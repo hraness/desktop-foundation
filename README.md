@@ -14,7 +14,7 @@ Pin by immutable tag:
 
 ```toml
 [dependencies]
-desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.1.0" }
+desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.2.0" }
 ```
 
 Implement `Host`, then run the event loop with the product's own
@@ -23,7 +23,13 @@ Implement `Host`, then run the event loop with the product's own
 ```rust
 fn main() {
     let host = Arc::new(MyHost::new());
-    desktop_foundation::run(tauri::generate_context!(), host, Options::default()).unwrap();
+    desktop_foundation::run(
+        tauri::generate_context!(),
+        host,
+        Options::default(),
+        |builder| builder, // or add invoke handlers / managed state here
+    )
+    .unwrap();
 }
 ```
 
@@ -38,7 +44,12 @@ TCC-bound surfaces (camera, microphone, screen recording).
   on a refresh interval and after every dispatch.
 - `dispatch(id)` receives a menu action id. It must not block; the host
   owns whatever thread does the work.
+- `started(app)` runs once after the status item exists — spawn sidecars
+  and `manage` product state here. `stopping()` runs on exit.
 - `MenuNode::quit(title)` adds a working Quit item; inert items
   (`MenuNode::disabled`) never reach `dispatch`.
+- With `Options::companion_window`, a hidden `main` window becomes an
+  on-demand panel: `MenuNode::show_window(title)` shows and focuses it, and
+  closing the window hides rather than destroys it.
 
 Current consumers: `oompa-menubar` in `hraness/oompa`.

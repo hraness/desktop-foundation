@@ -15,12 +15,17 @@ use std::time::Duration;
 
 use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 /// The action id that quits the application. Hosts must never see it.
 pub const QUIT_ACTION_ID: &str = "foundation.quit";
 
+/// The action id that shows and focuses the companion window. Products opt in
+/// with [`Options::companion_window`] and a hidden `main` window.
+pub const WINDOW_SHOW_ACTION_ID: &str = "foundation.window.show";
+
 const TRAY_ID: &str = "main";
+const COMPANION_WINDOW_LABEL: &str = "main";
 
 /// One menu node. Items with no `id` are inert labels.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +42,11 @@ impl MenuNode {
 
     pub fn disabled(title: impl Into<String>) -> Self {
         MenuNode::Item { id: None, title: title.into(), enabled: false }
+    }
+
+    /// A menu item that shows and focuses the companion window.
+    pub fn show_window(title: impl Into<String>) -> Self {
+        MenuNode::item(WINDOW_SHOW_ACTION_ID, title)
     }
 
     pub fn quit(title: impl Into<String>) -> Self {
@@ -69,6 +79,11 @@ pub struct MenuModel {
 pub trait Host: Send + Sync + 'static {
     fn snapshot(&self) -> MenuModel;
     fn dispatch(&self, _id: &str) {}
+    /// Runs once inside Tauri `setup`, after the status item exists. Products
+    /// spawn sidecars here and may `handle.manage(...)` their own state.
+    fn started(&self, _app: &AppHandle) {}
+    /// Runs once on `RunEvent::Exit`. Join owned work here.
+    fn stopping(&self) {}
 }
 
 /// How the foundation drives one application.
@@ -76,11 +91,15 @@ pub trait Host: Send + Sync + 'static {
 pub struct Options {
     /// Menu and status-item refresh interval.
     pub refresh: Duration,
+    /// When true, the hidden `main` window is a companion panel: closing it
+    /// hides rather than destroys it, and [`WINDOW_SHOW_ACTION_ID`] menu items
+    /// show and focus it.
+    pub companion_window: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { refresh: Duration::from_secs(10) }
+        Options { refresh: Duration::from_secs(10), companion_window: false }
     }
 }
 
@@ -151,17 +170,30 @@ fn schedule_refresh(handle: &AppHandle, host: &Arc<dyn Host>) {
     });
 }
 
+fn show_companion_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(COMPANION_WINDOW_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 /// Runs the application event loop. Never returns on success.
 ///
 /// `context` is the product's `tauri::generate_context!()` result so the
-/// binary keeps its own identifier, version, and embedded assets.
+/// binary keeps its own identifier, version, and embedded assets. `configure`
+/// applies product builder extensions — invoke handlers, managed state — and
+/// defaults to the identity.
 pub fn run(
     context: tauri::Context,
     host: Arc<dyn Host>,
     options: Options,
+    configure: impl FnOnce(tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry>,
 ) -> tauri::Result<()> {
     let dispatch_host = host.clone();
-    let app = tauri::Builder::default()
+    let run_host = host.clone();
+    let companion = options.companion_window;
+    let app = configure(tauri::Builder::default())
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -183,6 +215,7 @@ pub fn run(
                 ));
             }
             tray.build(app)?;
+            host.started(app.handle());
 
             let handle = app.handle().clone();
             let poll_host = host.clone();
@@ -201,13 +234,33 @@ pub fn run(
                 app.exit(0);
                 return;
             }
+            if id == WINDOW_SHOW_ACTION_ID {
+                show_companion_window(app);
+                return;
+            }
             if id.starts_with("foundation.inert.") {
                 return;
             }
             dispatch_host.dispatch(id);
             schedule_refresh(app, &dispatch_host);
         })
+        .on_window_event(move |window, event| {
+            if companion
+                && window.label() == COMPANION_WINDOW_LABEL
+                && matches!(event, tauri::WindowEvent::CloseRequested { .. })
+            {
+                // Accessory-style close: hide the panel, keep the status item.
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .build(context)?;
-    app.run(|_, _| {});
+    app.run(move |_app, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            run_host.stopping();
+        }
+    });
     Ok(())
 }

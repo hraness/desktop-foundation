@@ -1,0 +1,12 @@
+[package]
+name = "desktop-foundation"
+version = "0.1.0"
+description = "Product-neutral menu-bar desktop foundation for Hraness CLI products"
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde_json = "1.0"
+tauri = { version = "=2.11.5", features = ["tray-icon"] }

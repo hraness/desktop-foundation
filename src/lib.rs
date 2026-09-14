@@ -70,6 +70,10 @@ pub enum DispatchOutcome {
 
 const TRAY_ID: &str = "main";
 const COMPANION_WINDOW_LABEL: &str = "main";
+const MAX_MENU_TITLE_CHARS: usize = 256;
+const MAX_MENU_BADGE_CHARS: usize = 32;
+const MAX_MENU_SHORTCUT_CHARS: usize = 64;
+const MAX_ACCESSIBILITY_CHARS: usize = 256;
 
 /// One menu node. Items with no `id` are inert labels.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +133,16 @@ pub struct AccessibilityMetadata {
     pub label: Option<String>,
     pub value: Option<String>,
     pub hint: Option<String>,
+}
+
+impl AccessibilityMetadata {
+    pub fn bounded(&self) -> Self {
+        Self {
+            label: self.label.as_deref().map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
+            value: self.value.as_deref().map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
+            hint: self.hint.as_deref().map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,7 +205,7 @@ impl MenuItem {
     pub fn with_badge(mut self, badge: impl Into<String>) -> Self { self.badge = Some(badge.into()); self }
     pub fn with_progress(mut self, percent: u8) -> Self { self.progress = Some(ProgressValue::new(percent)); self }
     pub fn with_icon(mut self, icon: RgbaIcon) -> Self { self.icon = Some(icon); self }
-    pub fn with_accessibility(mut self, metadata: AccessibilityMetadata) -> Self { self.accessibility = metadata; self }
+    pub fn with_accessibility(mut self, metadata: AccessibilityMetadata) -> Self { self.accessibility = metadata.bounded(); self }
 }
 
 /// A full-color status-item icon. `rgba` is straight (non-premultiplied)
@@ -481,7 +495,11 @@ fn build_items(
                     }
                 };
                 let title = render_item_title(item);
-                let accelerator = item.shortcut.as_deref();
+                let shortcut = item
+                    .shortcut
+                    .as_deref()
+                    .map(|value| bounded_text(value, MAX_MENU_SHORTCUT_CHARS));
+                let accelerator = shortcut.as_deref();
                 match &item.kind {
                     MenuItemKind::Toggle { checked }
                     | MenuItemKind::Check { checked }
@@ -519,16 +537,20 @@ fn build_items(
 }
 
 fn render_item_title(item: &MenuItem) -> String {
-    let mut title = item.title.clone();
+    let mut title = bounded_text(&item.title, MAX_MENU_TITLE_CHARS);
     if let Some(badge) = &item.badge {
         title.push_str("  [");
-        title.push_str(badge);
+        title.push_str(&bounded_text(badge, MAX_MENU_BADGE_CHARS));
         title.push(']');
     }
     if let Some(progress) = item.progress {
         title.push_str(&format!("  {}%", progress.percent));
     }
-    title
+    bounded_text(&title, MAX_MENU_TITLE_CHARS)
+}
+
+fn bounded_text(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
 }
 
 fn build_menu(handle: &AppHandle, nodes: &[MenuNode]) -> tauri::Result<Menu<tauri::Wry>> {

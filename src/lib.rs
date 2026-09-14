@@ -735,4 +735,19 @@ mod tests {
         let item = MenuItem::check("pause", "Pause", false).with_accessibility(metadata.clone());
         assert_eq!(item.accessibility, metadata);
     }
+
+    #[test]
+    fn rich_item_labels_and_accessibility_are_bounded() {
+        let long = "x".repeat(400);
+        let metadata = AccessibilityMetadata {
+            label: Some(long.clone()),
+            value: Some(long.clone()),
+            hint: Some(long.clone()),
+        };
+        let item = MenuItem::action("long", long.clone())
+            .with_badge(long)
+            .with_accessibility(metadata);
+        assert!(render_item_title(&item).chars().count() <= MAX_MENU_TITLE_CHARS);
+        assert_eq!(item.accessibility.label.as_ref().map(|v| v.chars().count()), Some(MAX_ACCESSIBILITY_CHARS));
+    }
 }

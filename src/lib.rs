@@ -10,6 +10,8 @@
 //! product CLI spawns. Packaging into a `.app` stays an optional later gate
 //! for products that need TCC-bound surfaces.
 
+pub mod outputs;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,18 +32,24 @@ const COMPANION_WINDOW_LABEL: &str = "main";
 /// One menu node. Items with no `id` are inert labels.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuNode {
-    Item { id: Option<String>, title: String, enabled: bool },
+    Item { id: Option<String>, title: String, enabled: bool, icon: Option<RgbaIcon> },
     Separator,
     Submenu { title: String, items: Vec<MenuNode> },
 }
 
 impl MenuNode {
     pub fn item(id: impl Into<String>, title: impl Into<String>) -> Self {
-        MenuNode::Item { id: Some(id.into()), title: title.into(), enabled: true }
+        MenuNode::Item { id: Some(id.into()), title: title.into(), enabled: true, icon: None }
+    }
+
+    /// A menu item with a full-color icon rendered beside the title — used for
+    /// file previews such as output thumbnails.
+    pub fn item_with_icon(id: impl Into<String>, title: impl Into<String>, icon: RgbaIcon) -> Self {
+        MenuNode::Item { id: Some(id.into()), title: title.into(), enabled: true, icon: Some(icon) }
     }
 
     pub fn disabled(title: impl Into<String>) -> Self {
-        MenuNode::Item { id: None, title: title.into(), enabled: false }
+        MenuNode::Item { id: None, title: title.into(), enabled: false, icon: None }
     }
 
     /// A menu item that shows and focuses the companion window.
@@ -114,7 +122,7 @@ fn build_items(
             MenuNode::Separator => {
                 items.push(Box::new(PredefinedMenuItem::separator(handle)?));
             }
-            MenuNode::Item { id, title, enabled } => {
+            MenuNode::Item { id, title, enabled, icon } => {
                 let item_id = match id {
                     Some(id) => id.clone(),
                     None => {
@@ -122,7 +130,30 @@ fn build_items(
                         format!("foundation.inert.{}", *inert)
                     }
                 };
-                items.push(Box::new(MenuItem::with_id(handle, item_id, title, *enabled, None::<&str>)?));
+                match icon {
+                    Some(icon) => {
+                        let image = tauri::image::Image::new_owned(
+                            icon.rgba.clone(),
+                            icon.width,
+                            icon.height,
+                        );
+                        items.push(Box::new(tauri::menu::IconMenuItem::with_id(
+                            handle,
+                            item_id,
+                            title,
+                            *enabled,
+                            Some(image),
+                            None::<&str>,
+                        )?));
+                    }
+                    None => items.push(Box::new(MenuItem::with_id(
+                        handle,
+                        item_id,
+                        title,
+                        *enabled,
+                        None::<&str>,
+                    )?)),
+                }
             }
             MenuNode::Submenu { title, items: children } => {
                 let built = build_items(handle, children, inert)?;

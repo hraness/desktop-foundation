@@ -14,7 +14,7 @@ Pin by immutable tag:
 
 ```toml
 [dependencies]
-desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.2.0" }
+desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.3.0" }
 ```
 
 Implement `Host`, then run the event loop with the product's own
@@ -51,5 +51,33 @@ TCC-bound surfaces (camera, microphone, screen recording).
 - With `Options::companion_window`, a hidden `main` window becomes an
   on-demand panel: `MenuNode::show_window(title)` shows and focuses it, and
   closing the window hides rather than destroys it.
+- `MenuNode::item_with_icon` renders a full-color preview icon beside the
+  item title.
 
-Current consumers: `oompa-menubar` in `hraness/oompa`.
+## Outputs sections
+
+`outputs::OutputsSection` is a reusable building block for the common
+"agent drops outputs into a directory" pattern:
+
+```rust
+let outputs = OutputsSection::new(state_dir.join("outputs"));
+
+impl Host for MyHost {
+    fn snapshot(&self) -> MenuModel {
+        MenuModel { nodes: [product_nodes, self.outputs.nodes()].concat(), ..Default::default() }
+    }
+    fn dispatch(&self, id: &str) {
+        if self.outputs.dispatch(id) { return; }
+        // product actions
+    }
+}
+```
+
+It lists files newest-first (bounded, hidden files and directories skipped),
+labels each by filename stem — the agent's description — thumbnails image
+files, opens a file on click, and adds a "Reveal Outputs Folder" item.
+Dispatch resolves entries by a name hash, so refresh races cannot open the
+wrong file.
+
+Current consumers: `oompa-menubar` in `hraness/oompa`, `ghostget-desktop`
+in `hraness/ghostget`, `peopleblade-menubar` in `hraness/peopleblade`.

@@ -1,6 +1,7 @@
 # Contents
 
-- `src/lib.rs` contains the entire product-neutral foundation: `MenuNode`/`MenuModel` data model, `Host` trait, accessory activation, status-item lifecycle, menu construction, and the refresh loop. It is built on Tauri's maintained tray and activation APIs.
+- `src/lib.rs` contains the product-neutral foundation core: `MenuNode`/`MenuModel` data model (including per-item preview icons), `Host` trait, accessory activation, status-item lifecycle, menu construction, and the refresh loop. It is built on Tauri's maintained tray and activation APIs.
+- `src/outputs.rs` contains the reusable outputs-directory section: bounded newest-first listing, image thumbnails, and open/reveal dispatch for agent-dropped files.
 
 # Guidelines
 

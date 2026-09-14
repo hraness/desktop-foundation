@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem as TauriMenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager};
 
@@ -75,6 +75,10 @@ const COMPANION_WINDOW_LABEL: &str = "main";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuNode {
     Item { id: Option<String>, title: String, enabled: bool, icon: Option<RgbaIcon> },
+    /// An interactive item with native check semantics and richer presentation
+    /// metadata. This additive variant keeps the original `Item` shape source
+    /// compatible for existing product adapters.
+    Interactive { item: MenuItem },
     Separator,
     Submenu { title: String, items: Vec<MenuNode> },
 }
@@ -102,6 +106,92 @@ impl MenuNode {
     pub fn quit(title: impl Into<String>) -> Self {
         MenuNode::item(QUIT_ACTION_ID, title)
     }
+
+    pub fn interactive(item: MenuItem) -> Self {
+        MenuNode::Interactive { item }
+    }
+}
+
+/// Native presentation semantics for an interactive menu item. Tauri exposes
+/// check items but has no portable progress, badge, or radio-group primitive;
+/// those values are therefore retained in the model and represented in the
+/// title/accessibility metadata by the renderer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuItemKind {
+    Action,
+    Toggle { checked: bool },
+    Check { checked: bool },
+    Radio { selected: bool, group: Option<String> },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AccessibilityMetadata {
+    pub label: Option<String>,
+    pub value: Option<String>,
+    pub hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgressValue {
+    /// Integer percentage in the inclusive range 0..=100.
+    pub percent: u8,
+}
+
+impl ProgressValue {
+    pub fn new(percent: u8) -> Self {
+        Self { percent: percent.min(100) }
+    }
+}
+
+/// Rich, stable menu item description used by product adapters. `id` is the
+/// command identity and must remain stable across snapshots so actions can be
+/// reconciled safely after refreshes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuItem {
+    pub id: Option<String>,
+    pub title: String,
+    pub enabled: bool,
+    pub icon: Option<RgbaIcon>,
+    pub kind: MenuItemKind,
+    pub shortcut: Option<String>,
+    pub badge: Option<String>,
+    pub progress: Option<ProgressValue>,
+    pub accessibility: AccessibilityMetadata,
+}
+
+impl MenuItem {
+    pub fn action(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            id: Some(id.into()), title: title.into(), enabled: true, icon: None,
+            kind: MenuItemKind::Action, shortcut: None, badge: None, progress: None,
+            accessibility: AccessibilityMetadata::default(),
+        }
+    }
+
+    pub fn toggle(id: impl Into<String>, title: impl Into<String>, checked: bool) -> Self {
+        let mut item = Self::action(id, title);
+        item.kind = MenuItemKind::Toggle { checked };
+        item
+    }
+
+    pub fn check(id: impl Into<String>, title: impl Into<String>, checked: bool) -> Self {
+        let mut item = Self::action(id, title);
+        item.kind = MenuItemKind::Check { checked };
+        item
+    }
+
+    pub fn radio(id: impl Into<String>, title: impl Into<String>, group: impl Into<String>, selected: bool) -> Self {
+        let mut item = Self::action(id, title);
+        item.kind = MenuItemKind::Radio { selected, group: Some(group.into()) };
+        item
+    }
+
+    pub fn disabled(mut self) -> Self { self.enabled = false; self }
+    pub fn with_shortcut(mut self, shortcut: impl Into<String>) -> Self { self.shortcut = Some(shortcut.into()); self }
+    pub fn with_badge(mut self, badge: impl Into<String>) -> Self { self.badge = Some(badge.into()); self }
+    pub fn with_progress(mut self, percent: u8) -> Self { self.progress = Some(ProgressValue::new(percent)); self }
+    pub fn with_icon(mut self, icon: RgbaIcon) -> Self { self.icon = Some(icon); self }
+    pub fn with_accessibility(mut self, metadata: AccessibilityMetadata) -> Self { self.accessibility = metadata; self }
 }
 
 /// A full-color status-item icon. `rgba` is straight (non-premultiplied)
@@ -373,13 +463,48 @@ fn build_items(
                             None::<&str>,
                         )?));
                     }
-                    None => items.push(Box::new(MenuItem::with_id(
+                    None => items.push(Box::new(TauriMenuItem::with_id(
                         handle,
                         item_id,
                         title,
                         *enabled,
                         None::<&str>,
                     )?)),
+                }
+            }
+            MenuNode::Interactive { item } => {
+                let item_id = match &item.id {
+                    Some(id) => id.clone(),
+                    None => {
+                        *inert += 1;
+                        format!("foundation.inert.{}", *inert)
+                    }
+                };
+                let title = render_item_title(item);
+                let accelerator = item.shortcut.as_deref();
+                match &item.kind {
+                    MenuItemKind::Toggle { checked }
+                    | MenuItemKind::Check { checked }
+                    | MenuItemKind::Radio { selected: checked, .. } => {
+                        items.push(Box::new(CheckMenuItem::with_id(
+                            handle, item_id, title, item.enabled, *checked, accelerator,
+                        )?));
+                    }
+                    MenuItemKind::Action => {
+                        match &item.icon {
+                            Some(icon) => {
+                                let image = tauri::image::Image::new_owned(
+                                    icon.rgba.clone(), icon.width, icon.height,
+                                );
+                                items.push(Box::new(tauri::menu::IconMenuItem::with_id(
+                                    handle, item_id, title, item.enabled, Some(image), accelerator,
+                                )?));
+                            }
+                            None => items.push(Box::new(TauriMenuItem::with_id(
+                                handle, item_id, title, item.enabled, accelerator,
+                            )?)),
+                        }
+                    }
                 }
             }
             MenuNode::Submenu { title, items: children } => {
@@ -391,6 +516,19 @@ fn build_items(
         }
     }
     Ok(items)
+}
+
+fn render_item_title(item: &MenuItem) -> String {
+    let mut title = item.title.clone();
+    if let Some(badge) = &item.badge {
+        title.push_str("  [");
+        title.push_str(badge);
+        title.push(']');
+    }
+    if let Some(progress) = item.progress {
+        title.push_str(&format!("  {}%", progress.percent));
+    }
+    title
 }
 
 fn build_menu(handle: &AppHandle, nodes: &[MenuNode]) -> tauri::Result<Menu<tauri::Wry>> {
@@ -550,5 +688,29 @@ mod tests {
         let error = SnapshotError::new(SnapshotErrorKind::TimedOut);
         assert_eq!(error.kind, SnapshotErrorKind::TimedOut);
         assert_eq!(format!("{error:?}"), "SnapshotError { kind: TimedOut }");
+    }
+
+    #[test]
+    fn rich_items_keep_stable_identity_and_native_toggle_state() {
+        let item = MenuItem::toggle("daemon.pause", "Pause daemon", true)
+            .with_shortcut("CmdOrCtrl+P")
+            .with_badge("3")
+            .with_progress(120);
+        assert_eq!(item.id.as_deref(), Some("daemon.pause"));
+        assert_eq!(item.kind, MenuItemKind::Toggle { checked: true });
+        assert_eq!(item.progress, Some(ProgressValue { percent: 100 }));
+        assert_eq!(render_item_title(&item), "Pause daemon  [3]  100%");
+        assert!(matches!(MenuNode::interactive(item), MenuNode::Interactive { .. }));
+    }
+
+    #[test]
+    fn rich_item_accessibility_metadata_is_product_neutral() {
+        let metadata = AccessibilityMetadata {
+            label: Some("Pause Textbutler".into()),
+            value: Some("On".into()),
+            hint: Some("Stops background processing".into()),
+        };
+        let item = MenuItem::check("pause", "Pause", false).with_accessibility(metadata.clone());
+        assert_eq!(item.accessibility, metadata);
     }
 }

@@ -370,7 +370,7 @@ mod tests {
         for i in 0..120 { fs::write(dir.join(format!("older-{i}.txt")), b"old").unwrap(); }
         let newest = dir.join("newest.txt");
         fs::write(&newest, b"new").unwrap();
-        File::open(&newest).unwrap().set_modified(SystemTime::now() + std::time::Duration::from_secs(60)).unwrap();
+        OpenOptions::new().write(true).open(&newest).unwrap().set_modified(SystemTime::now() + std::time::Duration::from_secs(60)).unwrap();
         let entries = OutputsSection::new(&dir).with_limit(1).entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "newest.txt");

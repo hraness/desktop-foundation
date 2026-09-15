@@ -31,16 +31,9 @@ function fakeRunner(mode: string, tracePath: string): string {
       else process.stdout.write(frame);
     };
     const closeOutput = () => {
-      // Node protects stdout._destroy; Windows libuv also duplicates fd 1's
-      // OS handle. This fixture-only private API closes that duplicate before
-      // closing the CRT descriptor. Either handle alone keeps the pipe open.
-      // https://github.com/libuv/libuv/blob/v1.x/src/win/pipe.c (uv_pipe_open)
-      const handle = process.stdout._handle;
+      // POSIX only: Windows uses the native fixture to avoid Node's retained
+      // pipe handles. No private Node stream API is required.
       trace('closing-stdout');
-      if (process.platform === 'win32') {
-        if (!handle || typeof handle.close !== 'function') throw new Error('Missing fixture stdout handle');
-        handle.close(() => trace('libuv-handle-closed'));
-      }
       closeSync(1);
       trace('fd-closed-child-alive');
     };
@@ -92,20 +85,32 @@ async function start(t: TestContext, mode = 'normal', overrides: Partial<Compani
   t.after(() => rm(dir, { recursive: true, force: true }));
   const diagnostics: string[] = [];
   const tracePath = join(dir, 'fixture-trace.jsonl');
+  const closesOutput = mode === 'partial' || mode === 'eof';
+  const nativeFixture = closesOutput ? process.env.COMPANION_STDIO_FIXTURE : undefined;
+  if (closesOutput && process.platform === 'win32' && !nativeFixture) {
+    throw new Error('Windows EOF tests require COMPANION_STDIO_FIXTURE; compile examples/stdio_fixture.rs with rustc');
+  }
   const session = await runCompanion({
     appId: 'test.client', name: 'Client test', title: 'Te', stateDir: dir,
-    binary: process.execPath, binaryArgs: ['--input-type=module', '-e', fakeRunner(mode, tracePath), '--'],
-    timeoutMs: 150, refreshMs: 100,
+    binary: nativeFixture ?? process.execPath,
+    binaryArgs: nativeFixture ? [mode, tracePath] : ['--input-type=module', '-e', fakeRunner(mode, tracePath), '--'],
+    timeoutMs: nativeFixture ? 750 : 150, refreshMs: 100,
     snapshot: () => items, onAction: () => {},
     onDiagnostic: code => diagnostics.push(code), ...overrides,
   });
   t.after(() => session.quit());
-  return { session, diagnostics, tracePath };
+  return { session, diagnostics, tracePath, nativeFixture };
 }
 
 async function awaitOutputClosure(t: TestContext, fixture: Awaited<ReturnType<typeof start>>): Promise<void> {
   const timeout = delay(2000, undefined, { ref: false }).then(() => { throw new Error('Runner did not close after stdout EOF'); });
-  try { await Promise.race([fixture.session.closed, timeout]); }
+  try {
+    await fixture.session.ready;
+    await Promise.race([fixture.session.closed, timeout]);
+    if (fixture.nativeFixture) {
+      assert.match(await readFile(fixture.tracePath, 'utf8'), /"stage":"stdout-closed-child-alive"/);
+    }
+  }
   finally {
     const trace = await readFile(fixture.tracePath, 'utf8').catch(() => 'No fixture trace');
     t.diagnostic(`${trace.trim()}\nSDK diagnostics: ${fixture.diagnostics.join(', ')}`);
@@ -202,9 +207,8 @@ for (const mode of ['oversize', 'partial']) {
   test(`invalid ${mode} output closes the child with a bounded diagnostic`, { timeout: 4000 }, async t => {
     const fixture = await start(t, mode);
     const { session, diagnostics } = fixture;
-    await session.ready;
     if (mode === 'partial') await awaitOutputClosure(t, fixture);
-    else await session.closed;
+    else { await session.ready; await session.closed; }
     assert.ok(diagnostics.includes(mode === 'oversize' ? 'oversize-runner-frame' : 'invalid-runner-frame'));
   });
 }
@@ -212,7 +216,6 @@ for (const mode of ['oversize', 'partial']) {
 test('stdout EOF closes a still-running child rather than waiting forever', { timeout: 4000 }, async t => {
   const fixture = await start(t, 'eof');
   const { session, diagnostics } = fixture;
-  await session.ready;
   await awaitOutputClosure(t, fixture);
   assert.ok(diagnostics.includes('runner-output-closed'));
 });

@@ -1,6 +1,83 @@
 # desktop-foundation
 
-Shared Rust menu-bar foundation for Hraness CLI products.
+Shared desktop companions for CLI products: a native menu bar on macOS, a
+notification-area tray on Windows, and an AppIndicator tray on Linux.
+
+One prebuilt `hraness-companion` executable renders menus for any product. The
+TypeScript SDK owns verified installation, launch, singleton discovery, status,
+stop and optional login startup. Product CLIs supply snapshots and action
+handlers; rich screens open in the normal browser. No `.app`, DMG, MSI,
+AppImage, publisher certificate, Apple Developer account or notarization job is
+part of this release pipeline. Native executables still exist and OS trust
+controls still apply.
+
+The release matrix builds arm64 and x64 on all three systems. A portable tray
+does not make Apple Messages, Contacts or a macOS capture helper portable. See
+the [platform contract](docs/platforms.md), [installation and OS approval
+guide](docs/installation.md), and [agent instructions](skills/companion/SKILL.md).
+
+## JavaScript / TypeScript products
+
+The versioned SDK archive includes the exact native asset manifest. First
+start fetches and verifies the matching executable; later launches use the
+checked local cache. Users need no Cargo, Swift or Xcode. A source checkout
+has no release manifest until all six binary artifacts have been assembled.
+
+```sh
+npm install https://github.com/hraness/desktop-foundation/releases/download/v0.5.0/hraness-desktop-foundation-0.5.0.tgz
+```
+
+This is the release coordinate, not proof that it is already published. Check
+the [Releases page](https://github.com/hraness/desktop-foundation/releases) for
+the admitted version. GitHub Releases are canonical; npm registry publication
+is optional.
+
+Mount the handler inside the product's `menubar` command. Supply the absolute
+command that re-enters that same CLI with `--foreground`:
+
+```js
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { handleCompanionCommand, userPaths, openBrowser } from '@hraness/desktop-foundation';
+
+await handleCompanionCommand({
+  appId: 'org.example.mytool', name: 'My Tool', title: 'Mt',
+  stateDir: join(userPaths().dataDir, 'org.example.mytool'),
+  snapshot: async signal => [
+    { kind: 'label', label: 'Ready' },
+    { kind: 'action', id: 'dashboard', label: 'Open dashboard' },
+    { kind: 'quit', label: 'Quit My Tool' },
+  ],
+  onAction: async (id, signal) => {
+    if (id === 'dashboard') await openBrowser('https://example.com/dashboard');
+  },
+}, {
+  args: process.argv.slice(2),
+  foreground: {
+    executable: process.execPath,
+    args: [fileURLToPath(import.meta.url), '--foreground'],
+  },
+});
+```
+
+The default command returns after startup is confirmed. The companion remains
+until Quit or `menubar stop`; another start reports the existing instance.
+`install` opts into next-login startup, `uninstall` removes that entry,
+`status` checks the authenticated owner, and `doctor --json` provides platform
+guidance. Uninstall preserves the running companion and shared cache; use
+`stop` separately.
+
+Reads and actions receive cancellation signals. Product handlers preserve
+their permission checks and reconcile uncertain outcomes; the SDK never
+retries a mutation. The native renderer receives menu data and returns action
+IDs. It cannot request shell commands or browse product files. This is a
+protocol boundary, not an OS sandbox.
+
+The SDK also exports `runCompanion` for foreground owners and `planAutostart`
+for inspectable startup plans. `companion` runs a demonstration tray;
+`companion doctor --json` is network-silent.
+
+## Existing Rust products
 
 A product supplies a [`Host`](src/lib.rs) implementation that renders a
 `MenuModel` snapshot and answers action ids. The foundation owns the
@@ -14,7 +91,7 @@ Pin by immutable tag:
 
 ```toml
 [dependencies]
-desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.4.1" }
+desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.5.0" }
 ```
 
 Implement `Host`, then run the event loop with the product's own
@@ -33,9 +110,10 @@ fn main() {
 }
 ```
 
-The binary runs unbundled — `cargo build` output is what a product CLI
-spawns. `.app` packaging is an optional later gate for products that need
-TCC-bound surfaces (camera, microphone, screen recording).
+The binary runs unbundled. The shared runner is the preferred integration for
+new adapters so products do not each maintain a native build. OS permissions
+for camera, microphone, screen recording and other privileged capabilities
+remain owned by their existing product helpers; a tray does not grant them.
 
 ## Contract
 

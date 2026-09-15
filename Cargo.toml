@@ -1,6 +1,6 @@
 [package]
 name = "desktop-foundation"
-version = "0.4.1"
+version = "0.5.0"
 description = "Product-neutral menu-bar desktop foundation for Hraness CLI products"
 edition = "2021"
 rust-version = "1.77.2"
@@ -8,7 +8,21 @@ license = "MIT"
 publish = false
 
 [dependencies]
+fs2 = "0.4.3"
 libc = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "=2.11.5", features = ["tray-icon"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSFont", "NSControl", "NSStatusItem", "NSStatusBarButton", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSString"] }
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[[bin]]
+name = "hraness-companion"
+path = "src/bin/hraness-companion.rs"

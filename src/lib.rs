@@ -7,10 +7,11 @@
 //! privilege of its own.
 //!
 //! The host binary runs unbundled: `cargo build` output is the artifact the
-//! product CLI spawns. Packaging into a `.app` stays an optional later gate
-//! for products that need TCC-bound surfaces.
+//! product CLI spawns. The shared renderer uses no application bundle or window;
+//! product helpers retain their own OS permission boundaries.
 
 pub mod outputs;
+pub mod protocol;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};

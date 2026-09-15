@@ -1,0 +1,19 @@
+{
+  "name": "@hraness/desktop-foundation",
+  "version": "0.5.0",
+  "description": "CLI-owned, unbundled desktop companions for macOS, Windows and Linux",
+  "type": "module",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/hraness/desktop-foundation.git" },
+  "engines": { "node": ">=22" },
+  "exports": { ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" } },
+  "bin": { "companion": "./dist/src/cli.js" },
+  "files": ["dist/src", "release-manifest.json", "README.md", "docs", "skills", "LICENSE"],
+  "scripts": {
+    "build:sdk": "tsc -p sdk/tsconfig.json",
+    "test:sdk": "node scripts/test-sdk.mjs",
+    "check:sdk": "npm run build:sdk && npm run test:sdk",
+    "check": "npm run check:sdk && cargo test --locked && cargo build --locked --release --bin hraness-companion"
+  },
+  "devDependencies": { "@types/node": "22.19.7", "typescript": "5.9.3" }
+}

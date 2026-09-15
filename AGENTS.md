@@ -6,7 +6,9 @@
 # Guidelines
 
 - Keep this crate product-neutral. It owns UI mechanics only — never daemon semantics, credentials, product state, paths, or command names. Product adapters live in each product's repository.
-- The host binary runs unbundled: `cargo build` output is the artifact a product CLI spawns. `.app` packaging is an optional later gate, never a prerequisite.
+- Ship unbundled CLI companions only. The shared runner creates no windows. Do not introduce app bundles, installer packages, publisher signing credentials, notarization jobs, or automatic OS trust-policy workarounds. Existing Rust window APIs remain for pinned consumers; new adapters use the shared runner and browser UI.
+- `sdk/` owns the portable TypeScript installer, lifecycle, diagnostics and protocol client. Keep Node 22 compatibility and use the built-in Node test runner. `scripts/` and `.github/workflows/companion.yml` build and verify the six target artifacts from one source. Run `npm run check:sdk` plus the Rust gates before delivery.
+- Human OS approval is a documented installation step, never an automatic security-policy edit. Fail closed on corrupted assets and managed-device policy blocks. Product actions retain their original permissions and live qualification.
 - `Host::snapshot` may perform bounded local IO and always runs off the UI thread. `Host::dispatch` must not block.
 - A product's daemon remains the sole authority. The menu-bar process is a disposable client with no privilege of its own.
 - Keep secrets, raw socket paths, and environment values out of menu labels, tooltips, logs, and argv.

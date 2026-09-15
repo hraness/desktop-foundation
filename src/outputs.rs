@@ -193,8 +193,10 @@ impl OutputsSection {
             let path = path.to_owned();
             std::thread::spawn(move || {
                 if reveal {
+                    let mut selection = std::ffi::OsString::from("/select,");
+                    selection.push(path.as_os_str());
                     let _ = std::process::Command::new("explorer.exe")
-                        .arg(format!("/select,{}", path.display()))
+                        .arg(selection)
                         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
                         .status();
                 } else {

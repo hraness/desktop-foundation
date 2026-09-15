@@ -116,14 +116,16 @@ export async function startCompanion(options: { appId: string; stateDir: string;
   const timeout = options.timeoutMs ?? 30_000;
   if (!Number.isFinite(timeout) || timeout < 100 || timeout > 300_000) throw new Error('invalid-launch-deadline');
   const child = spawn(options.executable, [...options.args], { detached: true, stdio: 'ignore', windowsHide: true });
-  let failed = false, exited = false;
-  child.once('error', () => { failed = true; }); child.once('exit', () => { exited = true; }); child.unref();
+  let failed = false, exited = false, exitCode: number | null = null;
+  child.once('error', () => { failed = true; }); child.once('exit', code => { exited = true; exitCode = code; }); child.unref();
   const deadline = Date.now() + timeout;
   try {
     while (Date.now() < deadline) {
       const status = await companionStatus(options.stateDir, options.appId);
       if (status.running) return status;
-      if (failed || exited) throw new Error('companion-start-failed: run the foreground command and doctor for OS approval or dependency guidance');
+      // A successful contender may exit on the native singleton lock just
+      // before the winning owner publishes its receipt. Keep waiting for it.
+      if (failed || (exited && exitCode !== 0)) throw new Error('companion-start-failed: run the foreground command and doctor for OS approval or dependency guidance');
       await delay(100);
     }
     throw new Error('companion-start-timeout: check doctor and the foreground command');

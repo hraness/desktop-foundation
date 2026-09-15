@@ -28,11 +28,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # The hosted Windows ARM64 image can prove its notification area
+      # incapable; that leg still builds and runs unit/headless gates while
+      # interactive tray qualification stays required on x64 Windows.
       - name: Prepare same-session Windows tray host
         if: runner.os == 'Windows'
+        id: tray_host
         timeout-minutes: 3
         shell: pwsh
-        run: ./scripts/windows-desktop-fixture.ps1
+        run: |
+          if ('${{ runner.arch }}' -eq 'ARM64') { ./scripts/windows-desktop-fixture.ps1 -AllowUnsupported }
+          else { ./scripts/windows-desktop-fixture.ps1 }
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/cache/restore@v4
         id: native_cache
@@ -88,13 +94,13 @@ jobs:
       - name: Headless protocol probe
         run: node scripts/native-smoke.mjs --headless
       - name: Native event loop smoke (macOS and Windows)
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
         run: node scripts/native-smoke.mjs
       - name: Native event loop smoke (Linux)
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a node scripts/native-smoke.mjs
       - name: Detached CLI lifecycle smoke (macOS and Windows)
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
         run: node scripts/lifecycle-smoke.mjs
       - name: Detached CLI lifecycle smoke (Linux)
         if: runner.os == 'Linux'

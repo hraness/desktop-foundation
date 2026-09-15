@@ -1,7 +1,7 @@
 # CI desktop infrastructure, analogous to Linux's explicit Xvfb/D-Bus fixture.
 # This is not evidence of a visible menu or a clean-machine installation.
 # Never invoke against a user's desktop or change sessions, login, or OS policy.
-param([switch]$ProbeOnly)
+param([switch]$ProbeOnly, [switch]$AllowUnsupported)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -245,6 +245,19 @@ if ($trayProcessId -eq 0 -and $fixtureWatch.ElapsedMilliseconds -lt 15000) {
 
 if ($trayProcessId -eq 0 -or $fixtureWatch.ElapsedMilliseconds -ge 15000) {
     Write-FixtureEvidence 'unavailable' $trayProcessId
+    if ($env:GITHUB_OUTPUT) { Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8 -Value 'tray_capable=false' }
+    if ($AllowUnsupported) {
+        [ordered]@{
+            fixture = 'windows-desktop'
+            stage = 'tray-unsupported'
+            trayCapable = $false
+            reason = "no same-session Shell_TrayWnd within 15s"
+            sessionId = $fixtureSession
+            userInteractive = $fixtureInteractive
+            visualQualification = $false
+        } | ConvertTo-Json -Compress | Write-Output
+        return
+    }
     throw "windows-desktop-fixture-unavailable: no same-session Shell_TrayWnd within 15s (session=$fixtureSession, interactive=$fixtureInteractive)"
 }
 Write-FixtureEvidence 'ready' $trayProcessId
@@ -332,7 +345,27 @@ do {
     if ($probePassed -or $fixtureWatch.ElapsedMilliseconds -ge 75000) { break }
     Start-Sleep -Milliseconds 10000
 } while ($true)
+if ($env:GITHUB_OUTPUT) {
+    $capableValue = if ($probePassed) { 'true' } else { 'false' }
+    Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8 -Value "tray_capable=$capableValue"
+}
 if (-not $probePassed) {
+    # With -AllowUnsupported the host is recorded as proven-incapable instead
+    # of failing the job; interactive tray gates skip on this capability output
+    # while compilation, unit and headless gates still apply.
+    if ($AllowUnsupported) {
+        [ordered]@{
+            fixture = 'windows-desktop'
+            stage = 'tray-unsupported'
+            trayCapable = $false
+            reason = 'bounded Shell_NotifyIcon probe failed'
+            attempts = $probeAttempt
+            sessionId = $fixtureSession
+            userInteractive = $fixtureInteractive
+            visualQualification = $false
+        } | ConvertTo-Json -Compress | Write-Output
+        return
+    }
     throw 'windows-notifyicon-preflight-failed: hosted shell cannot complete the bounded tray probe'
 }
 # Leave the job-owned shell available to both native smoke steps. The disposable

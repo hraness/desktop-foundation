@@ -104,3 +104,18 @@ qualify Linux or Windows. A release should identify the exact version, digest,
 OS/architecture and desktop environment for each completed proof; unavailable
 targets remain explicitly unqualified. Login-registration claims need a separate
 sign-in/restart check, including Quit behavior.
+
+### Windows ARM64 qualification boundary
+
+GitHub's hosted Windows ARM64 image currently presents an interactive
+explorer-owned taskbar that cannot complete `Shell_NotifyIcon`: the bounded
+fixture probe fails with `E_FAIL` across apartments and icon variants while the
+identical probe passes on hosted x64 Windows. The ARM64 leg therefore runs the
+desktop fixture in capability mode — a proven-incapable host records
+`tray-unsupported` evidence and the job continues with compilation, unit and
+headless protocol gates, skipping only the interactive tray smokes. Interactive
+tray qualification for Windows is carried by the x64 leg; the exercised code
+path is architecture-independent Win32. If the hosted image regains a
+functional notification area, the capability probe resumes the ARM64
+interactive gates automatically. Until then released ARM64 executables are
+build- and protocol-qualified, not interactive-desktop-qualified.

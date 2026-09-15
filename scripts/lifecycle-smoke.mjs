@@ -22,7 +22,7 @@ let cleaned = false;
 // process has a finite watchdog and records completion only after SDK cleanup.
 await writeFile(entrypoint, `
 import { randomUUID } from 'node:crypto';
-import { appendFile, writeFile } from 'node:fs/promises';
+import { appendFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { startCompanion, serveCompanion } from ${JSON.stringify(sdkUrl)};
 const root = ${JSON.stringify(root)};
@@ -50,11 +50,12 @@ if (process.argv[2] === '--launch') {
     process.exitCode = await serveCompanion({ appId, name: 'Companion Lifecycle Smoke', title: 'Te',
       stateDir, binary: ${JSON.stringify(binary)}, refreshMs: 250, timeoutMs: 8_000,
       snapshot: async () => {
-        await writeFile(join(root, id + '.snapshots'), String(++snapshots), { mode: 0o600 });
+        await writeFile(join(root, id + '.snapshots.tmp'), String(++snapshots), { mode: 0o600 });
+        await rename(join(root, id + '.snapshots.tmp'), join(root, id + '.snapshots'));
         return [{ kind: 'label', label: 'Synthetic lifecycle smoke ' + snapshots }, { kind: 'quit', label: 'Quit smoke companion' }];
       },
       onAction: () => {},
-      onDiagnostic: code => { void appendFile(join(root, 'diagnostics.log'), code + '\\n', { mode: 0o600 }); },
+      onDiagnostic: code => { void appendFile(join(root, 'diagnostics.log'), code + '\\n', { mode: 0o600 }).catch(() => {}); },
     });
   } catch (error) {
     await appendFile(join(root, 'diagnostics.log'), String(error.message) + '\\n', { mode: 0o600 });

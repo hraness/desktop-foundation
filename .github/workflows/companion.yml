@@ -1,7 +1,6 @@
 name: Companion
 on:
   push:
-    branches: [main, codex/cross-platform-companion]
     tags: ['v*']
   pull_request:
   workflow_dispatch:

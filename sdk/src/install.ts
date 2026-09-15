@@ -56,6 +56,17 @@ export interface EnsureBinaryOptions {
   maxBytes?: number;
 }
 export interface InstalledBinary { path: string; version: string; target: PlatformTarget; reused: boolean }
+/** Read-only identity and integrity evidence for agents helping a human approve an OS prompt. */
+export async function inspectBinary(options: Omit<EnsureBinaryOptions, 'fetch' | 'maxBytes'>) {
+  const manifest = validateManifest(options.manifest);
+  const target = options.target ?? resolveTarget();
+  const asset = manifest.assets.find(value => value.target === target);
+  if (!asset) throw new CompanionError('unsupported_target', `This release has no companion asset for ${target}.`);
+  const path = join(options.cacheDir ?? userPaths().cacheDir, ...manifest.repository.split('/'), manifest.version, target, asset.name);
+  await assertPhysicalPath(path);
+  const installed = await verifyFile(path, asset);
+  return { path, installed, integrity: installed ? 'verified' : 'missing', version: manifest.version, tag: manifest.tag, repository: manifest.repository, target, sha256: asset.sha256, size: asset.size };
+}
 function errno(error: unknown, code: string) { return (error as NodeJS.ErrnoException)?.code === code; }
 
 export async function assertPhysicalPath(path: string) {

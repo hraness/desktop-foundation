@@ -21,7 +21,11 @@ export function assertAppId(id: string): void {
 function label(value: unknown, max = 256): asserts value is string {
   if (typeof value !== 'string' || !value || [...value].length > max || unsafe.test(value)) throw new Error('invalid-label');
 }
+function exact(value: object, fields: readonly string[]): void {
+  if (Object.keys(value).some(key => !fields.includes(key))) throw new Error('unknown-protocol-field');
+}
 export function validateSnapshot(value: Snapshot): ReadonlyMap<string, boolean> {
+  exact(value, ['version','type','appId','name','title','tooltip','revision','items']);
   assertAppId(value.appId);
   label(value.name, 128);
   if (!/^[a-zA-Z0-9]{1,2}$/.test(value.title)) throw new Error('invalid-title');
@@ -36,14 +40,16 @@ export function validateSnapshot(value: Snapshot): ReadonlyMap<string, boolean> 
       if (item.kind !== 'separator') label(item.label);
       switch (item.kind) {
         case 'action':
+          exact(item, ['kind','id','label','enabled','checked','shortcut']);
           if (!/^[A-Za-z0-9._:-]{1,256}$/.test(item.id) || item.id.startsWith('foundation.') || actions.has(item.id)) throw new Error('invalid-action-id');
           if (item.enabled !== undefined && typeof item.enabled !== 'boolean') throw new Error('invalid-enabled');
           if (item.checked !== undefined && typeof item.checked !== 'boolean') throw new Error('invalid-checked');
           if (item.shortcut !== undefined) label(item.shortcut, 64);
           actions.set(item.id, item.enabled !== false);
           break;
-        case 'submenu': visit(item.items, depth + 1); break;
-        case 'label': case 'separator': case 'quit': break;
+        case 'submenu': exact(item, ['kind','label','items']); visit(item.items, depth + 1); break;
+        case 'label': case 'quit': exact(item, ['kind','label']); break;
+        case 'separator': exact(item, ['kind']); break;
         default: throw new Error('invalid-menu');
       }
     }

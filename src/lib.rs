@@ -318,6 +318,12 @@ impl MenuModel {
 pub trait Host: Send + Sync + 'static {
     fn snapshot(&self) -> MenuModel;
     fn dispatch(&self, _id: &str) {}
+    /// Optional private directory for Linux AppIndicator's generated icon
+    /// files. Supply this before tray creation to isolate different products
+    /// that use the same internal tray ID. Hosts own path validation and must
+    /// retain the directory for the lifetime of the companion. Other platforms
+    /// ignore the directory. The default preserves existing Rust consumers.
+    fn tray_icon_directory(&self) -> Option<std::path::PathBuf> { None }
     /// Fallible snapshot hook used by the refresh coordinator. Existing hosts
     /// keep their infallible implementation; new hosts can return a typed
     /// error and optionally provide a safe degraded model.
@@ -791,6 +797,9 @@ pub fn run(
             };
             let (menu, routes) = build_menu(app.handle(), &model.nodes, 1)?;
             let mut tray = TrayIconBuilder::with_id(TRAY_ID).menu(&menu);
+            if let Some(directory) = host.tray_icon_directory() {
+                tray = tray.temp_dir_path(directory);
+            }
             if let Some(title) = &model.title {
                 tray = tray.title(title.clone());
             }

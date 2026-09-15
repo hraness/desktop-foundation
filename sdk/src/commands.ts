@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { runCompanion, packagedManifest, type CompanionOptions } from './client.js';
-import { ensureBinary } from './install.js';
-import { diagnosePlatform, resolveTarget } from './platform.js';
+import { packagedManifest, type CompanionOptions } from './client.js';
+import { ensureBinary, inspectBinary } from './install.js';
+import { diagnosePlatform } from './platform.js';
 import { companionStatus, startCompanion, stopCompanion, serveCompanion } from './service.js';
 import { planAutostart, setAutostart, removeAutostart } from './autostart.js';
 
@@ -18,15 +18,20 @@ export async function handleCompanionCommand(options: CompanionOptions, invocati
   if (command === '--foreground') return await serveCompanion(options);
   if (command === 'doctor') {
     const diagnostics = diagnosePlatform();
-    const status = await companionStatus(options.stateDir, options.appId).catch(() => ({ running: false, appId: options.appId, receipt: 'invalid' }));
-    write({ status, diagnostics, signing: 'unsigned', notarization: 'none', documentation: 'https://github.com/hraness/desktop-foundation/blob/main/docs/installation.md' });
-    return diagnostics.some(d => d.severity === 'error') ? 1 : 0;
+    const status = await companionStatus(options.stateDir, options.appId).catch(() => ({ running: null, appId: options.appId, state: 'invalid-receipt' }));
+    let artifact: unknown;
+    let artifactFailed = false;
+    try {
+      artifact = options.binary ? { path: options.binary, source: 'maintainer-override', integrity: 'not-release-verified' } : await inspectBinary({ manifest: options.manifest ?? await packagedManifest(), cacheDir: options.cacheDir });
+    } catch (error) { artifactFailed = true; artifact = { state: 'unavailable', code: (error as {code?:string}).code ?? 'release-manifest-unavailable' }; }
+    write({ status, artifact, diagnostics, signing: 'unsigned', notarization: 'none', documentation: 'https://github.com/hraness/desktop-foundation/blob/main/docs/installation.md' });
+    return artifactFailed || diagnostics.some(d => d.severity === 'error') ? 1 : 0;
   }
   if (command === 'status') { write(await companionStatus(options.stateDir, options.appId)); return 0; }
   if (command === 'stop') { write(await stopCompanion(options.stateDir, options.appId)); return 0; }
   if (command === 'install' || command === 'uninstall') {
     const plan = planAutostart({ id: options.appId, label: options.name, executable: invocation.foreground.executable, args: [...invocation.foreground.args] });
-    if (command === 'install') { await setAutostart(plan); write({ loginStartup: 'enabled', takesEffect: 'next-login' }); }
+    if (command === 'install') { await setAutostart(plan); write({ loginStartup: 'enabled', takesEffect: 'next-login', requirements: plan.requirements }); }
     else { await removeAutostart(plan); write({ loginStartup: 'disabled', runningCompanion: 'unchanged' }); }
     return 0;
   }

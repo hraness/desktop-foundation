@@ -90,9 +90,14 @@ struct Runner {
     session: Arc<Mutex<Session>>,
     input: Mutex<Option<BufReader<std::io::Stdin>>>,
     output: Output,
+    icon_directory: Option<PathBuf>,
 }
 
 impl Host for Runner {
+    fn tray_icon_directory(&self) -> Option<PathBuf> {
+        self.icon_directory.clone()
+    }
+
     fn snapshot(&self) -> MenuModel {
         self.session
             .lock()
@@ -331,6 +336,17 @@ fn graphical_session() -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn icon_directory(state_dir: &Path, app_id: &str) -> Result<PathBuf, ProtocolError> {
+    if !protocol::valid_app_id(app_id) {
+        return Err(ProtocolError("invalid-snapshot"));
+    }
+    // tray-icon uses its internal tray ID in PNG filenames. Each product
+    // needs a separate directory even when callers share a state root.
+    let directory = state_dir.join(format!("{app_id}.icons"));
+    private_directory(&directory)?;
+    Ok(directory)
+}
+
 fn check_protocol() -> Result<(), ProtocolError> {
     let mut input = BufReader::new(std::io::stdin());
     let mut output = std::io::stdout();
@@ -390,10 +406,19 @@ fn execute() -> Result<(), ProtocolError> {
         return Ok(());
     };
     graphical_session()?;
+    let icon_directory = if cfg!(target_os = "linux") {
+        Some(icon_directory(
+            &state_dir,
+            &session.latest().unwrap().app_id,
+        )?)
+    } else {
+        None
+    };
     let host = Arc::new(Runner {
         session: Arc::new(Mutex::new(session)),
         input: Mutex::new(Some(input)),
         output: Output::new(),
+        icon_directory,
     });
     desktop_foundation::run(
         tauri::generate_context!(),
@@ -421,16 +446,34 @@ mod tests {
     use super::*;
 
     fn fixture() -> PathBuf {
-        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
-            "companion-lock-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        private_directory(&root).unwrap();
-        root
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let temporary = std::env::temp_dir().canonicalize().unwrap();
+        // Wall-clock nanoseconds do not imply nanosecond clock resolution:
+        // parallel tests can receive identical timestamps on macOS. Reserve
+        // each root exclusively, and never reuse stale state from a prior PID.
+        for _ in 0..1024 {
+            let root = temporary.join(format!(
+                "companion-lock-{}-{}",
+                std::process::id(),
+                SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ));
+            let mut builder = fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(&root) {
+                Ok(()) => {
+                    private_directory(&root).unwrap();
+                    return root;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("cannot create native test fixture: {error}"),
+            }
+        }
+        panic!("could not reserve a unique native test fixture");
     }
 
     #[test]
@@ -459,6 +502,18 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    #[test]
+    fn icon_directories_are_app_scoped_before_tray_creation() {
+        let dir = fixture();
+        let one = icon_directory(&dir, "test.one").unwrap();
+        let two = icon_directory(&dir, "test.two").unwrap();
+        assert_ne!(one, two);
+        assert!(one.is_dir() && two.is_dir());
+        assert_eq!(one, icon_directory(&dir, "test.one").unwrap());
+        assert!(icon_directory(&dir, "../escape").is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlink_directories_and_lock_files_are_refused() {
@@ -469,6 +524,11 @@ mod tests {
         symlink(&actual, dir.join("redirected")).unwrap();
         assert!(matches!(
             lock_instance(&dir.join("redirected"), "test"),
+            Err(ProtocolError("unsafe-state-dir"))
+        ));
+        symlink(&actual, dir.join("test.icons")).unwrap();
+        assert!(matches!(
+            icon_directory(&dir, "test"),
             Err(ProtocolError("unsafe-state-dir"))
         ));
         let actual_file = dir.join("actual-file");

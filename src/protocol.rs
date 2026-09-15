@@ -157,11 +157,12 @@ fn safe_text(value: &str, max: usize) -> bool {
 
 pub fn valid_app_id(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= 128
-        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value.len() <= 64
+        && !value.contains("..")
+        && value.as_bytes()[0].is_ascii_lowercase()
         && value
             .bytes()
-            .all(|ch| ch.is_ascii_alphanumeric() || b"._-".contains(&ch))
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || b".-".contains(&ch))
 }
 
 fn valid_action_id(value: &str) -> bool {

@@ -14,7 +14,9 @@ controls still apply.
 The release matrix builds arm64 and x64 on all three systems. A portable tray
 does not make Apple Messages, Contacts or a macOS capture helper portable. See
 the [platform contract](docs/platforms.md), [installation and OS approval
-guide](docs/installation.md), and [agent instructions](skills/companion/SKILL.md).
+guide](docs/installation.md), [architecture](docs/architecture.md),
+[product adoption guide](docs/adoption.md), [language-neutral protocol](docs/protocol.md),
+and [agent instructions](skills/companion/SKILL.md).
 
 ## JavaScript / TypeScript products
 

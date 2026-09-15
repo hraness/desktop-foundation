@@ -52,6 +52,12 @@ jobs:
       - name: Native event loop smoke (Linux)
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a node scripts/native-smoke.mjs
+      - name: Detached CLI lifecycle smoke (macOS and Windows)
+        if: runner.os != 'Linux'
+        run: node scripts/lifecycle-smoke.mjs
+      - name: Detached CLI lifecycle smoke (Linux)
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a node scripts/lifecycle-smoke.mjs
       - name: Collect raw executable
         shell: bash
         env:
@@ -61,6 +67,10 @@ jobs:
           extension=''
           if [[ "$COMPANION_TARGET" == *windows* ]]; then extension='.exe'; fi
           cp "target/release/hraness-companion$extension" "artifacts/hraness-companion-$COMPANION_TARGET$extension"
+      - name: Record ABI and build evidence
+        env:
+          COMPANION_TARGET: ${{ matrix.target }}
+        run: node scripts/artifact-evidence.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.target }}
@@ -86,6 +96,8 @@ jobs:
       - run: node scripts/release-manifest.mjs
       - name: Package verified SDK and pinned manifest
         run: npm pack --ignore-scripts --pack-destination artifacts
+      - name: Smoke test the installed SDK tarball
+        run: node scripts/package-smoke.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: distribution

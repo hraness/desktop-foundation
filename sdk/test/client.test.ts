@@ -18,10 +18,19 @@ const items: readonly MenuItem[] = [
 function fakeRunner(mode: string): string {
   return `
     import { createInterface } from 'node:readline';
+    import { closeSync, writeSync } from 'node:fs';
     const mode = ${JSON.stringify(mode)};
+    const closesOutput = mode === 'partial' || mode === 'eof';
     let seen = 0;
     const alive = setInterval(() => {}, 1000);
-    const send = value => process.stdout.write(JSON.stringify({version:1,...value})+'\\n');
+    const send = value => {
+      const frame = JSON.stringify({version:1,...value})+'\\n';
+      // Node protects process.stdout from ordinary destruction. For EOF
+      // fixtures, never initialize that stream: write the small ready frame
+      // directly to fd 1, then close the real pipe on every platform.
+      if (closesOutput) writeSync(1, frame);
+      else process.stdout.write(frame);
+    };
     if (mode === 'ignore-quit' || mode === 'eof' || mode === 'stalled-input') process.on('SIGTERM', () => {});
     const input = createInterface({input:process.stdin});
     input.on('line', line => {
@@ -53,8 +62,8 @@ function fakeRunner(mode: string): string {
           ].map(JSON.stringify).join('\\n')+'\\n');
         }
         if (mode === 'oversize') process.stdout.write('x'.repeat(256*1024+1));
-        if (mode === 'partial') process.stdout.end('{');
-        if (mode === 'eof') process.stdout.end();
+        if (mode === 'partial') writeSync(1, '{');
+        if (closesOutput) closeSync(1);
         if (mode === 'stalled-input') input.pause();
       }
       if (mode === 'repeat-actions') send({type:'action',id:'enabled',revision:value.revision});

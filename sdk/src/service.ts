@@ -2,7 +2,7 @@ import { createServer, request } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { open, mkdir, lstat, readFile, rename, unlink } from 'node:fs/promises';
+import { open, lstat, readdir, rename, unlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runCompanion, type CompanionOptions } from './client.js';
@@ -10,14 +10,13 @@ import { assertAppId } from './protocol.js';
 import { ensurePrivateDirectory } from './install.js';
 
 interface Receipt { version: 1; appId: string; port: number; token: string; instance: string }
-export interface CompanionStatus { running: boolean; appId: string }
-const receiptPath = (directory: string) => join(directory, 'companion-service.json');
+export interface CompanionStatus { running: boolean | null; appId: string; state: 'running' | 'stopped' | 'unreachable' }
+const receiptPath = (directory: string, instance: string) => join(directory, `.companion-service-${instance}.json`);
 async function privateDirectory(directory: string): Promise<void> {
   if (!isAbsolute(directory)) throw new Error('absolute-state-directory-required');
   await ensurePrivateDirectory(directory);
 }
-async function readReceipt(directory: string, appId: string): Promise<Receipt | undefined> {
-  const path = receiptPath(directory);
+async function readReceipt(path: string, appId: string): Promise<Receipt | undefined> {
   let handle;
   try {
     const stat = await lstat(path);
@@ -27,9 +26,23 @@ async function readReceipt(directory: string, appId: string): Promise<Receipt | 
     if (actual.ino !== stat.ino || actual.dev !== stat.dev || actual.size > 2048) throw new Error('changed-service-receipt');
     const value = JSON.parse(await handle.readFile('utf8')) as Receipt;
     if (value.version !== 1 || value.appId !== appId || !Number.isInteger(value.port) || value.port < 1 || value.port > 65535 || !/^[a-f0-9]{64}$/.test(value.token) || !/^[a-f0-9]{32}$/.test(value.instance)) throw new Error('invalid-service-receipt');
+    if (!path.endsWith(`.companion-service-${value.instance}.json`)) throw new Error('invalid-service-instance');
     return value;
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
   finally { await handle?.close(); }
+}
+async function receipts(directory: string, appId: string): Promise<Receipt[]> {
+  let names: string[];
+  try { names = (await readdir(directory)).filter(name => /^\.companion-service-[a-f0-9]{32}\.json$/.test(name)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+  if (names.length > 128) throw new Error('too-many-service-receipts: inspect stale companion owners');
+  return (await Promise.all(names.map(name => readReceipt(join(directory, name), appId)))).filter((value): value is Receipt => !!value);
+}
+async function discover(directory: string, appId: string): Promise<{ owner?: Receipt; uncertain: boolean }> {
+  const found = await receipts(directory, appId);
+  const live = (await Promise.all(found.map(async value => await exchange(value, 'status') ? value : undefined))).filter((value): value is Receipt => !!value);
+  if (live.length > 1) throw new Error('multiple-service-owners');
+  return { owner: live[0], uncertain: found.length > 0 };
 }
 async function exchange(receipt: Receipt, operation: 'status' | 'stop'): Promise<boolean> {
   return await new Promise(resolveResult => {
@@ -50,16 +63,19 @@ async function exchange(receipt: Receipt, operation: 'status' | 'stop'): Promise
 }
 export async function companionStatus(stateDir: string, appId: string): Promise<CompanionStatus> {
   assertAppId(appId);
-  const receipt = await readReceipt(stateDir, appId);
-  return { appId, running: receipt ? await exchange(receipt, 'status') : false };
+  const { owner, uncertain } = await discover(stateDir, appId);
+  return owner ? { appId, running: true, state: 'running' } : uncertain ? { appId, running: null, state: 'unreachable' } : { appId, running: false, state: 'stopped' };
 }
 export async function stopCompanion(stateDir: string, appId: string): Promise<CompanionStatus> {
   assertAppId(appId);
-  const receipt = await readReceipt(stateDir, appId);
-  if (!receipt || !await exchange(receipt, 'status')) return { appId, running: false };
-  if (!await exchange(receipt, 'stop')) throw new Error('stop-indeterminate');
+  const { owner, uncertain } = await discover(stateDir, appId);
+  if (!owner) {
+    if (uncertain) throw new Error('stop-indeterminate: service receipt exists but the owner is unreachable');
+    return { appId, running: false, state: 'stopped' };
+  }
+  if (!await exchange(owner, 'stop')) throw new Error('stop-indeterminate');
   for (let attempt = 0; attempt < 60; attempt++) {
-    if (!await exchange(receipt, 'status')) return { appId, running: false };
+    if (!await readReceipt(receiptPath(stateDir, owner.instance), appId)) return await companionStatus(stateDir, appId);
     await delay(100);
   }
   throw new Error('stop-timeout');
@@ -71,10 +87,13 @@ export async function serveCompanion(options: CompanionOptions): Promise<number>
   await privateDirectory(options.stateDir);
   if ((await companionStatus(options.stateDir, options.appId)).running) return 0;
   const session = await runCompanion(options);
+  let rendererClosed = false;
+  void session.closed.then(() => { rendererClosed = true; });
   const state = await session.ready;
   if (state === 'already-running') return await session.closed;
   const receipt: Receipt = { version: 1, appId: options.appId, port: 0, token: randomBytes(32).toString('hex'), instance: randomBytes(16).toString('hex') };
   const server = createServer((req, res) => {
+    if (rendererClosed) { res.writeHead(503).end(); return; }
     const auth = req.headers.authorization ?? '';
     const expected = `Bearer ${receipt.token}`;
     const supplied = Buffer.from(auth), wanted = Buffer.from(expected);
@@ -91,18 +110,20 @@ export async function serveCompanion(options: CompanionOptions): Promise<number>
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('service-listen-failed');
     receipt.port = address.port;
-    // Native lock is held before publishing a receipt; another owner cannot replace it.
+    // Instance-specific receipts cannot replace a newer owner's discovery data,
+    // even if the renderer dies while this asynchronous setup is in progress.
+    if (rendererClosed) return await session.closed;
     const handle = await open(temp, 'wx', 0o600);
     try { await handle.writeFile(JSON.stringify(receipt)); await handle.sync(); } finally { await handle.close(); }
-    await rename(temp, receiptPath(options.stateDir));
+    if (rendererClosed) return await session.closed;
+    await rename(temp, receiptPath(options.stateDir, receipt.instance));
     process.once('SIGINT', signal); process.once('SIGTERM', signal);
     return await session.closed;
   } finally {
     process.removeListener('SIGINT', signal); process.removeListener('SIGTERM', signal);
     await session.quit();
     server.closeAllConnections(); await new Promise<void>(resolveClose => server.close(() => resolveClose()));
-    const current = await readReceipt(options.stateDir, options.appId).catch(() => undefined);
-    if (current?.instance === receipt.instance) await unlink(receiptPath(options.stateDir)).catch(() => {});
+    await unlink(receiptPath(options.stateDir, receipt.instance)).catch(() => {});
     await unlink(temp).catch(() => {});
   }
 }

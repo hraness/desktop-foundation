@@ -91,6 +91,9 @@ try {
     for (const file of [
       'release-manifest.json', 'dist/src/index.js', 'dist/src/index.d.ts', 'dist/src/cli.js',
       'README.md', 'LICENSE', 'docs/installation.md', 'docs/platforms.md', 'skills/companion/SKILL.md',
+      'docs/architecture.md', 'docs/adoption.md', 'docs/protocol.md',
+      'src/lib.rs', 'src/protocol.rs', 'src/bin/hraness-companion.rs', 'src/outputs.rs',
+      'sdk/src/protocol.ts', 'sdk/src/client.ts', 'sdk/src/commands.ts',
     ]) await access(join(root, file));
     const sdk = await import(${JSON.stringify(packageName)});
     assert.equal(import.meta.resolve(${JSON.stringify(packageName)}), pathToFileURL(join(root, 'dist/src/index.js')).href);

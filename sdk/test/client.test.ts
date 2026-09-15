@@ -94,7 +94,9 @@ async function start(t: TestContext, mode = 'normal', overrides: Partial<Compani
     appId: 'test.client', name: 'Client test', title: 'Te', stateDir: dir,
     binary: nativeFixture ?? process.execPath,
     binaryArgs: nativeFixture ? [mode, tracePath] : ['--input-type=module', '-e', fakeRunner(mode, tracePath), '--'],
-    timeoutMs: nativeFixture ? 750 : 150, refreshMs: 100,
+    // Allow cold Node startup on Windows ARM; deadline assertions still use
+    // explicit 100ms where startup is not involved.
+    timeoutMs: 750, refreshMs: 100,
     snapshot: () => items, onAction: () => {},
     onDiagnostic: code => diagnostics.push(code), ...overrides,
   });

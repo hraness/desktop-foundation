@@ -810,6 +810,25 @@ fn show_companion_window(app: &AppHandle) {
     }
 }
 
+fn loading_model(default_icon: Option<&tauri::image::Image<'_>>) -> MenuModel {
+    // Windows registers the tray before the worker supplies a product model.
+    // Register a valid HICON in NIM_ADD: an iconless placeholder can be rejected
+    // by Explorer, after which even the first tooltip NIM_MODIFY fails. The
+    // tray-icon backend deliberately does not propagate that NIM_ADD failure.
+    #[cfg(target_os = "windows")]
+    let icon = Some(default_icon.map(|image| RgbaIcon {
+        rgba: image.rgba().to_vec(), width: image.width(), height: image.height(),
+    }).unwrap_or_else(|| protocol::monogram("Hr")));
+    #[cfg(not(target_os = "windows"))]
+    let icon = { let _ = default_icon; None };
+    MenuModel {
+        title: Some("…".into()),
+        icon,
+        nodes: vec![MenuNode::disabled("Loading status…"), MenuNode::quit("Quit")],
+        ..MenuModel::default()
+    }
+}
+
 /// Runs the application event loop. Never returns on success.
 ///
 /// `context` is the product's `tauri::generate_context!()` result so the
@@ -838,11 +857,7 @@ pub fn run(
 
             // Keep setup on the UI thread cheap. The coordinator takes the
             // first snapshot asynchronously and replaces this inert menu.
-            let model = MenuModel {
-                title: Some("…".into()),
-                nodes: vec![MenuNode::disabled("Loading status…"), MenuNode::quit("Quit")],
-                ..MenuModel::default()
-            };
+            let model = loading_model(app.default_window_icon());
             let (menu, routes) = build_menu(app.handle(), &model.nodes, 1)?;
             let mut tray = TrayIconBuilder::with_id(TRAY_ID).menu(&menu);
             if let Some(directory) = host.tray_icon_directory() {
@@ -923,6 +938,25 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loading_tray_has_a_windows_icon_before_the_first_snapshot() {
+        let fallback = loading_model(None);
+        assert!(fallback.validate().is_ok());
+        let image = tauri::image::Image::new_owned(vec![255; 16], 2, 2);
+        let configured = loading_model(Some(&image));
+        assert!(configured.validate().is_ok());
+        #[cfg(target_os = "windows")]
+        {
+            assert_eq!(fallback.icon, Some(protocol::monogram("Hr")));
+            assert_eq!(configured.icon, Some(RgbaIcon { rgba: vec![255; 16], width: 2, height: 2 }));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert_eq!(fallback.icon, None);
+            assert_eq!(configured.icon, None);
+        }
+    }
 
     #[test]
     fn refresh_requests_advance_generation_and_coalesce() {

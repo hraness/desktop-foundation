@@ -29,7 +29,8 @@ jobs:
         with:
           node-version: '22'
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: native_cache
         with:
           path: |
             ~/.cargo/registry
@@ -69,6 +70,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - run: cargo build --locked --release --bin hraness-companion
+      # Compilation succeeded; retain reusable build inputs even if a later
+      # desktop integration test fails. Every gate still runs on every tree.
+      - uses: actions/cache/save@v4
+        if: steps.native_cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.native_cache.outputs.cache-primary-key }}
       - name: Headless protocol probe
         run: node scripts/native-smoke.mjs --headless
       - name: Prepare same-session Windows tray host

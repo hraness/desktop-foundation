@@ -5,11 +5,14 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use desktop_foundation::protocol::{self, Event, Frame, ProtocolError, Session, VERSION};
-use desktop_foundation::{DispatchOutcome, Host, MenuModel, Options, RefreshHandle, RenderError};
+use desktop_foundation::{
+    DispatchOutcome, Host, MenuModel, Options, RefreshHandle, RenderError, RenderOperation,
+};
 use tauri::AppHandle;
 
 struct Message {
@@ -91,6 +94,7 @@ struct Runner {
     input: Mutex<Option<BufReader<std::io::Stdin>>>,
     output: Output,
     icon_directory: Option<PathBuf>,
+    rendered_once: AtomicBool,
 }
 
 impl Host for Runner {
@@ -126,21 +130,37 @@ impl Host for Runner {
         }
     }
 
-    fn render_failed(&self, _error: RenderError) {
-        self.output.emit(Event::error("render-failed"));
+    fn render_failed_at(&self, _error: RenderError, operation: RenderOperation) {
+        let code = match operation {
+            RenderOperation::Validate => "render-model-failed",
+            RenderOperation::Schedule => "render-schedule-failed",
+            RenderOperation::LookupTray => "render-tray-missing",
+            RenderOperation::BuildMenu => "render-menu-build-failed",
+            RenderOperation::SetMenu => "render-menu-set-failed",
+            RenderOperation::SetTitle => "render-title-failed",
+            RenderOperation::SetTooltip => "render-tooltip-failed",
+            RenderOperation::SetIcon => "render-icon-failed",
+            RenderOperation::SetChecked => "render-check-failed",
+        };
+        self.output.emit(Event::error(code));
         if let Some(app) = self.output.app.lock().unwrap().as_ref() {
             app.exit(1);
+        }
+    }
+
+    fn model_rendered(&self, _app: &AppHandle) {
+        if !self.rendered_once.swap(true, Ordering::AcqRel) {
+            self.output.emit(Event::Ready {
+                version: VERSION,
+                pid: std::process::id(),
+                platform: std::env::consts::OS,
+            });
         }
     }
 
     fn started_with_refresh(&self, app: &AppHandle, refresh: RefreshHandle) {
         *self.output.app.lock().unwrap() = Some(app.clone());
         apply_serif(app);
-        self.output.emit(Event::Ready {
-            version: VERSION,
-            pid: std::process::id(),
-            platform: std::env::consts::OS,
-        });
         let mut input = self
             .input
             .lock()
@@ -419,6 +439,7 @@ fn execute() -> Result<(), ProtocolError> {
         input: Mutex::new(Some(input)),
         output: Output::new(),
         icon_directory,
+        rendered_once: AtomicBool::new(false),
     });
     desktop_foundation::run(
         tauri::generate_context!(),

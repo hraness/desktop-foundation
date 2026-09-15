@@ -8,7 +8,8 @@ const initial = { version:1, type:'snapshot', appId:'org.hraness.companion.smoke
 const args = process.argv.includes('--headless') ? ['--check-protocol'] : ['--state-dir',root];
 const child = spawn(binary,args,{stdio:['pipe','pipe','pipe']});
 const expected = process.argv.includes('--headless') ? 'validated' : 'ready';
-let ready = false, pending = '', errorOutput = '';
+let ready = false, quitSent = false, stopped = false, pending = '', errorOutput = '';
+let updateTimer;
 const timer = setTimeout(()=>child.kill('SIGKILL'),15_000);
 try {
   const done = new Promise((resolveDone,reject)=>{
@@ -21,16 +22,27 @@ try {
       while((i=pending.indexOf('\n'))>=0){
         const event=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);
         if(event.type==='error') {reject(new Error(event.code));child.kill();return}
+        if(event.type==='stopped') stopped=true;
         if(event.type===expected && !ready){
           ready=true;
-          child.stdin.write(JSON.stringify({...initial,revision:2,items:[{kind:'submenu',label:'Updated',items:[{kind:'action',id:'toggle',label:'Example toggle',checked:false}]}]})+'\n');
-          setTimeout(()=>child.stdin.end(JSON.stringify({version:1,type:'quit'})+'\n'),250);
+          // Keep the real event loop alive through multiple render/refresh
+          // cycles. A startup-only probe can miss delayed native failures.
+          let revision = 1;
+          updateTimer = setInterval(() => {
+            if (++revision > 9) {
+              clearInterval(updateTimer);
+              quitSent = true;
+              child.stdin.end(JSON.stringify({version:1,type:'quit'})+'\n');
+              return;
+            }
+            child.stdin.write(JSON.stringify({...initial,revision,items:[{kind:'submenu',label:'Updated '+revision,items:[{kind:'action',id:'toggle',label:'Example toggle',checked:revision%2===0}]}]})+'\n');
+          },250);
         }
       }
     });
-    child.once('close',code=>{if(code!==0 || !ready)reject(new Error(`Native smoke failed (${code}): ${errorOutput}`));else resolveDone()});
+    child.once('close',code=>{if(code!==0 || !ready || !quitSent || (expected==='ready' && !stopped))reject(new Error(`Native smoke failed (${code}; ready=${ready}, quitSent=${quitSent}, stopped=${stopped}): ${errorOutput}`));else resolveDone()});
   });
   child.stdin.write(JSON.stringify(initial)+'\n');
   await done;
-  console.log(`${expected}: native startup, protocol update and exit (${process.platform}/${process.arch}); this is not visual tray qualification`);
-} finally { clearTimeout(timer); if(child.exitCode===null)child.kill(); await rm(root,{recursive:true,force:true}); }
+  console.log(`${expected}: native startup, sustained protocol updates and exit (${process.platform}/${process.arch}); this is not visual tray qualification`);
+} finally { clearTimeout(timer); clearInterval(updateTimer); if(child.exitCode===null)child.kill(); await rm(root,{recursive:true,force:true}); }

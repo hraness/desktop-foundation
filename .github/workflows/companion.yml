@@ -71,6 +71,11 @@ jobs:
       - run: cargo build --locked --release --bin hraness-companion
       - name: Headless protocol probe
         run: node scripts/native-smoke.mjs --headless
+      - name: Prepare same-session Windows tray host
+        if: runner.os == 'Windows'
+        timeout-minutes: 1
+        shell: pwsh
+        run: ./scripts/windows-desktop-fixture.ps1
       - name: Native event loop smoke (macOS and Windows)
         if: runner.os != 'Linux'
         run: node scripts/native-smoke.mjs

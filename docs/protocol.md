@@ -156,14 +156,14 @@ required event sequence.
 
 | Event | Meaning |
 | --- | --- |
-| `ready` | Native tray allocation and setup reached the ready hook. `platform` uses Rust OS names: `macos`, `linux`, or `windows`; `pid` identifies this child. |
+| `ready` | The first product menu and tray properties were successfully applied. `platform` uses Rust OS names: `macos`, `linux`, or `windows`; `pid` identifies this child. |
 | `action` | An enabled action from the indicated snapshot was selected. Carries only its original `id` and `revision`. |
 | `already-running` | Another runner holds the same app/state lock. This child creates no UI and exits with status zero. It does not attach to or update the existing instance. |
 | `error` | A safe machine-readable failure category. Treat the session as failed and observe exit; do not retry a product mutation. |
 | `stopped` | Normal event-loop shutdown notification, sent on a best-effort basis. |
 | `validated` | A snapshot passed the headless protocol checker. Emitted only in `--check-protocol` mode. |
 
-`ready` occurs before the first product snapshot has necessarily been rendered.
+`ready` follows the first successful product render, not the loading placeholder.
 It does not prove that a panel displays the icon, that a user can open the menu,
 or that OS approval succeeded on a different machine. There is no per-snapshot
 render acknowledgment. Headless `validated` events provide no graphical
@@ -200,7 +200,7 @@ Current categories include:
 | Invocation/state | `invalid-arguments`, `snapshot-required`, `unsafe-state-dir`, `state-unavailable`, `lock-unavailable` |
 | Framing/version | `input-unavailable`, `invalid-frame`, `partial-frame`, `frame-too-large`, `unsupported-version` |
 | Snapshot/menu | `invalid-snapshot`, `identity-changed`, `stale-revision`, `invalid-action`, `invalid-label`, `invalid-shortcut`, `menu-too-large`, `menu-too-deep` |
-| Native/output | `tray-unavailable`, `render-failed`, `output-unavailable` |
+| Native/output | `tray-unavailable`, `render-model-failed`, `render-schedule-failed`, `render-tray-missing`, `render-menu-build-failed`, `render-menu-set-failed`, `render-title-failed`, `render-tooltip-failed`, `render-icon-failed`, `render-check-failed`, `output-unavailable` |
 
 Codes contain no raw input, file paths, or product diagnostics. Show actionable
 product guidance for recognized categories and a generic failure for an unknown

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Hraness Companion",
+  "version": "0.5.0",
+  "identifier": "app.hraness.companion",
+  "build": { "frontendDist": "frontend" },
+  "app": {
+    "windows": [],
+    "security": { "csp": "default-src 'none'", "capabilities": [] }
+  },
+  "bundle": { "active": false, "icon": ["icons/icon.png", "icons/icon.ico"] }
+}

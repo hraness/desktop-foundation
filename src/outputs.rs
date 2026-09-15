@@ -140,7 +140,7 @@ impl OutputsSection {
             reveal.push(MenuNode::item(format!("{REVEAL_PREFIX}{key}"), label));
         }
         if let Ok(mut old) = self.offered.lock() { *old = offered; }
-        if !reveal.is_empty() { nodes.push(MenuNode::Submenu { title: "Reveal Output in Finder".into(), items: reveal }); }
+        if !reveal.is_empty() { nodes.push(MenuNode::Submenu { title: reveal_label().into(), items: reveal }); }
         nodes.push(MenuNode::Separator);
         nodes.push(MenuNode::item(FOLDER_ID, "Reveal Outputs Folder"));
         nodes
@@ -183,12 +183,36 @@ impl OutputsSection {
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
-            let _ = reveal;
-            let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+            let target = if reveal { path.parent().unwrap_or(path) } else { path };
+            let mut command = std::process::Command::new("xdg-open");
+            command.arg(target).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+            if let Ok(mut child) = command.spawn() { std::thread::spawn(move || { let _ = child.wait(); }); }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            let _ = (path, reveal);
+            let path = path.to_owned();
+            std::thread::spawn(move || {
+                if reveal {
+                    let mut selection = std::ffi::OsString::from("/select,");
+                    selection.push(path.as_os_str());
+                    let _ = std::process::Command::new("explorer.exe")
+                        .arg(selection)
+                        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+                        .status();
+                } else {
+                    use std::os::windows::ffi::OsStrExt;
+                    #[link(name = "shell32")]
+                    extern "system" {
+                        fn ShellExecuteW(window: *mut std::ffi::c_void, operation: *const u16, file: *const u16,
+                            parameters: *const u16, directory: *const u16, show: i32) -> *mut std::ffi::c_void;
+                    }
+                    let file: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+                    let open: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+                    // An OS file association open, never cmd.exe or a shell
+                    // command constructed from an output filename.
+                    unsafe { ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), 1); }
+                }
+            });
         }
     }
 
@@ -231,6 +255,10 @@ impl OutputsSection {
         }
         Some(icon)
     }
+}
+
+fn reveal_label() -> &'static str {
+    if cfg!(target_os = "macos") { "Reveal Output in Finder" } else { "Show Output in Folder" }
 }
 
 fn read_image(mut file: File, expected: &Fingerprint) -> Option<Vec<u8>> {
@@ -313,7 +341,7 @@ mod tests {
         let section = OutputsSection::new(&dir);
         let nodes = section.nodes();
         assert!(matches!(&nodes[0], MenuNode::Interactive { item } if item.title == "chart of options" && item.icon.is_some() && item.badge.as_ref().is_some_and(|s| s.starts_with("PNG"))));
-        assert!(matches!(&nodes[1], MenuNode::Submenu { title, items } if title == "Reveal Output in Finder" && items.len() == 1));
+        assert!(matches!(&nodes[1], MenuNode::Submenu { title, items } if title == reveal_label() && items.len() == 1));
         assert!(matches!(&nodes[2], MenuNode::Separator));
         assert!(matches!(&nodes[3], MenuNode::Item { title, .. } if title == "Reveal Outputs Folder"));
         fs::remove_dir_all(&dir).unwrap();
@@ -342,7 +370,7 @@ mod tests {
         for i in 0..120 { fs::write(dir.join(format!("older-{i}.txt")), b"old").unwrap(); }
         let newest = dir.join("newest.txt");
         fs::write(&newest, b"new").unwrap();
-        File::open(&newest).unwrap().set_modified(SystemTime::now() + std::time::Duration::from_secs(60)).unwrap();
+        OpenOptions::new().write(true).open(&newest).unwrap().set_modified(SystemTime::now() + std::time::Duration::from_secs(60)).unwrap();
         let entries = OutputsSection::new(&dir).with_limit(1).entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "newest.txt");

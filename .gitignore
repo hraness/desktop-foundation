@@ -1,2 +1,8 @@
 /target
 .DS_Store
+/node_modules
+/dist
+/artifacts
+/release-manifest.json
+/*.tgz
+/gen

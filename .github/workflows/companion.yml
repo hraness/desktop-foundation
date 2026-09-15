@@ -1,0 +1,185 @@
+name: Companion
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    name: Native (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-2022, target: x86_64-pc-windows-msvc }
+          - { os: windows-11-vs2026-arm, target: aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # The hosted Windows ARM64 image can prove its notification area
+      # incapable; that leg still builds and runs unit/headless gates while
+      # interactive tray qualification stays required on x64 Windows.
+      - name: Prepare same-session Windows tray host
+        if: runner.os == 'Windows'
+        id: tray_host
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          if ('${{ runner.arch }}' -eq 'ARM64') { ./scripts/windows-desktop-fixture.ps1 -AllowUnsupported }
+          else { ./scripts/windows-desktop-fixture.ps1 }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache/restore@v4
+        id: native_cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: companion-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+      - name: Install Linux build and runtime dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11
+      - run: npm ci --ignore-scripts
+      - name: Build native stdout EOF fixture (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force target/test-fixtures | Out-Null
+          rustc --edition=2021 examples/stdio_fixture.rs -o target/test-fixtures/stdio-fixture.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "COMPANION_STDIO_FIXTURE=$((Resolve-Path target/test-fixtures/stdio-fixture.exe).Path)" >> $env:GITHUB_ENV
+      - run: npm run check:sdk
+      - name: Native Rust tests
+        id: native_tests
+        run: cargo test --locked
+      # Auxiliary evidence must not replace or mask the required Rust test result.
+      - name: Diagnose Windows native imports and manifests
+        continue-on-error: true
+        if: always() && runner.os == 'Windows' && steps.native_tests.outcome != 'skipped'
+        timeout-minutes: 2
+        shell: pwsh
+        run: ./scripts/windows-loader-diagnostics.ps1
+      - name: Preserve Windows loader evidence
+        continue-on-error: true
+        if: always() && runner.os == 'Windows' && steps.native_tests.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: loader-${{ matrix.target }}
+          path: target/windows-loader-diagnostics/*
+          if-no-files-found: warn
+          retention-days: 7
+      - run: cargo build --locked --release --bin hraness-companion
+      # Compilation succeeded; retain reusable build inputs even if a later
+      # desktop integration test fails. Every gate still runs on every tree.
+      - uses: actions/cache/save@v4
+        if: steps.native_cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.native_cache.outputs.cache-primary-key }}
+      - name: Headless protocol probe
+        run: node scripts/native-smoke.mjs --headless
+      - name: Native event loop smoke (macOS and Windows)
+        if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
+        run: node scripts/native-smoke.mjs
+      - name: Native event loop smoke (Linux)
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a node scripts/native-smoke.mjs
+      - name: Detached CLI lifecycle smoke (macOS and Windows)
+        if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
+        run: node scripts/lifecycle-smoke.mjs
+      - name: Detached CLI lifecycle smoke (Linux)
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a node scripts/lifecycle-smoke.mjs
+      - name: Collect raw executable
+        shell: bash
+        env:
+          COMPANION_TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p artifacts
+          extension=''
+          if [[ "$COMPANION_TARGET" == *windows* ]]; then extension='.exe'; fi
+          cp "target/release/hraness-companion$extension" "artifacts/hraness-companion-$COMPANION_TARGET$extension"
+      - name: Record ABI and build evidence
+        env:
+          COMPANION_TARGET: ${{ matrix.target }}
+        run: node scripts/artifact-evidence.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: artifacts/*
+          if-no-files-found: error
+  package:
+    needs: native
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: artifacts
+          merge-multiple: true
+      - run: npm ci --ignore-scripts
+      - run: npm run check:sdk
+      - run: node scripts/release-manifest.mjs
+      - name: Package verified SDK and pinned manifest
+        run: npm pack --ignore-scripts --pack-destination artifacts
+      - name: Smoke test the installed SDK tarball
+        run: node scripts/package-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution
+          path: artifacts/*
+          if-no-files-found: error
+  required:
+    name: Required
+    if: always()
+    needs: [native, package]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: All targets and package must pass
+        env:
+          NATIVE_RESULT: ${{ needs.native.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        run: test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = success
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [required]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+          path: artifacts
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: artifacts/*
+      - name: Publish new versioned release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$RELEASE_TAG" artifacts/* --verify-tag --title "$RELEASE_TAG" --notes 'Unsigned, unbundled CLI companions for macOS, Windows and Linux. Includes a pinned SDK manifest and GitHub build attestations. See docs/installation.md for human OS approval guidance. Native event-loop tests do not establish clean-machine visual acceptance.'

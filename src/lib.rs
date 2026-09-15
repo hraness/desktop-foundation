@@ -7,10 +7,11 @@
 //! privilege of its own.
 //!
 //! The host binary runs unbundled: `cargo build` output is the artifact the
-//! product CLI spawns. Packaging into a `.app` stays an optional later gate
-//! for products that need TCC-bound surfaces.
+//! product CLI spawns. The shared renderer uses no application bundle or window;
+//! product helpers retain their own OS permission boundaries.
 
 pub mod outputs;
+pub mod protocol;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
@@ -259,6 +260,32 @@ pub enum RenderError {
     Native,
 }
 
+/// The bounded operation that failed, without native error text or user data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderOperation {
+    Validate,
+    Schedule,
+    LookupTray,
+    BuildMenu,
+    SetMenu,
+    SetTitle,
+    SetTooltip,
+    SetIcon,
+    SetChecked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RenderFailure {
+    error: RenderError,
+    operation: RenderOperation,
+}
+
+impl RenderFailure {
+    fn native(operation: RenderOperation) -> Self {
+        Self { error: RenderError::Native, operation }
+    }
+}
+
 impl MenuModel {
     /// Validate bounded native work and unambiguous selection state. Multiple
     /// menu rows may intentionally dispatch the same stable command ID.
@@ -317,6 +344,12 @@ impl MenuModel {
 pub trait Host: Send + Sync + 'static {
     fn snapshot(&self) -> MenuModel;
     fn dispatch(&self, _id: &str) {}
+    /// Optional private directory for Linux AppIndicator's generated icon
+    /// files. Supply this before tray creation to isolate different products
+    /// that use the same internal tray ID. Hosts own path validation and must
+    /// retain the directory for the lifetime of the companion. Other platforms
+    /// ignore the directory. The default preserves existing Rust consumers.
+    fn tray_icon_directory(&self) -> Option<std::path::PathBuf> { None }
     /// Fallible snapshot hook used by the refresh coordinator. Existing hosts
     /// keep their infallible implementation; new hosts can return a typed
     /// error and optionally provide a safe degraded model.
@@ -338,6 +371,11 @@ pub trait Host: Send + Sync + 'static {
     /// Reports safe rendering failure categories on the snapshot worker.
     /// Keep this bounded; repeated native failures retry at the normal interval.
     fn render_failed(&self, _error: RenderError) {}
+    /// Reports the failed operation while preserving legacy host behavior.
+    /// Like [`Host::render_failed`], this runs on the snapshot worker.
+    fn render_failed_at(&self, error: RenderError, _operation: RenderOperation) {
+        self.render_failed(error);
+    }
     /// Structured dispatch hook. The legacy `dispatch` method remains the
     /// compatibility default and is treated as accepted.
     fn dispatch_result(&self, id: &str) -> DispatchOutcome {
@@ -352,6 +390,10 @@ pub trait Host: Send + Sync + 'static {
     fn started_with_refresh(&self, app: &AppHandle, _refresh: RefreshHandle) {
         self.started(app);
     }
+    /// Runs on the UI thread only after a complete host model is applied.
+    /// This excludes the loading placeholder and failed or cancelled renders.
+    /// Keep this non-blocking; it is distinct from event-loop startup.
+    fn model_rendered(&self, _app: &AppHandle) {}
     /// Non-blocking shutdown notification, before joining the snapshot worker.
     /// Hosts can cancel a socket read here. Legacy bounded reads are joined to
     /// completion; the foundation cannot forcibly cancel arbitrary host IO.
@@ -398,7 +440,7 @@ struct PendingRefresh {
     generation: u64,
     requested: bool,
     stopping: bool,
-    render_error: Option<RenderError>,
+    render_error: Option<RenderFailure>,
 }
 
 struct RefreshState {
@@ -430,18 +472,24 @@ impl RefreshState {
         !pending.stopping && pending.generation == generation
     }
 
-    fn report_render_error(&self, error: RenderError) {
-        // Do not request an immediate retry: a persistent native failure must
-        // not turn into an unbounded snapshot/UI retry loop.
+    fn report_render_error(&self, error: RenderFailure) {
+        // Wake the worker to report the error, without requesting a new render.
+        // A persistent failure must not cause an immediate snapshot/retry loop.
         self.pending.lock().expect("refresh state lock poisoned").render_error = Some(error);
+        self.cv.notify_one();
     }
 
-    fn next(&self, interval: Duration) -> Option<(u64, Option<RenderError>)> {
+    fn next(&self, interval: Duration) -> Option<(u64, Option<RenderFailure>)> {
         let pending = self.pending.lock().expect("refresh state lock poisoned");
         let (mut pending, timeout) = self.cv.wait_timeout_while(pending, interval, |pending| {
-            !pending.requested && !pending.stopping
+            !pending.requested && !pending.stopping && pending.render_error.is_none()
         }).expect("refresh state lock poisoned");
         if pending.stopping { return None; }
+        // Error delivery does not consume a real pending invalidation. The
+        // worker reports it first, then waits or handles that queued snapshot.
+        if let Some(failure) = pending.render_error.take() {
+            return Some((pending.generation, Some(failure)));
+        }
         if timeout.timed_out() && !pending.requested {
             pending.generation = pending.generation.wrapping_add(1);
         }
@@ -489,7 +537,10 @@ impl RefreshController {
             let mailbox = Arc::new(Mutex::new(PendingRender::default()));
             state.request();
             while let Some((generation, render_error)) = state.next(interval) {
-                if let Some(error) = render_error { host.render_failed(error); }
+                if let Some(failure) = render_error {
+                    host.render_failed_at(failure.error, failure.operation);
+                    continue;
+                }
                 let context = SnapshotContext { state: state.clone(), generation };
                 let result = host.snapshot_with_context(&context);
                 if context.is_cancelled() { continue; }
@@ -502,7 +553,7 @@ impl RefreshController {
                 if context.is_cancelled() { continue; }
                 let Some(model) = model else { continue; };
                 if let Err(error) = model.validate() {
-                    host.render_failed(RenderError::Model(error));
+                    host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
                     continue;
                 }
                 {
@@ -515,6 +566,7 @@ impl RefreshController {
                 let state_for_ui = state.clone();
                 let mailbox_for_ui = mailbox.clone();
                 let rendered = rendered.clone();
+                let rendered_host = host.clone();
                 if app.run_on_main_thread(move || {
                     let next = {
                         let mut pending = mailbox_for_ui.lock().expect("render mailbox lock poisoned");
@@ -523,14 +575,15 @@ impl RefreshController {
                     };
                     let Some((generation, model)) = next else { return; };
                     if !state_for_ui.is_current(generation) { return; }
-                    if let Err(error) = apply_model(&target, &model, &rendered) {
-                        state_for_ui.report_render_error(error);
+                    match apply_model(&target, &model, &rendered) {
+                        Ok(()) => rendered_host.model_rendered(&target),
+                        Err(error) => state_for_ui.report_render_error(error),
                     }
                 }).is_err() {
                     let mut pending = mailbox.lock().expect("render mailbox lock poisoned");
                     pending.scheduled = false;
                     pending.latest = None;
-                    state.report_render_error(RenderError::Native);
+                    state.report_render_error(RenderFailure::native(RenderOperation::Schedule));
                 }
             }
         }));
@@ -717,7 +770,7 @@ fn build_menu(handle: &AppHandle, nodes: &[MenuNode], serial: u64)
 
 fn apply_model(
     handle: &AppHandle, model: &MenuModel, rendered: &Mutex<RenderedMenu>,
-) -> Result<(), RenderError> {
+) -> Result<(), RenderFailure> {
     let serial = {
         let mut rendered = rendered.lock().expect("rendered menu lock poisoned");
         if rendered.model.as_ref() == Some(model) { return Ok(()); }
@@ -725,9 +778,11 @@ fn apply_model(
         rendered.serial
     };
     // Models are validated on the worker before they reach the UI thread.
-    let tray = handle.tray_by_id(TRAY_ID).ok_or(RenderError::Native)?;
-    let (menu, routes) = build_menu(handle, &model.nodes, serial).map_err(|_| RenderError::Native)?;
-    tray.set_menu(Some(menu)).map_err(|_| RenderError::Native)?;
+    let tray = handle.tray_by_id(TRAY_ID)
+        .ok_or(RenderFailure::native(RenderOperation::LookupTray))?;
+    let (menu, routes) = build_menu(handle, &model.nodes, serial)
+        .map_err(|_| RenderFailure::native(RenderOperation::BuildMenu))?;
+    tray.set_menu(Some(menu)).map_err(|_| RenderFailure::native(RenderOperation::SetMenu))?;
     {
         let mut rendered = rendered.lock().expect("rendered menu lock poisoned");
         rendered.routes = routes;
@@ -736,13 +791,13 @@ fn apply_model(
         rendered.model = None;
     }
     tray.set_title(model.title.as_deref().map(|title| bounded_text(title, MAX_MENU_TITLE_CHARS)))
-        .map_err(|_| RenderError::Native)?;
+        .map_err(|_| RenderFailure::native(RenderOperation::SetTitle))?;
     tray.set_tooltip(model.tooltip.as_deref().map(|tip| bounded_text(tip, MAX_MENU_TITLE_CHARS)))
-        .map_err(|_| RenderError::Native)?;
+        .map_err(|_| RenderFailure::native(RenderOperation::SetTooltip))?;
     let image = model.icon.as_ref().map(|icon|
         tauri::image::Image::new_owned(icon.rgba.clone(), icon.width, icon.height)
     );
-    tray.set_icon(image).map_err(|_| RenderError::Native)?;
+    tray.set_icon(image).map_err(|_| RenderFailure::native(RenderOperation::SetIcon))?;
     rendered.lock().expect("rendered menu lock poisoned").model = Some(model.clone());
     Ok(())
 }
@@ -752,6 +807,25 @@ fn show_companion_window(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+fn loading_model(default_icon: Option<&tauri::image::Image<'_>>) -> MenuModel {
+    // Windows registers the tray before the worker supplies a product model.
+    // Supply a valid HICON in the initial NIM_ADD rather than depending on a
+    // later icon update. This alone does not establish registration success:
+    // tray-icon defers NIM_ADD failures, so readiness still awaits full render.
+    #[cfg(target_os = "windows")]
+    let icon = Some(default_icon.map(|image| RgbaIcon {
+        rgba: image.rgba().to_vec(), width: image.width(), height: image.height(),
+    }).unwrap_or_else(|| protocol::monogram("Hr")));
+    #[cfg(not(target_os = "windows"))]
+    let icon = { let _ = default_icon; None };
+    MenuModel {
+        title: Some("…".into()),
+        icon,
+        nodes: vec![MenuNode::disabled("Loading status…"), MenuNode::quit("Quit")],
+        ..MenuModel::default()
     }
 }
 
@@ -783,13 +857,12 @@ pub fn run(
 
             // Keep setup on the UI thread cheap. The coordinator takes the
             // first snapshot asynchronously and replaces this inert menu.
-            let model = MenuModel {
-                title: Some("…".into()),
-                nodes: vec![MenuNode::disabled("Loading status…"), MenuNode::quit("Quit")],
-                ..MenuModel::default()
-            };
+            let model = loading_model(app.default_window_icon());
             let (menu, routes) = build_menu(app.handle(), &model.nodes, 1)?;
             let mut tray = TrayIconBuilder::with_id(TRAY_ID).menu(&menu);
+            if let Some(directory) = host.tray_icon_directory() {
+                tray = tray.temp_dir_path(directory);
+            }
             if let Some(title) = &model.title {
                 tray = tray.title(title.clone());
             }
@@ -821,7 +894,7 @@ pub fn run(
                 // Native check items auto-toggle even when the command fails.
                 // The next daemon snapshot, not this click, owns the mark.
                 if check.set_checked(checked).is_err() {
-                    event_controller.state.report_render_error(RenderError::Native);
+                    event_controller.state.report_render_error(RenderFailure::native(RenderOperation::SetChecked));
                     event_controller.handle().request();
                     return;
                 }
@@ -865,6 +938,25 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loading_tray_has_a_windows_icon_before_the_first_snapshot() {
+        let fallback = loading_model(None);
+        assert!(fallback.validate().is_ok());
+        let image = tauri::image::Image::new_owned(vec![255; 16], 2, 2);
+        let configured = loading_model(Some(&image));
+        assert!(configured.validate().is_ok());
+        #[cfg(target_os = "windows")]
+        {
+            assert_eq!(fallback.icon, Some(protocol::monogram("Hr")));
+            assert_eq!(configured.icon, Some(RgbaIcon { rgba: vec![255; 16], width: 2, height: 2 }));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert_eq!(fallback.icon, None);
+            assert_eq!(configured.icon, None);
+        }
+    }
 
     #[test]
     fn refresh_requests_advance_generation_and_coalesce() {
@@ -921,10 +1013,51 @@ mod tests {
     #[test]
     fn render_errors_do_not_request_an_immediate_retry_loop() {
         let state = RefreshState::new();
-        state.report_render_error(RenderError::Native);
+        let failure = RenderFailure::native(RenderOperation::SetTooltip);
+        state.report_render_error(failure);
         assert!(!state.pending.lock().unwrap().requested);
-        assert_eq!(state.next(Duration::ZERO), Some((1, Some(RenderError::Native))));
-        assert_eq!(state.next(Duration::ZERO), Some((2, None)));
+        assert_eq!(state.next(Duration::ZERO), Some((0, Some(failure))));
+        assert!(!state.pending.lock().unwrap().requested);
+        assert_eq!(state.next(Duration::ZERO), Some((1, None)));
+    }
+
+    #[test]
+    fn render_error_delivery_preserves_a_pending_snapshot() {
+        let state = RefreshState::new();
+        let failure = RenderFailure::native(RenderOperation::SetIcon);
+        state.request();
+        state.report_render_error(failure);
+        assert_eq!(state.next(Duration::ZERO), Some((1, Some(failure))));
+        assert!(state.pending.lock().unwrap().requested);
+        assert_eq!(state.next(Duration::ZERO), Some((1, None)));
+        assert!(!state.pending.lock().unwrap().requested);
+    }
+
+    #[test]
+    fn render_failure_wakes_worker_without_waiting_for_refresh_interval() {
+        let state = Arc::new(RefreshState::new());
+        let worker_state = state.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            tx.send(worker_state.next(Duration::from_secs(60))).unwrap();
+        });
+        let failure = RenderFailure::native(RenderOperation::SetTooltip);
+        state.report_render_error(failure);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), Some((0, Some(failure))));
+        assert!(!state.pending.lock().unwrap().requested);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn operation_reports_preserve_legacy_host_failure_callback() {
+        struct LegacyHost(Mutex<Option<RenderError>>);
+        impl Host for LegacyHost {
+            fn snapshot(&self) -> MenuModel { MenuModel::default() }
+            fn render_failed(&self, error: RenderError) { *self.0.lock().unwrap() = Some(error); }
+        }
+        let host = LegacyHost(Mutex::new(None));
+        host.render_failed_at(RenderError::Native, RenderOperation::SetTooltip);
+        assert_eq!(*host.0.lock().unwrap(), Some(RenderError::Native));
     }
 
     #[test]

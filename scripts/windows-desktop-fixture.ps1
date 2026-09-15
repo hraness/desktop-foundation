@@ -180,6 +180,18 @@ public static class CompanionDesktopFixture {
             return 0;
         }
     }
+
+    public static string TrayOwnerName(int processId) {
+        if (processId == 0) return null;
+        try {
+            using (Process process = Process.GetProcessById(processId)) {
+                return process.ProcessName;
+            }
+        } catch (Exception) {
+            // Diagnostics only: never fail qualification on a name lookup.
+            return null;
+        }
+    }
 }
 '@
 
@@ -260,55 +272,68 @@ $shellLibrary = Join-Path ([Environment]::GetFolderPath('System')) 'shell32.dll'
     processArchitecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
     osArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
     shell32Version = [Diagnostics.FileVersionInfo]::GetVersionInfo($shellLibrary).FileVersion
+    trayOwnerProcess = [CompanionDesktopFixture]::TrayOwnerName($trayProcessId)
     trayDescendantClasses = @([CompanionDesktopFixture]::TrayDescendantClasses())
     trayPolicies = @($trayPolicies)
 } | ConvertTo-Json -Depth 4 -Compress | Write-Output
 
 # A separate same-session process bounds even a stalled Shell_NotifyIcon call.
 # Require a working shell before expensive compilation; retain all native gates.
-$probeStart = [System.Diagnostics.ProcessStartInfo]::new([Environment]::ProcessPath)
-$probeStart.UseShellExecute = $false
-$probeStart.RedirectStandardOutput = $true
-$probeStart.RedirectStandardError = $true
-foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $PSCommandPath, '-ProbeOnly')) {
-    $probeStart.ArgumentList.Add($argument)
-}
-$probeProcess = [System.Diagnostics.Process]::Start($probeStart)
-if ($null -eq $probeProcess) { throw 'windows-notifyicon-probe-start-failed' }
-try {
-    $probeTimedOut = $false
-    $probeOutput = $probeProcess.StandardOutput.ReadToEndAsync()
-    $probeErrors = $probeProcess.StandardError.ReadToEndAsync()
-    if (-not $probeProcess.WaitForExit(10000)) {
-        $probeTimedOut = $true
-        # Only terminate this exact owned diagnostic process. Normal probe
-        # cleanup uses finally; on timeout the OS destroys its owned window.
-        $probeProcess.Kill()
-        if (-not $probeProcess.WaitForExit(1000)) { throw 'windows-notifyicon-probe-cleanup-timeout' }
-        Write-Output '{"fixture":"windows-notifyicon-probe","stage":"timeout"}'
+# A freshly started shell can lag on registering its tray handler, so the
+# bounded probe retries inside the fixture budget before the host is declared
+# unsupported.
+$probePassed = $false
+$probeAttempt = 0
+do {
+    $probeAttempt++
+    $probeStart = [System.Diagnostics.ProcessStartInfo]::new([Environment]::ProcessPath)
+    $probeStart.UseShellExecute = $false
+    $probeStart.RedirectStandardOutput = $true
+    $probeStart.RedirectStandardError = $true
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $PSCommandPath, '-ProbeOnly')) {
+        $probeStart.ArgumentList.Add($argument)
     }
-    if ($probeOutput.Wait(1000)) { Write-Output $probeOutput.Result.TrimEnd() }
-    if ($probeErrors.Wait(1000) -and -not [string]::IsNullOrWhiteSpace($probeErrors.Result)) {
-        $probeErrorText = $probeErrors.Result
+    $probeProcess = [System.Diagnostics.Process]::Start($probeStart)
+    if ($null -eq $probeProcess) { throw 'windows-notifyicon-probe-start-failed' }
+    try {
+        $probeTimedOut = $false
+        $probeOutput = $probeProcess.StandardOutput.ReadToEndAsync()
+        $probeErrors = $probeProcess.StandardError.ReadToEndAsync()
+        if (-not $probeProcess.WaitForExit(10000)) {
+            $probeTimedOut = $true
+            # Only terminate this exact owned diagnostic process. Normal probe
+            # cleanup uses finally; on timeout the OS destroys its owned window.
+            $probeProcess.Kill()
+            if (-not $probeProcess.WaitForExit(1000)) { throw 'windows-notifyicon-probe-cleanup-timeout' }
+            Write-Output '{"fixture":"windows-notifyicon-probe","stage":"timeout"}'
+        }
+        if ($probeOutput.Wait(1000)) { Write-Output $probeOutput.Result.TrimEnd() }
+        if ($probeErrors.Wait(1000) -and -not [string]::IsNullOrWhiteSpace($probeErrors.Result)) {
+            $probeErrorText = $probeErrors.Result
+            [ordered]@{
+                fixture = 'windows-notifyicon-probe'
+                stage = 'stderr'
+                diagnostic = $probeErrorText.Substring(0, [Math]::Min(2000, $probeErrorText.Length))
+                diagnosticOnly = $true
+            } | ConvertTo-Json -Compress | Write-Output
+        }
         [ordered]@{
             fixture = 'windows-notifyicon-probe'
-            stage = 'stderr'
-            diagnostic = $probeErrorText.Substring(0, [Math]::Min(2000, $probeErrorText.Length))
-            diagnosticOnly = $true
+            stage = 'complete'
+            attempt = $probeAttempt
+            exitCode = $probeProcess.ExitCode
+            preflight = $true
         } | ConvertTo-Json -Compress | Write-Output
+        if (-not $probeTimedOut -and $probeProcess.ExitCode -eq 0) { $probePassed = $true }
+    } finally {
+        if (-not $probeProcess.HasExited) { $probeProcess.Kill() }
+        $probeProcess.Dispose()
     }
-    [ordered]@{
-        fixture = 'windows-notifyicon-probe'
-        stage = 'complete'
-        exitCode = $probeProcess.ExitCode
-        preflight = $true
-    } | ConvertTo-Json -Compress | Write-Output
-    if ($probeTimedOut -or $probeProcess.ExitCode -ne 0) {
-        throw 'windows-notifyicon-preflight-failed: hosted shell cannot complete the bounded tray probe'
-    }
-} finally {
-    if (-not $probeProcess.HasExited) { $probeProcess.Kill() }
-    $probeProcess.Dispose()
+    if ($probePassed -or $fixtureWatch.ElapsedMilliseconds -ge 75000) { break }
+    Start-Sleep -Milliseconds 10000
+} while ($true)
+if (-not $probePassed) {
+    throw 'windows-notifyicon-preflight-failed: hosted shell cannot complete the bounded tray probe'
 }
 # Leave the job-owned shell available to both native smoke steps. The disposable
 # hosted VM and GitHub runner process cleanup own its teardown; never kill an

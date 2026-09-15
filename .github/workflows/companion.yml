@@ -30,7 +30,7 @@ jobs:
           node-version: '22'
       - name: Prepare same-session Windows tray host
         if: runner.os == 'Windows'
-        timeout-minutes: 1
+        timeout-minutes: 3
         shell: pwsh
         run: ./scripts/windows-desktop-fixture.ps1
       - uses: dtolnay/rust-toolchain@stable

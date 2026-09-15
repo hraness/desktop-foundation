@@ -12,7 +12,7 @@
 
 pub mod outputs;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -74,6 +74,10 @@ const MAX_MENU_TITLE_CHARS: usize = 256;
 const MAX_MENU_BADGE_CHARS: usize = 32;
 const MAX_MENU_SHORTCUT_CHARS: usize = 64;
 const MAX_ACCESSIBILITY_CHARS: usize = 256;
+const MAX_MENU_NODES: usize = 256;
+const MAX_MENU_DEPTH: usize = 8;
+const MAX_ACTION_ID_BYTES: usize = 1024;
+const MAX_ICON_DIMENSION: u32 = 512;
 
 /// One menu node. Items with no `id` are inert labels.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,10 +120,11 @@ impl MenuNode {
     }
 }
 
-/// Native presentation semantics for an interactive menu item. Tauri exposes
-/// check items but has no portable progress, badge, or radio-group primitive;
-/// those values are therefore retained in the model and represented in the
-/// title/accessibility metadata by the renderer.
+/// Presentation semantics for an interactive menu item. Toggle/check/radio
+/// all use native checkmarks. Radio groups are validated for at most one
+/// selection, but the host must make the selection and supply a new snapshot.
+/// The renderer restores the authoritative checkmark when an item is clicked;
+/// it never treats the platform's automatic toggle as daemon confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuItemKind {
     Action,
@@ -129,6 +134,10 @@ pub enum MenuItemKind {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Optional information for future richer renderers. Tauri's portable native
+/// menu API cannot set separate accessibility labels, values, or hints; these
+/// fields are currently retained only. Native accessibility uses the visible
+/// title and checkmark. Put essential state in those fields today.
 pub struct AccessibilityMetadata {
     pub label: Option<String>,
     pub value: Option<String>,
@@ -165,10 +174,13 @@ pub struct MenuItem {
     pub id: Option<String>,
     pub title: String,
     pub enabled: bool,
+    /// Rendered for actions. Native check items cannot also display this icon.
     pub icon: Option<RgbaIcon>,
     pub kind: MenuItemKind,
     pub shortcut: Option<String>,
+    /// Bounded text appended to the title, not a separate native badge.
     pub badge: Option<String>,
+    /// Percentage appended to the title, not a native progress control.
     pub progress: Option<ProgressValue>,
     pub accessibility: AccessibilityMetadata,
 }
@@ -221,10 +233,82 @@ pub struct RgbaIcon {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MenuModel {
     /// Status-item text. Present alongside or instead of the icon.
+    /// `None` clears a previously rendered title.
     pub title: Option<String>,
+    /// `None` clears a previously rendered icon.
     pub icon: Option<RgbaIcon>,
+    /// `None` clears a previously rendered tooltip.
     pub tooltip: Option<String>,
     pub nodes: Vec<MenuNode>,
+}
+
+/// A safe category; model errors never include product labels or command IDs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelError {
+    TooManyNodes,
+    TooDeep,
+    InvalidActionId,
+    InvalidIcon,
+    AmbiguousRadioGroup,
+}
+
+/// Safe rendering failure categories reported through [`Host::render_failed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderError {
+    Model(ModelError),
+    Native,
+}
+
+impl MenuModel {
+    /// Validate bounded native work and unambiguous selection state. Multiple
+    /// menu rows may intentionally dispatch the same stable command ID.
+    /// Invalid snapshots leave the last rendered menu and its routes intact.
+    pub fn validate(&self) -> Result<(), ModelError> {
+        fn icon_valid(icon: &RgbaIcon) -> bool {
+            icon.width > 0 && icon.height > 0
+                && icon.width <= MAX_ICON_DIMENSION && icon.height <= MAX_ICON_DIMENSION
+                && u64::from(icon.width) * u64::from(icon.height) * 4 == icon.rgba.len() as u64
+        }
+        fn walk(
+            nodes: &[MenuNode], depth: usize, count: &mut usize,
+            selected_groups: &mut HashSet<String>,
+        ) -> Result<(), ModelError> {
+            if depth > MAX_MENU_DEPTH { return Err(ModelError::TooDeep); }
+            for node in nodes {
+                *count += 1;
+                if *count > MAX_MENU_NODES { return Err(ModelError::TooManyNodes); }
+                let (id, icon) = match node {
+                    MenuNode::Item { id, icon, .. } => (id, icon),
+                    MenuNode::Interactive { item } => {
+                        if let MenuItemKind::Radio { selected: true, group: Some(group) } = &item.kind {
+                            if !selected_groups.insert(group.clone()) {
+                                return Err(ModelError::AmbiguousRadioGroup);
+                            }
+                        }
+                        (&item.id, &item.icon)
+                    }
+                    MenuNode::Submenu { items, .. } => {
+                        walk(items, depth + 1, count, selected_groups)?;
+                        continue;
+                    }
+                    MenuNode::Separator => continue,
+                };
+                if let Some(id) = id {
+                    if id.is_empty() || id.len() > MAX_ACTION_ID_BYTES || id.chars().any(char::is_control) {
+                        return Err(ModelError::InvalidActionId);
+                    }
+                }
+                if icon.as_ref().is_some_and(|icon| !icon_valid(icon)) {
+                    return Err(ModelError::InvalidIcon);
+                }
+            }
+            Ok(())
+        }
+        if self.icon.as_ref().is_some_and(|icon| !icon_valid(icon)) {
+            return Err(ModelError::InvalidIcon);
+        }
+        walk(&self.nodes, 0, &mut 0, &mut HashSet::new())
+    }
 }
 
 /// The product's UI authority. `snapshot` may perform bounded local IO; it is
@@ -239,11 +323,21 @@ pub trait Host: Send + Sync + 'static {
     fn snapshot_result(&self) -> SnapshotResult {
         Ok(self.snapshot())
     }
+    /// Cooperative cancellation for long reads. Stop work when the context is
+    /// cancelled; all host IO must still have its own finite deadline. Legacy
+    /// hosts keep their bounded `snapshot_result` implementation.
+    fn snapshot_with_context(&self, _context: &SnapshotContext) -> SnapshotResult {
+        self.snapshot_result()
+    }
     /// Model to render after a failed snapshot. Returning `None` keeps the
-    /// last known menu visible while the coordinator retries.
+    /// last known menu visible while the coordinator retries. This hook runs
+    /// on the snapshot worker, never on the UI thread.
     fn snapshot_failed(&self, _error: &SnapshotError) -> Option<MenuModel> {
         None
     }
+    /// Reports safe rendering failure categories on the snapshot worker.
+    /// Keep this bounded; repeated native failures retry at the normal interval.
+    fn render_failed(&self, _error: RenderError) {}
     /// Structured dispatch hook. The legacy `dispatch` method remains the
     /// compatibility default and is treated as accepted.
     fn dispatch_result(&self, id: &str) -> DispatchOutcome {
@@ -258,7 +352,12 @@ pub trait Host: Send + Sync + 'static {
     fn started_with_refresh(&self, app: &AppHandle, _refresh: RefreshHandle) {
         self.started(app);
     }
-    /// Runs once on `RunEvent::Exit`. Join owned work here.
+    /// Non-blocking shutdown notification, before joining the snapshot worker.
+    /// Hosts can cancel a socket read here. Legacy bounded reads are joined to
+    /// completion; the foundation cannot forcibly cancel arbitrary host IO.
+    fn cancel_snapshot(&self) {}
+    /// Runs once after the snapshot worker stops on `RunEvent::Exit`. Join
+    /// other owned work here. Do not synchronously request UI work on shutdown.
     fn stopping(&self) {}
 }
 
@@ -280,46 +379,83 @@ impl RefreshHandle {
     }
 }
 
+/// A snapshot's cooperative cancellation token. Invalidation and application
+/// shutdown both cancel it. No host should wait synchronously for UI work.
+#[derive(Clone)]
+pub struct SnapshotContext {
+    state: Arc<RefreshState>,
+    generation: u64,
+}
+
+impl SnapshotContext {
+    pub fn is_cancelled(&self) -> bool {
+        !self.state.is_current(self.generation)
+    }
+}
+
+#[derive(Default)]
+struct PendingRefresh {
+    generation: u64,
+    requested: bool,
+    stopping: bool,
+    render_error: Option<RenderError>,
+}
+
 struct RefreshState {
-    generation: AtomicU64,
-    requested: AtomicBool,
-    stopping: AtomicBool,
-    wake: Mutex<()>,
+    pending: Mutex<PendingRefresh>,
     cv: Condvar,
 }
 
 impl RefreshState {
     fn new() -> Self {
-        Self {
-            generation: AtomicU64::new(0),
-            requested: AtomicBool::new(false),
-            stopping: AtomicBool::new(false),
-            wake: Mutex::new(()),
-            cv: Condvar::new(),
-        }
+        Self { pending: Mutex::new(PendingRefresh::default()), cv: Condvar::new() }
     }
 
     fn request(&self) {
-        if self.stopping.load(Ordering::Acquire) {
-            return;
-        }
-        self.generation.fetch_add(1, Ordering::AcqRel);
-        self.requested.store(true, Ordering::Release);
-        self.cv.notify_one();
-    }
-
-    fn mark_requested(&self) {
-        if self.stopping.load(Ordering::Acquire) {
-            return;
-        }
-        self.requested.store(true, Ordering::Release);
+        let mut pending = self.pending.lock().expect("refresh state lock poisoned");
+        if pending.stopping { return; }
+        pending.generation = pending.generation.wrapping_add(1);
+        pending.requested = true;
         self.cv.notify_one();
     }
 
     fn stop(&self) {
-        self.stopping.store(true, Ordering::Release);
+        let mut pending = self.pending.lock().expect("refresh state lock poisoned");
+        pending.stopping = true;
         self.cv.notify_all();
     }
+
+    fn is_current(&self, generation: u64) -> bool {
+        let pending = self.pending.lock().expect("refresh state lock poisoned");
+        !pending.stopping && pending.generation == generation
+    }
+
+    fn report_render_error(&self, error: RenderError) {
+        // Do not request an immediate retry: a persistent native failure must
+        // not turn into an unbounded snapshot/UI retry loop.
+        self.pending.lock().expect("refresh state lock poisoned").render_error = Some(error);
+    }
+
+    fn next(&self, interval: Duration) -> Option<(u64, Option<RenderError>)> {
+        let pending = self.pending.lock().expect("refresh state lock poisoned");
+        let (mut pending, timeout) = self.cv.wait_timeout_while(pending, interval, |pending| {
+            !pending.requested && !pending.stopping
+        }).expect("refresh state lock poisoned");
+        if pending.stopping { return None; }
+        if timeout.timed_out() && !pending.requested {
+            pending.generation = pending.generation.wrapping_add(1);
+        }
+        // Consume the request and generation under one lock. An invalidation
+        // during IO now remains pending for exactly one subsequent snapshot.
+        pending.requested = false;
+        Some((pending.generation, pending.render_error.take()))
+    }
+}
+
+#[derive(Default)]
+struct PendingRender {
+    scheduled: bool,
+    latest: Option<(u64, MenuModel)>,
 }
 
 struct RefreshController {
@@ -343,81 +479,67 @@ impl RefreshController {
         RefreshHandle { state: self.state.clone() }
     }
 
-    fn start(&self, app: AppHandle) {
-        if self.worker.lock().expect("refresh worker lock poisoned").is_some() {
-            return;
-        }
+    fn start(&self, app: AppHandle, rendered: Arc<Mutex<RenderedMenu>>) {
+        let mut owned_worker = self.worker.lock().expect("refresh worker lock poisoned");
+        if owned_worker.is_some() { return; }
         let host = self.host.clone();
         let state = self.state.clone();
         let interval = self.interval.max(Duration::from_secs(1));
-        let worker = std::thread::spawn(move || {
-            // Request an initial snapshot immediately after the tray exists.
+        *owned_worker = Some(std::thread::spawn(move || {
+            let mailbox = Arc::new(Mutex::new(PendingRender::default()));
             state.request();
-            loop {
-                let mut guard = state.wake.lock().expect("refresh wake lock poisoned");
-                while !state.requested.load(Ordering::Acquire)
-                    && !state.stopping.load(Ordering::Acquire)
+            while let Some((generation, render_error)) = state.next(interval) {
+                if let Some(error) = render_error { host.render_failed(error); }
+                let context = SnapshotContext { state: state.clone(), generation };
+                let result = host.snapshot_with_context(&context);
+                if context.is_cancelled() { continue; }
+                // Error fallbacks can themselves do IO; keep them here, never
+                // inside the queued main-thread closure.
+                let model = match result {
+                    Ok(model) => Some(model),
+                    Err(error) => host.snapshot_failed(&error),
+                };
+                if context.is_cancelled() { continue; }
+                let Some(model) = model else { continue; };
+                if let Err(error) = model.validate() {
+                    host.render_failed(RenderError::Model(error));
+                    continue;
+                }
                 {
-                    let (next, _) = state
-                        .cv
-                        .wait_timeout(guard, interval)
-                        .expect("refresh wait lock poisoned");
-                    guard = next;
-                    if !state.requested.load(Ordering::Acquire) {
-                        state.request();
-                    }
+                    let mut pending = mailbox.lock().expect("render mailbox lock poisoned");
+                    pending.latest = Some((generation, model));
+                    if pending.scheduled { continue; }
+                    pending.scheduled = true;
                 }
-                state.requested.store(false, Ordering::Release);
-                drop(guard);
-                if state.stopping.load(Ordering::Acquire) {
-                    break;
-                }
-
-                // A single worker owns snapshots. If invalidations arrive
-                // during IO, discard the stale result and immediately take a
-                // newer generation instead of running concurrent snapshots.
-                let mut generation = state.generation.load(Ordering::Acquire);
-                loop {
-                    if state.stopping.load(Ordering::Acquire) {
-                        return;
+                let target = app.clone();
+                let state_for_ui = state.clone();
+                let mailbox_for_ui = mailbox.clone();
+                let rendered = rendered.clone();
+                if app.run_on_main_thread(move || {
+                    let next = {
+                        let mut pending = mailbox_for_ui.lock().expect("render mailbox lock poisoned");
+                        pending.scheduled = false;
+                        pending.latest.take()
+                    };
+                    let Some((generation, model)) = next else { return; };
+                    if !state_for_ui.is_current(generation) { return; }
+                    if let Err(error) = apply_model(&target, &model, &rendered) {
+                        state_for_ui.report_render_error(error);
                     }
-                    let result = host.snapshot_result();
-                    let observed = state.generation.load(Ordering::Acquire);
-                    if observed != generation {
-                        generation = observed;
-                        continue;
-                    }
-                    let target = app.clone();
-                    let host_for_error = host.clone();
-                    let state_for_ui = state.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        if state_for_ui.stopping.load(Ordering::Acquire)
-                            || state_for_ui.generation.load(Ordering::Acquire) != generation
-                        {
-                            state_for_ui.mark_requested();
-                            return;
-                        }
-                        match result {
-                            Ok(model) => apply_model(&target, &model),
-                            Err(error) => {
-                                if let Some(model) = host_for_error.snapshot_failed(&error) {
-                                    apply_model(&target, &model);
-                                }
-                            }
-                        }
-                    });
-                    break;
+                }).is_err() {
+                    let mut pending = mailbox.lock().expect("render mailbox lock poisoned");
+                    pending.scheduled = false;
+                    pending.latest = None;
+                    state.report_render_error(RenderError::Native);
                 }
             }
-        });
-        *self.worker.lock().expect("refresh worker lock poisoned") = Some(worker);
+        }));
     }
 
     fn stop(&self) {
         self.state.stop();
+        self.host.cancel_snapshot();
         if let Some(worker) = self.worker.lock().expect("refresh worker lock poisoned").take() {
-            // The worker is never joined from itself, but keep this guard for
-            // embedders that choose to stop from a host callback.
             if worker.thread().id() != std::thread::current().id() {
                 let _ = worker.join();
             }
@@ -442,10 +564,48 @@ impl Default for Options {
     }
 }
 
+#[derive(Clone)]
+struct MenuRoute {
+    command: Option<String>,
+    check: Option<(CheckMenuItem<tauri::Wry>, bool)>,
+}
+
+#[derive(Default)]
+struct RenderedMenu {
+    serial: u64,
+    model: Option<MenuModel>,
+    routes: HashMap<String, MenuRoute>,
+}
+
+struct MenuBuild {
+    serial: u64,
+    sequence: usize,
+    routes: HashMap<String, MenuRoute>,
+}
+
+impl MenuBuild {
+    fn new(serial: u64) -> Self {
+        Self { serial, sequence: 0, routes: HashMap::new() }
+    }
+
+    fn route(&mut self, command: Option<&String>, enabled: bool) -> String {
+        self.sequence += 1;
+        // Native identity is scoped to this rendering, while product command
+        // identity remains stable. Queued events from a replaced menu cannot
+        // trigger a command belonging to its replacement.
+        let native_id = format!("foundation.menu.{}.{}", self.serial, self.sequence);
+        self.routes.insert(native_id.clone(), MenuRoute {
+            command: command.filter(|_| enabled).cloned(),
+            check: None,
+        });
+        native_id
+    }
+}
+
 fn build_items(
     handle: &AppHandle,
     nodes: &[MenuNode],
-    inert: &mut usize,
+    build: &mut MenuBuild,
 ) -> tauri::Result<Vec<Box<dyn IsMenuItem<tauri::Wry>>>> {
     let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::with_capacity(nodes.len());
     for node in nodes {
@@ -454,82 +614,69 @@ fn build_items(
                 items.push(Box::new(PredefinedMenuItem::separator(handle)?));
             }
             MenuNode::Item { id, title, enabled, icon } => {
-                let item_id = match id {
-                    Some(id) => id.clone(),
-                    None => {
-                        *inert += 1;
-                        format!("foundation.inert.{}", *inert)
-                    }
-                };
+                let enabled = *enabled && id.is_some();
+                let item_id = build.route(id.as_ref(), enabled);
+                let title = bounded_text(title, MAX_MENU_TITLE_CHARS);
                 match icon {
                     Some(icon) => {
                         let image = tauri::image::Image::new_owned(
-                            icon.rgba.clone(),
-                            icon.width,
-                            icon.height,
+                            icon.rgba.clone(), icon.width, icon.height,
                         );
                         items.push(Box::new(tauri::menu::IconMenuItem::with_id(
-                            handle,
-                            item_id,
-                            title,
-                            *enabled,
-                            Some(image),
-                            None::<&str>,
+                            handle, item_id, title, enabled, Some(image), None::<&str>,
                         )?));
                     }
                     None => items.push(Box::new(TauriMenuItem::with_id(
-                        handle,
-                        item_id,
-                        title,
-                        *enabled,
-                        None::<&str>,
+                        handle, item_id, title, enabled, None::<&str>,
                     )?)),
                 }
             }
             MenuNode::Interactive { item } => {
-                let item_id = match &item.id {
-                    Some(id) => id.clone(),
-                    None => {
-                        *inert += 1;
-                        format!("foundation.inert.{}", *inert)
-                    }
-                };
+                let enabled = item.enabled && item.id.is_some();
+                let item_id = build.route(item.id.as_ref(), enabled);
                 let title = render_item_title(item);
-                let shortcut = item
-                    .shortcut
-                    .as_deref()
-                    .map(|value| bounded_text(value, MAX_MENU_SHORTCUT_CHARS));
-                let accelerator = shortcut.as_deref();
+                // Never truncate into a different shortcut. Tauri ignores an
+                // invalid accelerator; drop oversized values before parsing.
+                let accelerator = item.shortcut.as_deref()
+                    .filter(|value| value.len() <= MAX_MENU_SHORTCUT_CHARS);
                 match &item.kind {
                     MenuItemKind::Toggle { checked }
                     | MenuItemKind::Check { checked }
                     | MenuItemKind::Radio { selected: checked, .. } => {
-                        items.push(Box::new(CheckMenuItem::with_id(
-                            handle, item_id, title, item.enabled, *checked, accelerator,
-                        )?));
-                    }
-                    MenuItemKind::Action => {
-                        match &item.icon {
-                            Some(icon) => {
-                                let image = tauri::image::Image::new_owned(
-                                    icon.rgba.clone(), icon.width, icon.height,
-                                );
-                                items.push(Box::new(tauri::menu::IconMenuItem::with_id(
-                                    handle, item_id, title, item.enabled, Some(image), accelerator,
-                                )?));
-                            }
-                            None => items.push(Box::new(TauriMenuItem::with_id(
-                                handle, item_id, title, item.enabled, accelerator,
-                            )?)),
+                        let check = CheckMenuItem::with_id(
+                            handle, item_id.clone(), title, enabled, *checked, accelerator,
+                        )?;
+                        let route = build.routes.get_mut(&item_id).expect("registered menu route");
+                        route.check = Some((check.clone(), *checked));
+                        if matches!(item.kind, MenuItemKind::Radio { selected: true, .. }) {
+                            // Choosing the selected radio is a no-op, never a
+                            // request to deselect the group's current value.
+                            route.command = None;
                         }
+                        items.push(Box::new(check));
                     }
+                    MenuItemKind::Action => match &item.icon {
+                        Some(icon) => {
+                            let image = tauri::image::Image::new_owned(
+                                icon.rgba.clone(), icon.width, icon.height,
+                            );
+                            items.push(Box::new(tauri::menu::IconMenuItem::with_id(
+                                handle, item_id, title, enabled, Some(image), accelerator,
+                            )?));
+                        }
+                        None => items.push(Box::new(TauriMenuItem::with_id(
+                            handle, item_id, title, enabled, accelerator,
+                        )?)),
+                    },
                 }
             }
             MenuNode::Submenu { title, items: children } => {
-                let built = build_items(handle, children, inert)?;
+                let built = build_items(handle, children, build)?;
                 let refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
                     built.iter().map(|item| item.as_ref() as &dyn IsMenuItem<tauri::Wry>).collect();
-                items.push(Box::new(Submenu::with_items(handle, title, true, &refs)?));
+                items.push(Box::new(Submenu::with_items(
+                    handle, bounded_text(title, MAX_MENU_TITLE_CHARS), true, &refs,
+                )?));
             }
         }
     }
@@ -537,45 +684,67 @@ fn build_items(
 }
 
 fn render_item_title(item: &MenuItem) -> String {
-    let mut title = bounded_text(&item.title, MAX_MENU_TITLE_CHARS);
+    // Reserve suffix space so long titles cannot silently hide state.
+    let mut suffix = String::new();
     if let Some(badge) = &item.badge {
-        title.push_str("  [");
-        title.push_str(&bounded_text(badge, MAX_MENU_BADGE_CHARS));
-        title.push(']');
+        suffix.push_str("  [");
+        suffix.push_str(&bounded_text(badge, MAX_MENU_BADGE_CHARS));
+        suffix.push(']');
     }
     if let Some(progress) = item.progress {
-        title.push_str(&format!("  {}%", progress.percent));
+        suffix.push_str(&format!("  {}%", progress.percent.min(100)));
     }
-    bounded_text(&title, MAX_MENU_TITLE_CHARS)
+    let mut title = bounded_text(&item.title, MAX_MENU_TITLE_CHARS - suffix.chars().count());
+    title.push_str(&suffix);
+    title
 }
 
 fn bounded_text(value: &str, max_chars: usize) -> String {
-    value.chars().take(max_chars).collect()
+    // Labels are one line. Remove control characters that could alter native
+    // menu layout or present misleading shortcut text.
+    value.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).take(max_chars).collect()
 }
 
-fn build_menu(handle: &AppHandle, nodes: &[MenuNode]) -> tauri::Result<Menu<tauri::Wry>> {
-    let mut inert = 0usize;
-    let items = build_items(handle, nodes, &mut inert)?;
+fn build_menu(handle: &AppHandle, nodes: &[MenuNode], serial: u64)
+    -> tauri::Result<(Menu<tauri::Wry>, HashMap<String, MenuRoute>)>
+{
+    let mut build = MenuBuild::new(serial);
+    let items = build_items(handle, nodes, &mut build)?;
     let refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
         items.iter().map(|item| item.as_ref() as &dyn IsMenuItem<tauri::Wry>).collect();
-    Menu::with_items(handle, &refs)
+    Ok((Menu::with_items(handle, &refs)?, build.routes))
 }
 
-fn apply_model(handle: &AppHandle, model: &MenuModel) {
-    let Some(tray) = handle.tray_by_id(TRAY_ID) else { return };
-    if let Ok(menu) = build_menu(handle, &model.nodes) {
-        let _ = tray.set_menu(Some(menu));
+fn apply_model(
+    handle: &AppHandle, model: &MenuModel, rendered: &Mutex<RenderedMenu>,
+) -> Result<(), RenderError> {
+    let serial = {
+        let mut rendered = rendered.lock().expect("rendered menu lock poisoned");
+        if rendered.model.as_ref() == Some(model) { return Ok(()); }
+        rendered.serial = rendered.serial.wrapping_add(1);
+        rendered.serial
+    };
+    // Models are validated on the worker before they reach the UI thread.
+    let tray = handle.tray_by_id(TRAY_ID).ok_or(RenderError::Native)?;
+    let (menu, routes) = build_menu(handle, &model.nodes, serial).map_err(|_| RenderError::Native)?;
+    tray.set_menu(Some(menu)).map_err(|_| RenderError::Native)?;
+    {
+        let mut rendered = rendered.lock().expect("rendered menu lock poisoned");
+        rendered.routes = routes;
+        // If a later property update fails, retry the complete model next
+        // time instead of treating partially applied native state as final.
+        rendered.model = None;
     }
-    if let Some(title) = &model.title {
-        let _ = tray.set_title(Some(title.clone()));
-    }
-    if let Some(tooltip) = &model.tooltip {
-        let _ = tray.set_tooltip(Some(tooltip.clone()));
-    }
-    if let Some(icon) = &model.icon {
-        let image = tauri::image::Image::new_owned(icon.rgba.clone(), icon.width, icon.height);
-        let _ = tray.set_icon(Some(image));
-    }
+    tray.set_title(model.title.as_deref().map(|title| bounded_text(title, MAX_MENU_TITLE_CHARS)))
+        .map_err(|_| RenderError::Native)?;
+    tray.set_tooltip(model.tooltip.as_deref().map(|tip| bounded_text(tip, MAX_MENU_TITLE_CHARS)))
+        .map_err(|_| RenderError::Native)?;
+    let image = model.icon.as_ref().map(|icon|
+        tauri::image::Image::new_owned(icon.rgba.clone(), icon.width, icon.height)
+    );
+    tray.set_icon(image).map_err(|_| RenderError::Native)?;
+    rendered.lock().expect("rendered menu lock poisoned").model = Some(model.clone());
+    Ok(())
 }
 
 fn show_companion_window(app: &AppHandle) {
@@ -605,6 +774,8 @@ pub fn run(
     let refresh_handle = controller.handle();
     let event_controller = controller.clone();
     let exit_controller = controller.clone();
+    let rendered = Arc::new(Mutex::new(RenderedMenu::default()));
+    let event_rendered = rendered.clone();
     let app = configure(tauri::Builder::default())
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -613,10 +784,11 @@ pub fn run(
             // Keep setup on the UI thread cheap. The coordinator takes the
             // first snapshot asynchronously and replaces this inert menu.
             let model = MenuModel {
-                nodes: vec![MenuNode::disabled("Loading status…")],
+                title: Some("…".into()),
+                nodes: vec![MenuNode::disabled("Loading status…"), MenuNode::quit("Quit")],
                 ..MenuModel::default()
             };
-            let menu = build_menu(app.handle(), &model.nodes)?;
+            let (menu, routes) = build_menu(app.handle(), &model.nodes, 1)?;
             let mut tray = TrayIconBuilder::with_id(TRAY_ID).menu(&menu);
             if let Some(title) = &model.title {
                 tray = tray.title(title.clone());
@@ -632,12 +804,29 @@ pub fn run(
                 ));
             }
             tray.build(app)?;
+            *rendered.lock().expect("rendered menu lock poisoned") = RenderedMenu {
+                serial: 1, model: Some(model), routes,
+            };
             host.started_with_refresh(app.handle(), refresh_handle.clone());
-            controller.start(app.handle().clone());
+            controller.start(app.handle().clone(), rendered.clone());
             Ok(())
         })
         .on_menu_event(move |app, event| {
-            let id = event.id.0.as_str();
+            // Only events issued by the currently rendered tray may dispatch.
+            // App/window menus and delayed events from replaced trays are ignored.
+            let route = event_rendered.lock().expect("rendered menu lock poisoned")
+                .routes.get(event.id.0.as_str()).cloned();
+            let Some(route) = route else { return; };
+            if let Some((check, checked)) = route.check {
+                // Native check items auto-toggle even when the command fails.
+                // The next daemon snapshot, not this click, owns the mark.
+                if check.set_checked(checked).is_err() {
+                    event_controller.state.report_render_error(RenderError::Native);
+                    event_controller.handle().request();
+                    return;
+                }
+            }
+            let Some(id) = route.command else { return; };
             if id == QUIT_ACTION_ID {
                 app.exit(0);
                 return;
@@ -646,13 +835,10 @@ pub fn run(
                 show_companion_window(app);
                 return;
             }
-            if id.starts_with("foundation.inert.") {
-                return;
-            }
-            let outcome = dispatch_host.dispatch_result(id);
-            if !matches!(outcome, DispatchOutcome::Rejected) {
-                event_controller.handle().request();
-            }
+            let _outcome = dispatch_host.dispatch_result(&id);
+            // Rejected actions also reconcile state/capabilities. Never retry
+            // the mutation here, including an indeterminate delivery outcome.
+            event_controller.handle().request();
         })
         .on_window_event(move |window, event| {
             if companion
@@ -683,15 +869,14 @@ mod tests {
     #[test]
     fn refresh_requests_advance_generation_and_coalesce() {
         let state = RefreshState::new();
-        assert_eq!(state.generation.load(Ordering::Acquire), 0);
         state.request();
         state.request();
-        assert_eq!(state.generation.load(Ordering::Acquire), 2);
-        assert!(state.requested.load(Ordering::Acquire));
-        state.requested.store(false, Ordering::Release);
-        state.mark_requested();
-        assert_eq!(state.generation.load(Ordering::Acquire), 2);
-        assert!(state.requested.load(Ordering::Acquire));
+        assert_eq!(state.next(Duration::ZERO), Some((2, None)));
+        assert!(!state.pending.lock().unwrap().requested);
+        state.request();
+        assert!(!state.is_current(2));
+        assert_eq!(state.next(Duration::ZERO), Some((3, None)));
+        assert!(!state.pending.lock().unwrap().requested);
     }
 
     #[test]
@@ -700,9 +885,113 @@ mod tests {
         let handle = RefreshHandle { state: state.clone() };
         handle.stop();
         handle.request();
-        assert!(state.stopping.load(Ordering::Acquire));
-        assert_eq!(state.generation.load(Ordering::Acquire), 0);
-        assert!(!state.requested.load(Ordering::Acquire));
+        assert!(state.pending.lock().unwrap().stopping);
+        assert_eq!(state.next(Duration::ZERO), None);
+        assert_eq!(state.pending.lock().unwrap().generation, 0);
+    }
+
+    #[test]
+    fn shutdown_wakes_an_idle_refresh_worker() {
+        let state = Arc::new(RefreshState::new());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || {
+            tx.send(worker_state.next(Duration::from_secs(60))).unwrap();
+        });
+        state.stop();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), None);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn snapshot_context_cancels_on_invalidation_or_shutdown() {
+        let state = Arc::new(RefreshState::new());
+        state.request();
+        let (generation, _) = state.next(Duration::ZERO).unwrap();
+        let context = SnapshotContext { state: state.clone(), generation };
+        assert!(!context.is_cancelled());
+        state.request();
+        assert!(context.is_cancelled());
+        let (generation, _) = state.next(Duration::ZERO).unwrap();
+        let context = SnapshotContext { state: state.clone(), generation };
+        state.stop();
+        assert!(context.is_cancelled());
+    }
+
+    #[test]
+    fn render_errors_do_not_request_an_immediate_retry_loop() {
+        let state = RefreshState::new();
+        state.report_render_error(RenderError::Native);
+        assert!(!state.pending.lock().unwrap().requested);
+        assert_eq!(state.next(Duration::ZERO), Some((1, Some(RenderError::Native))));
+        assert_eq!(state.next(Duration::ZERO), Some((2, None)));
+    }
+
+    #[test]
+    fn native_routes_isolate_old_disabled_and_duplicate_command_rows() {
+        let command = "foundation.inert.1".to_owned();
+        let mut first = MenuBuild::new(1);
+        let old_id = first.route(Some(&command), true);
+        let mut next = MenuBuild::new(2);
+        let active = next.route(Some(&command), true);
+        let duplicate = next.route(Some(&command), true);
+        let disabled = next.route(Some(&command), false);
+        let inert = next.route(None, true);
+        assert!(!next.routes.contains_key(&old_id));
+        assert_ne!(active, duplicate);
+        assert_eq!(next.routes[&active].command.as_ref(), Some(&command));
+        assert_eq!(next.routes[&duplicate].command.as_ref(), Some(&command));
+        assert_eq!(next.routes[&disabled].command, None);
+        assert_eq!(next.routes[&inert].command, None);
+        assert!(!next.routes.contains_key(&command));
+    }
+
+    #[test]
+    fn menu_validation_allows_repeated_commands_but_bounds_native_work() {
+        let mut model = MenuModel {
+            nodes: vec![MenuNode::show_window("Approvals"), MenuNode::show_window("Open")],
+            ..MenuModel::default()
+        };
+        assert_eq!(model.validate(), Ok(()));
+        model.nodes = vec![MenuNode::Separator; MAX_MENU_NODES + 1];
+        assert_eq!(model.validate(), Err(ModelError::TooManyNodes));
+        model.nodes = vec![MenuNode::item("", "Empty ID")];
+        assert_eq!(model.validate(), Err(ModelError::InvalidActionId));
+        model.nodes = vec![MenuNode::item("id\ncommand", "Control characters")];
+        assert_eq!(model.validate(), Err(ModelError::InvalidActionId));
+        model.nodes.clear();
+        for _ in 0..=MAX_MENU_DEPTH {
+            model.nodes = vec![MenuNode::Submenu { title: "Nested".into(), items: model.nodes }];
+        }
+        assert_eq!(model.validate(), Err(ModelError::TooDeep));
+    }
+
+    #[test]
+    fn invalid_icon_and_contradictory_radio_selection_are_rejected() {
+        let mut model = MenuModel {
+            icon: Some(RgbaIcon { width: u32::MAX, height: u32::MAX, rgba: vec![] }),
+            ..MenuModel::default()
+        };
+        assert_eq!(model.validate(), Err(ModelError::InvalidIcon));
+        model.icon = None;
+        model.nodes = vec![
+            MenuNode::interactive(MenuItem::radio("one", "One", "mode", true)),
+            MenuNode::Submenu { title: "More".into(), items: vec![
+                MenuNode::interactive(MenuItem::radio("two", "Two", "mode", true)),
+            ] },
+        ];
+        assert_eq!(model.validate(), Err(ModelError::AmbiguousRadioGroup));
+    }
+
+    #[test]
+    fn long_titles_preserve_badge_progress_and_remove_control_characters() {
+        let mut item = MenuItem::action("queue", "x".repeat(400)).with_badge("12");
+        // Public model fields can bypass the constructor's clamping.
+        item.progress = Some(ProgressValue { percent: 255 });
+        let title = render_item_title(&item);
+        assert_eq!(title.chars().count(), MAX_MENU_TITLE_CHARS);
+        assert!(title.ends_with("  [12]  100%"));
+        assert_eq!(bounded_text("first\nsecond\tthird\0", 30), "first second third ");
     }
 
     #[test]

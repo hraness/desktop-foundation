@@ -8,18 +8,22 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::fs;
+use std::fs::{self, File, Metadata, OpenOptions};
+use std::io::{Cursor, Read};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use crate::{MenuNode, RgbaIcon};
+use crate::{MenuItem, MenuNode, RgbaIcon};
 
 const DEFAULT_LIMIT: usize = 20;
 const MAX_LABEL: usize = 80;
 const MAX_DECODE_BYTES: u64 = 24 * 1024 * 1024;
 const THUMB_SIZE: u32 = 32;
+const MAX_SCAN: usize = 10_000;
+const MAX_PIXELS_PER_AXIS: u32 = 8_192;
+const MAX_IMAGE_ALLOCATION: u64 = 64 * 1024 * 1024;
 
 pub const OPEN_PREFIX: &str = "outputs.open.";
 pub const REVEAL_PREFIX: &str = "outputs.reveal.";
@@ -39,12 +43,36 @@ pub struct OutputEntry {
 pub struct OutputsSection {
     dir: PathBuf,
     limit: usize,
-    thumbs: Mutex<HashMap<String, (Option<SystemTime>, RgbaIcon)>>,
+    thumbs: Mutex<HashMap<String, (Fingerprint, RgbaIcon)>>,
+    offered: Mutex<HashMap<String, (PathBuf, Fingerprint)>>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct Fingerprint {
+    size: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    identity: (u64, u64, i64, i64),
+}
+
+impl Fingerprint {
+    fn of(meta: &Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            size: meta.len(), modified: meta.modified().ok(),
+            #[cfg(unix)]
+            identity: (meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec()),
+        }
+    }
+}
+
+struct ListedFile { name: String, path: PathBuf, fingerprint: Fingerprint }
+struct Listing { files: Vec<ListedFile>, partial: bool, available: bool }
 
 impl OutputsSection {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        OutputsSection { dir: dir.into(), limit: DEFAULT_LIMIT, thumbs: Mutex::new(HashMap::new()) }
+        OutputsSection { dir: dir.into(), limit: DEFAULT_LIMIT, thumbs: Mutex::new(HashMap::new()), offered: Mutex::new(HashMap::new()) }
     }
 
     pub fn with_limit(mut self, limit: usize) -> Self {
@@ -59,46 +87,60 @@ impl OutputsSection {
     /// Bounded newest-first listing. Directories, hidden files, and symlinks
     /// are skipped.
     pub fn entries(&self) -> Vec<OutputEntry> {
-        let mut files: Vec<(String, PathBuf, u64, Option<SystemTime>)> = Vec::new();
-        if let Ok(read) = fs::read_dir(&self.dir) {
-            for entry in read.flatten().take(self.limit * 4) {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') {
-                    continue;
-                }
-                let Ok(meta) = entry.metadata() else { continue };
-                if !meta.is_file() {
-                    continue;
-                }
-                files.push((name, entry.path(), meta.len(), meta.modified().ok()));
-            }
+        self.scan().files.into_iter().map(|file| self.entry(file)).collect()
+    }
+
+    fn entry(&self, file: ListedFile) -> OutputEntry {
+        let icon = self.thumbnail(&file.path, &file.fingerprint);
+        OutputEntry { name: file.name, size: file.fingerprint.size, modified: file.fingerprint.modified, icon }
+    }
+
+    fn scan(&self) -> Listing {
+        let mut listing = Listing { files: Vec::new(), partial: false, available: false };
+        // Do not follow a redirected output root or offer links as files.
+        if !fs::symlink_metadata(&self.dir).is_ok_and(|m| m.is_dir()) { return listing; }
+        let Ok(read) = fs::read_dir(&self.dir) else { return listing };
+        listing.available = true;
+        for (index, entry) in read.take(MAX_SCAN + 1).enumerate() {
+            if index == MAX_SCAN { listing.partial = true; break; }
+            let Ok(entry) = entry else { listing.partial = true; continue };
+            let Ok(name) = entry.file_name().into_string() else { continue };
+            if name.starts_with('.') { continue; }
+            let Ok(meta) = fs::symlink_metadata(entry.path()) else { continue };
+            if !meta.is_file() { continue; }
+            listing.files.push(ListedFile { name, path: entry.path(), fingerprint: Fingerprint::of(&meta) });
         }
-        files.sort_by(|a, b| b.3.cmp(&a.3));
-        files.truncate(self.limit);
-        files
-            .into_iter()
-            .map(|(name, path, size, modified)| {
-                OutputEntry { name, size, modified, icon: self.thumbnail(&path, modified) }
-            })
-            .collect()
+        listing.files.sort_by(|a, b| b.fingerprint.modified.cmp(&a.fingerprint.modified).then_with(|| a.name.cmp(&b.name)));
+        listing.files.truncate(self.limit);
+        listing
     }
 
     /// Menu nodes for the section: one item per entry plus a folder item.
-    /// Empty directories yield a single inert label.
+    /// Empty directories retain the folder action so users can find the destination.
     pub fn nodes(&self) -> Vec<MenuNode> {
-        let entries = self.entries();
-        if entries.is_empty() {
-            return vec![MenuNode::disabled("No outputs yet")];
+        let listing = self.scan();
+        let mut offered = HashMap::new();
+        let mut nodes = Vec::new();
+        let mut reveal = Vec::new();
+        if !listing.available {
+            if let Ok(mut old) = self.offered.lock() { old.clear(); }
+            return vec![MenuNode::disabled("Outputs folder unavailable")];
         }
-        let mut nodes = Vec::with_capacity(entries.len() + 1);
-        for entry in entries {
+        if listing.files.is_empty() { nodes.push(MenuNode::disabled("No outputs yet")); }
+        if listing.partial { nodes.push(MenuNode::disabled("Showing outputs from a partial folder scan")); }
+        for file in listing.files {
+            let key = file_key(&file.name, &file.fingerprint);
+            offered.insert(key.clone(), (file.path.clone(), file.fingerprint.clone()));
+            let entry = self.entry(file);
             let label = label_of(&entry.name);
-            let id = format!("{}{}", OPEN_PREFIX, file_key(&entry.name));
-            nodes.push(match entry.icon {
-                Some(icon) => MenuNode::item_with_icon(id, label, icon),
-                None => MenuNode::item(id, label),
-            });
+            let mut item = MenuItem::action(format!("{OPEN_PREFIX}{key}"), label.clone())
+                .with_badge(file_detail(&entry.name, entry.size));
+            if let Some(icon) = entry.icon { item = item.with_icon(icon); }
+            nodes.push(MenuNode::interactive(item));
+            reveal.push(MenuNode::item(format!("{REVEAL_PREFIX}{key}"), label));
         }
+        if let Ok(mut old) = self.offered.lock() { *old = offered; }
+        if !reveal.is_empty() { nodes.push(MenuNode::Submenu { title: "Reveal Output in Finder".into(), items: reveal }); }
         nodes.push(MenuNode::Separator);
         nodes.push(MenuNode::item(FOLDER_ID, "Reveal Outputs Folder"));
         nodes
@@ -107,7 +149,7 @@ impl OutputsSection {
     /// Handles this section's action ids. Returns true when the id was ours.
     pub fn dispatch(&self, id: &str) -> bool {
         if id == FOLDER_ID {
-            self.open_path(&self.dir, false);
+            if fs::symlink_metadata(&self.dir).is_ok_and(|m| m.is_dir()) { self.open_path(&self.dir, false); }
             return true;
         }
         let (prefix, reveal) = if let Some(key) = id.strip_prefix(REVEAL_PREFIX) {
@@ -124,20 +166,20 @@ impl OutputsSection {
     }
 
     fn find_by_key(&self, key: &str) -> Option<PathBuf> {
-        self.entries()
-            .into_iter()
-            .find(|entry| file_key(&entry.name) == key)
-            .map(|entry| self.dir.join(&entry.name))
+        let (path, expected) = self.offered.lock().ok()?.get(key)?.clone();
+        let observed = fs::symlink_metadata(&path).ok()?;
+        (observed.is_file() && Fingerprint::of(&observed) == expected).then_some(path)
     }
 
     fn open_path(&self, path: &Path, reveal: bool) {
         #[cfg(target_os = "macos")]
         {
-            let mut command = std::process::Command::new("open");
+            let mut command = std::process::Command::new("/usr/bin/open");
             if reveal {
                 command.arg("-R");
             }
-            let _ = command.arg(path).spawn();
+            command.arg(path).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+            if let Ok(mut child) = command.spawn() { std::thread::spawn(move || { let _ = child.wait(); }); }
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
@@ -150,25 +192,34 @@ impl OutputsSection {
         }
     }
 
-    fn thumbnail(&self, path: &Path, modified: Option<SystemTime>) -> Option<RgbaIcon> {
+    fn thumbnail(&self, path: &Path, expected: &Fingerprint) -> Option<RgbaIcon> {
         let ext = path.extension()?.to_string_lossy().to_lowercase();
         if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico") {
             return None;
         }
-        let meta = fs::metadata(path).ok()?;
-        if !meta.is_file() || meta.len() > MAX_DECODE_BYTES {
-            return None;
-        }
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        { use std::os::unix::fs::OpenOptionsExt; options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK); }
+        let file = options.open(path).ok()?;
+        let meta = file.metadata().ok()?;
+        if !meta.is_file() || Fingerprint::of(&meta) != *expected || meta.len() > MAX_DECODE_BYTES { return None; }
         let name = path.file_name()?.to_string_lossy().into_owned();
         if let Ok(cache) = self.thumbs.lock() {
-            if let Some((cached_mtime, icon)) = cache.get(&name) {
-                if *cached_mtime == modified {
+            if let Some((cached, icon)) = cache.get(&name) {
+                if cached == expected {
                     return Some(icon.clone());
                 }
             }
         }
-        let bytes = fs::read(path).ok()?;
-        let image = image::load_from_memory(&bytes).ok()?;
+        let bytes = read_image(file, expected)?;
+        let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(MAX_PIXELS_PER_AXIS);
+        limits.max_image_height = Some(MAX_PIXELS_PER_AXIS);
+        limits.max_alloc = Some(MAX_IMAGE_ALLOCATION);
+        reader.limits(limits);
+        let image = reader.decode().ok()?;
         let thumb = image.thumbnail(THUMB_SIZE, THUMB_SIZE).to_rgba8();
         let (width, height) = (thumb.width(), thumb.height());
         let icon = RgbaIcon { rgba: thumb.into_raw(), width, height };
@@ -176,24 +227,40 @@ impl OutputsSection {
             if cache.len() > self.limit * 2 {
                 cache.clear();
             }
-            cache.insert(name, (modified, icon.clone()));
+            cache.insert(name, (expected.clone(), icon.clone()));
         }
         Some(icon)
     }
 }
 
-fn label_of(name: &str) -> String {
-    let stem = Path::new(name).file_stem().unwrap_or_default().to_string_lossy();
-    let mut label: String = stem.chars().take(MAX_LABEL).collect();
-    if label.len() < stem.len() {
-        label.push('…');
-    }
-    if label.is_empty() { name.to_string() } else { label }
+fn read_image(mut file: File, expected: &Fingerprint) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    (&mut file).take(MAX_DECODE_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > MAX_DECODE_BYTES || Fingerprint::of(&file.metadata().ok()?) != *expected { return None; }
+    Some(bytes)
 }
 
-fn file_key(name: &str) -> String {
+fn file_detail(name: &str, size: u64) -> String {
+    let ext = Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("file");
+    let kind: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(10).collect::<String>().to_uppercase();
+    let size = if size < 1024 { format!("{size} B") } else if size < 1024 * 1024 { format!("{} KB", size / 1024) } else { format!("{} MB", size / (1024 * 1024)) };
+    format!("{kind} · {size}")
+}
+
+fn label_of(name: &str) -> String {
+    let stem = Path::new(name).file_stem().unwrap_or_default().to_string_lossy();
+    let safe: String = stem.chars().filter(|c| !c.is_control() && !matches!(*c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')).collect();
+    let mut label: String = safe.chars().take(MAX_LABEL).collect();
+    if label.len() < safe.len() {
+        label.push('…');
+    }
+    if label.is_empty() { "Untitled output".into() } else { label }
+}
+
+fn file_key(name: &str, fingerprint: &Fingerprint) -> String {
     let mut hasher = DefaultHasher::new();
     name.hash(&mut hasher);
+    fingerprint.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 
@@ -245,17 +312,18 @@ mod tests {
         fs::write(dir.join("chart of options.png"), tiny_png()).unwrap();
         let section = OutputsSection::new(&dir);
         let nodes = section.nodes();
-        assert!(matches!(&nodes[0], MenuNode::Item { title, icon: Some(_), .. } if title == "chart of options"));
-        assert!(matches!(&nodes[1], MenuNode::Separator));
-        assert!(matches!(&nodes[2], MenuNode::Item { title, .. } if title == "Reveal Outputs Folder"));
+        assert!(matches!(&nodes[0], MenuNode::Interactive { item } if item.title == "chart of options" && item.icon.is_some() && item.badge.as_ref().is_some_and(|s| s.starts_with("PNG"))));
+        assert!(matches!(&nodes[1], MenuNode::Submenu { title, items } if title == "Reveal Output in Finder" && items.len() == 1));
+        assert!(matches!(&nodes[2], MenuNode::Separator));
+        assert!(matches!(&nodes[3], MenuNode::Item { title, .. } if title == "Reveal Outputs Folder"));
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn empty_dir_yields_inert_label() {
+    fn empty_dir_retains_folder_action() {
         let dir = fixture();
         let section = OutputsSection::new(&dir);
-        assert_eq!(section.nodes(), vec![MenuNode::disabled("No outputs yet")]);
+        assert_eq!(section.nodes(), vec![MenuNode::disabled("No outputs yet"), MenuNode::Separator, MenuNode::item(FOLDER_ID, "Reveal Outputs Folder")]);
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -263,9 +331,88 @@ mod tests {
     fn dispatch_owns_only_prefixed_ids() {
         let dir = fixture();
         let section = OutputsSection::new(&dir);
-        assert!(section.dispatch(FOLDER_ID));
         assert!(section.dispatch(&format!("{}abc", OPEN_PREFIX)));
         assert!(!section.dispatch("daemon.start"));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn newest_file_is_selected_beyond_the_old_four_times_limit() {
+        let dir = fixture();
+        for i in 0..120 { fs::write(dir.join(format!("older-{i}.txt")), b"old").unwrap(); }
+        let newest = dir.join("newest.txt");
+        fs::write(&newest, b"new").unwrap();
+        File::open(&newest).unwrap().set_modified(SystemTime::now() + std::time::Duration::from_secs(60)).unwrap();
+        let entries = OutputsSection::new(&dir).with_limit(1).entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "newest.txt");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn replaced_or_removed_output_cannot_be_dispatched_from_an_old_menu() {
+        let dir = fixture();
+        let path = dir.join("report.txt");
+        fs::write(&path, b"old").unwrap();
+        let section = OutputsSection::new(&dir);
+        let key = file_key("report.txt", &Fingerprint::of(&fs::metadata(&path).unwrap()));
+        assert!(section.find_by_key(&key).is_none());
+        section.nodes();
+        assert_eq!(section.find_by_key(&key), Some(path.clone()));
+        fs::write(&path, b"new content").unwrap();
+        assert!(section.find_by_key(&key).is_none());
+        // A newer worker snapshot may finish before the old menu is replaced.
+        // Its new fingerprint must never make an old action target new content.
+        section.nodes();
+        assert!(section.find_by_key(&key).is_none());
+        let replacement_key = file_key("report.txt", &Fingerprint::of(&fs::metadata(&path).unwrap()));
+        assert_ne!(key, replacement_key);
+        assert_eq!(section.find_by_key(&replacement_key), Some(path.clone()));
+        section.nodes();
+        assert_eq!(section.find_by_key(&replacement_key), Some(path.clone()));
+        fs::remove_file(path).unwrap();
+        assert!(section.find_by_key(&replacement_key).is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_not_listed_or_admitted_after_rendering() {
+        use std::os::unix::fs::symlink;
+        let dir = fixture();
+        fs::write(dir.join("private.txt"), b"private").unwrap();
+        symlink(dir.join("private.txt"), dir.join("linked.txt")).unwrap();
+        let section = OutputsSection::new(&dir);
+        assert_eq!(section.entries().len(), 1);
+        section.nodes();
+        let key = file_key("private.txt", &Fingerprint::of(&fs::metadata(dir.join("private.txt")).unwrap()));
+        fs::remove_file(dir.join("private.txt")).unwrap();
+        symlink("linked.txt", dir.join("private.txt")).unwrap();
+        assert!(section.find_by_key(&key).is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn thumbnail_rejects_excessive_dimensions_and_refreshes_replacements() {
+        let dir = fixture();
+        let path = dir.join("preview.png");
+        fs::write(&path, tiny_png()).unwrap();
+        let section = OutputsSection::new(&dir);
+        assert!(section.entries()[0].icon.is_some());
+        let mut data = Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(MAX_PIXELS_PER_AXIS + 1, 1, image::Rgba([0, 0, 0, 255]))
+            .write_to(&mut data, image::ImageFormat::Png).unwrap();
+        fs::write(dir.join("replacement.png"), data.into_inner()).unwrap();
+        fs::rename(dir.join("replacement.png"), &path).unwrap();
+        assert!(section.entries()[0].icon.is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn labels_are_safe_and_file_types_disambiguate_equal_stems() {
+        assert_eq!(label_of("a\n\u{202e}b.png"), "ab");
+        assert!(file_detail("chart.png", 2048).starts_with("PNG · 2 KB"));
+        assert!(file_detail("chart.svg", 2048).starts_with("SVG · 2 KB"));
+        assert!(label_of(&"x".repeat(200)).chars().count() <= MAX_LABEL + 1);
     }
 }

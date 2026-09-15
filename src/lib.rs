@@ -812,9 +812,9 @@ fn show_companion_window(app: &AppHandle) {
 
 fn loading_model(default_icon: Option<&tauri::image::Image<'_>>) -> MenuModel {
     // Windows registers the tray before the worker supplies a product model.
-    // Register a valid HICON in NIM_ADD: an iconless placeholder can be rejected
-    // by Explorer, after which even the first tooltip NIM_MODIFY fails. The
-    // tray-icon backend deliberately does not propagate that NIM_ADD failure.
+    // Supply a valid HICON in the initial NIM_ADD rather than depending on a
+    // later icon update. This alone does not establish registration success:
+    // tray-icon defers NIM_ADD failures, so readiness still awaits full render.
     #[cfg(target_os = "windows")]
     let icon = Some(default_icon.map(|image| RgbaIcon {
         rgba: image.rgba().to_vec(), width: image.width(), height: image.height(),

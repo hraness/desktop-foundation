@@ -16,8 +16,11 @@ $explorerStarted = $false
 
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
 
 public static class CompanionDesktopFixture {
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
@@ -33,6 +36,15 @@ public static class CompanionDesktopFixture {
     private static extern IntPtr LoadIconW(IntPtr instance, IntPtr resourceId);
     [DllImport("shell32.dll", ExactSpelling = true, SetLastError = true)]
     private static extern int Shell_NotifyIconW(uint message, ref NotifyIconData data);
+    [DllImport("ole32.dll", ExactSpelling = true)]
+    private static extern int CoInitializeEx(IntPtr reserved, uint concurrency);
+    [DllImport("ole32.dll", ExactSpelling = true)]
+    private static extern void CoUninitialize();
+    private delegate bool EnumWindowCallback(IntPtr window, IntPtr parameter);
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumWindowCallback callback, IntPtr parameter);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int GetClassNameW(IntPtr window, StringBuilder className, int count);
 
     // Windows SDK shellapi.h uses pack(1) only for !_WIN64. Natural sequential
     // layout matches both x64 and ARM64; strings are fixed UTF-16 arrays.
@@ -59,10 +71,11 @@ public static class CompanionDesktopFixture {
         };
     }
 
-    private static void Emit(string stage, int variant, int result, int error) {
+    private static void Emit(string apartment, string stage, int variant, int result, int error) {
         // Shell_NotifyIcon documents BOOL only, not GetLastError semantics.
         // Retain the numeric error as diagnostic context, never a success test.
         Console.WriteLine("{\"fixture\":\"windows-notifyicon-probe\",\"stage\":\"" + stage +
+            "\",\"apartment\":\"" + apartment +
             "\",\"withIcon\":" + variant + ",\"result\":" + result + ",\"lastError\":" + error +
             ",\"lastErrorDiagnosticOnly\":true,\"size\":" + Marshal.SizeOf<NotifyIconData>() +
             ",\"windowOffset\":" + Marshal.OffsetOf<NotifyIconData>("Window").ToInt64() +
@@ -70,18 +83,19 @@ public static class CompanionDesktopFixture {
             ",\"tipOffset\":" + Marshal.OffsetOf<NotifyIconData>("Tip").ToInt64() + "}");
     }
 
-    public static void Probe() {
+    private static bool Probe(string apartment) {
         // An owned hidden top-level window; never show, activate, or interact.
         IntPtr window = CreateWindowExW(0x80, "STATIC", "Companion CI probe", 0,
             0, 0, 1, 1, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
         int error = Marshal.GetLastWin32Error();
-        Emit("create-window", -1, window == IntPtr.Zero ? 0 : 1, error);
-        if (window == IntPtr.Zero) return;
+        Emit(apartment, "create-window", -1, window == IntPtr.Zero ? 0 : 1, error);
+        if (window == IntPtr.Zero) return false;
+        bool validIconSucceeded = false;
         try {
             // IDI_APPLICATION is a shared borrowed system icon: do not destroy.
             IntPtr icon = LoadIconW(IntPtr.Zero, new IntPtr(32512));
             error = Marshal.GetLastWin32Error();
-            Emit("load-system-icon", -1, icon == IntPtr.Zero ? 0 : 1, error);
+            Emit(apartment, "load-system-icon", -1, icon == IntPtr.Zero ? 0 : 1, error);
             for (int variant = 0; variant < 2; variant++) {
                 if (variant == 1 && icon == IntPtr.Zero) continue;
                 NotifyIconData data = Data(window, (uint)(1000 + variant));
@@ -91,25 +105,65 @@ public static class CompanionDesktopFixture {
                     data.Icon = variant == 0 ? IntPtr.Zero : icon;
                     int result = Shell_NotifyIconW(0, ref data); // NIM_ADD
                     error = Marshal.GetLastWin32Error();
-                    Emit("add", variant, result, error);
+                    Emit(apartment, "add", variant, result, error);
+                    bool added = result != 0;
                     data.Flags = 4; // NIF_TIP: clear tooltip, matching the initial product model.
                     result = Shell_NotifyIconW(1, ref data); // NIM_MODIFY
                     error = Marshal.GetLastWin32Error();
-                    Emit("modify-tooltip", variant, result, error);
+                    Emit(apartment, "modify-tooltip", variant, result, error);
+                    if (variant == 1) validIconSucceeded = added && result != 0;
                 } finally {
                     // The HWND and IDs were created by this probe. Never touch
                     // any existing taskbar icon, even after an add failure.
                     data.Flags = 0;
                     int result = Shell_NotifyIconW(2, ref data); // NIM_DELETE
                     error = Marshal.GetLastWin32Error();
-                    Emit("delete", variant, result, error);
+                    Emit(apartment, "delete", variant, result, error);
                 }
             }
         } finally {
             int result = DestroyWindow(window);
             error = Marshal.GetLastWin32Error();
-            Emit("destroy-window", -1, result, error);
+            Emit(apartment, "destroy-window", -1, result, error);
         }
+        return validIconSucceeded;
+    }
+
+    public static bool ProbeAll() {
+        bool initial = Probe("inherited");
+        // Fresh owned threads isolate apartment setup. Every successful COM
+        // initialization, including S_FALSE, is balanced on its calling thread.
+        // These variants diagnose failures; they cannot override the first one.
+        foreach (uint concurrency in new uint[] { 2, 0 }) {
+            string apartment = concurrency == 2 ? "STA" : "MTA";
+            Thread thread = new Thread(() => {
+                int result = CoInitializeEx(IntPtr.Zero, concurrency);
+                Console.WriteLine("{\"fixture\":\"windows-notifyicon-probe\",\"stage\":\"com-initialize\",\"apartment\":\"" +
+                    apartment + "\",\"hresult\":" + result + "}");
+                try {
+                    if (result >= 0) Probe(apartment);
+                } finally {
+                    if (result >= 0) CoUninitialize();
+                }
+            });
+            thread.IsBackground = true;
+            thread.Start();
+            // The parent process also enforces a total 10-second deadline.
+            if (!thread.Join(2500)) throw new TimeoutException("windows-notifyicon-apartment-timeout");
+        }
+        return initial;
+    }
+
+    public static string[] TrayDescendantClasses() {
+        IntPtr tray = FindWindowW("Shell_TrayWnd", null);
+        List<string> classes = new List<string>();
+        int seen = 0;
+        if (tray != IntPtr.Zero) EnumChildWindows(tray, (window, parameter) => {
+            StringBuilder name = new StringBuilder(256);
+            if (GetClassNameW(window, name, name.Capacity) > 0) classes.Add(name.ToString());
+            return ++seen < 64;
+        }, IntPtr.Zero);
+        return classes.ToArray();
     }
 
     public static int TrayProcessId(int sessionId) {
@@ -133,7 +187,9 @@ if ($ProbeOnly) {
     if ([CompanionDesktopFixture]::TrayProcessId($fixtureSession) -eq 0) {
         throw 'windows-notifyicon-probe-requires-same-session-tray'
     }
-    [CompanionDesktopFixture]::Probe()
+    if (-not [CompanionDesktopFixture]::ProbeAll()) {
+        throw 'windows-notifyicon-preflight-failed: valid-icon add or tooltip modify failed'
+    }
     return
 }
 
@@ -181,8 +237,35 @@ if ($trayProcessId -eq 0 -or $fixtureWatch.ElapsedMilliseconds -ge 15000) {
 }
 Write-FixtureEvidence 'ready' $trayProcessId
 
+# Exact values and class names only: no window titles, user identity, registry
+# dumps, or changes to shell/security/privacy policy.
+$trayPolicies = foreach ($hive in @('HKCU', 'HKLM')) {
+    $value = $null
+    $present = $false
+    $readError = $false
+    try {
+        $value = Get-ItemPropertyValue -LiteralPath "${hive}:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Name NoTrayItemsDisplay -ErrorAction Stop
+        $present = $true
+    } catch [System.Management.Automation.ItemNotFoundException] {
+    } catch [System.Management.Automation.PSArgumentException] {
+    } catch {
+        $readError = $true
+    }
+    [ordered]@{ hive = $hive; name = 'NoTrayItemsDisplay'; present = $present; value = $(if ($value -is [int] -or $value -is [long]) { $value } else { $null }); readError = $readError }
+}
+$shellLibrary = Join-Path ([Environment]::GetFolderPath('System')) 'shell32.dll'
+[ordered]@{
+    fixture = 'windows-desktop'
+    stage = 'shell-diagnostics'
+    processArchitecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+    osArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+    shell32Version = [Diagnostics.FileVersionInfo]::GetVersionInfo($shellLibrary).FileVersion
+    trayDescendantClasses = @([CompanionDesktopFixture]::TrayDescendantClasses())
+    trayPolicies = @($trayPolicies)
+} | ConvertTo-Json -Depth 4 -Compress | Write-Output
+
 # A separate same-session process bounds even a stalled Shell_NotifyIcon call.
-# Probe results diagnose the real native gate; they never replace or skip it.
+# Require a working shell before expensive compilation; retain all native gates.
 $probeStart = [System.Diagnostics.ProcessStartInfo]::new([Environment]::ProcessPath)
 $probeStart.UseShellExecute = $false
 $probeStart.RedirectStandardOutput = $true
@@ -193,14 +276,16 @@ foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $PSCommandPath
 $probeProcess = [System.Diagnostics.Process]::Start($probeStart)
 if ($null -eq $probeProcess) { throw 'windows-notifyicon-probe-start-failed' }
 try {
+    $probeTimedOut = $false
     $probeOutput = $probeProcess.StandardOutput.ReadToEndAsync()
     $probeErrors = $probeProcess.StandardError.ReadToEndAsync()
     if (-not $probeProcess.WaitForExit(10000)) {
+        $probeTimedOut = $true
         # Only terminate this exact owned diagnostic process. Normal probe
         # cleanup uses finally; on timeout the OS destroys its owned window.
         $probeProcess.Kill()
         if (-not $probeProcess.WaitForExit(1000)) { throw 'windows-notifyicon-probe-cleanup-timeout' }
-        Write-Output '{"fixture":"windows-notifyicon-probe","stage":"timeout","diagnosticOnly":true}'
+        Write-Output '{"fixture":"windows-notifyicon-probe","stage":"timeout"}'
     }
     if ($probeOutput.Wait(1000)) { Write-Output $probeOutput.Result.TrimEnd() }
     if ($probeErrors.Wait(1000) -and -not [string]::IsNullOrWhiteSpace($probeErrors.Result)) {
@@ -216,8 +301,11 @@ try {
         fixture = 'windows-notifyicon-probe'
         stage = 'complete'
         exitCode = $probeProcess.ExitCode
-        diagnosticOnly = $true
+        preflight = $true
     } | ConvertTo-Json -Compress | Write-Output
+    if ($probeTimedOut -or $probeProcess.ExitCode -ne 0) {
+        throw 'windows-notifyicon-preflight-failed: hosted shell cannot complete the bounded tray probe'
+    }
 } finally {
     if (-not $probeProcess.HasExited) { $probeProcess.Kill() }
     $probeProcess.Dispose()

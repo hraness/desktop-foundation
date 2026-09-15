@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
@@ -15,21 +15,34 @@ const items: readonly MenuItem[] = [
 
 // A real child process exercises pipes, exit races and signal escalation.
 // Node's -- separator preserves the native runner arguments on every OS.
-function fakeRunner(mode: string): string {
+function fakeRunner(mode: string, tracePath: string): string {
   return `
     import { createInterface } from 'node:readline';
-    import { closeSync, writeSync } from 'node:fs';
+    import { appendFileSync, closeSync, writeSync } from 'node:fs';
     const mode = ${JSON.stringify(mode)};
     const closesOutput = mode === 'partial' || mode === 'eof';
+    const trace = stage => appendFileSync(${JSON.stringify(tracePath)}, JSON.stringify({stage,platform:process.platform,node:process.version})+'\\n');
     let seen = 0;
     const alive = setInterval(() => {}, 1000);
     const send = value => {
       const frame = JSON.stringify({version:1,...value})+'\\n';
-      // Node protects process.stdout from ordinary destruction. For EOF
-      // fixtures, never initialize that stream: write the small ready frame
-      // directly to fd 1, then close the real pipe on every platform.
+      // Synchronous writes ensure every test frame precedes the real EOF.
       if (closesOutput) writeSync(1, frame);
       else process.stdout.write(frame);
+    };
+    const closeOutput = () => {
+      // Node protects stdout._destroy; Windows libuv also duplicates fd 1's
+      // OS handle. This fixture-only private API closes that duplicate before
+      // closing the CRT descriptor. Either handle alone keeps the pipe open.
+      // https://github.com/libuv/libuv/blob/v1.x/src/win/pipe.c (uv_pipe_open)
+      const handle = process.stdout._handle;
+      trace('closing-stdout');
+      if (process.platform === 'win32') {
+        if (!handle || typeof handle.close !== 'function') throw new Error('Missing fixture stdout handle');
+        handle.close(() => trace('libuv-handle-closed'));
+      }
+      closeSync(1);
+      trace('fd-closed-child-alive');
     };
     if (mode === 'ignore-quit' || mode === 'eof' || mode === 'stalled-input') process.on('SIGTERM', () => {});
     const input = createInterface({input:process.stdin});
@@ -63,7 +76,7 @@ function fakeRunner(mode: string): string {
         }
         if (mode === 'oversize') process.stdout.write('x'.repeat(256*1024+1));
         if (mode === 'partial') writeSync(1, '{');
-        if (closesOutput) closeSync(1);
+        if (closesOutput) closeOutput();
         if (mode === 'stalled-input') input.pause();
       }
       if (mode === 'repeat-actions') send({type:'action',id:'enabled',revision:value.revision});
@@ -78,15 +91,25 @@ async function start(t: TestContext, mode = 'normal', overrides: Partial<Compani
   const dir = await mkdtemp(join(tmpdir(), 'companion-client-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const diagnostics: string[] = [];
+  const tracePath = join(dir, 'fixture-trace.jsonl');
   const session = await runCompanion({
     appId: 'test.client', name: 'Client test', title: 'Te', stateDir: dir,
-    binary: process.execPath, binaryArgs: ['--input-type=module', '-e', fakeRunner(mode), '--'],
+    binary: process.execPath, binaryArgs: ['--input-type=module', '-e', fakeRunner(mode, tracePath), '--'],
     timeoutMs: 150, refreshMs: 100,
     snapshot: () => items, onAction: () => {},
     onDiagnostic: code => diagnostics.push(code), ...overrides,
   });
   t.after(() => session.quit());
-  return { session, diagnostics };
+  return { session, diagnostics, tracePath };
+}
+
+async function awaitOutputClosure(t: TestContext, fixture: Awaited<ReturnType<typeof start>>): Promise<void> {
+  const timeout = delay(2000, undefined, { ref: false }).then(() => { throw new Error('Runner did not close after stdout EOF'); });
+  try { await Promise.race([fixture.session.closed, timeout]); }
+  finally {
+    const trace = await readFile(fixture.tracePath, 'utf8').catch(() => 'No fixture trace');
+    t.diagnostic(`${trace.trim()}\nSDK diagnostics: ${fixture.diagnostics.join(', ')}`);
+  }
 }
 
 async function eventually(predicate: () => boolean, timeout = 1500): Promise<void> {
@@ -177,17 +200,20 @@ test('duplicate ready events do not create duplicate refresh intervals', { timeo
 
 for (const mode of ['oversize', 'partial']) {
   test(`invalid ${mode} output closes the child with a bounded diagnostic`, { timeout: 4000 }, async t => {
-    const { session, diagnostics } = await start(t, mode);
+    const fixture = await start(t, mode);
+    const { session, diagnostics } = fixture;
     await session.ready;
-    await session.closed;
+    if (mode === 'partial') await awaitOutputClosure(t, fixture);
+    else await session.closed;
     assert.ok(diagnostics.includes(mode === 'oversize' ? 'oversize-runner-frame' : 'invalid-runner-frame'));
   });
 }
 
 test('stdout EOF closes a still-running child rather than waiting forever', { timeout: 4000 }, async t => {
-  const { session, diagnostics } = await start(t, 'eof');
+  const fixture = await start(t, 'eof');
+  const { session, diagnostics } = fixture;
   await session.ready;
-  await session.closed;
+  await awaitOutputClosure(t, fixture);
   assert.ok(diagnostics.includes('runner-output-closed'));
 });
 

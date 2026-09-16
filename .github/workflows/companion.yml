@@ -93,6 +93,14 @@ jobs:
           key: ${{ steps.native_cache.outputs.cache-primary-key }}
       - name: Headless protocol probe
         run: node scripts/native-smoke.mjs --headless
+      # The one-shot prompt needs no tray, so it qualifies on every leg —
+      # including hosts that prove their notification area incapable.
+      - name: Native prompt smoke (macOS and Windows)
+        if: runner.os != 'Linux'
+        run: node scripts/prompt-smoke.mjs
+      - name: Native prompt smoke (Linux)
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a node scripts/prompt-smoke.mjs
       - name: Native event loop smoke (macOS and Windows)
         if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
         run: node scripts/native-smoke.mjs

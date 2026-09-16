@@ -3,6 +3,7 @@ export * from './platform.js';
 export * from './install.js';
 export * from './autostart.js';
 export * from './client.js';
+export * from './prompt.js';
 export * from './service.js';
 export * from './errors.js';
 export * from './commands.js';

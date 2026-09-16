@@ -11,6 +11,7 @@
 //! product helpers retain their own OS permission boundaries.
 
 pub mod outputs;
+pub mod prompt;
 pub mod protocol;
 
 use std::collections::{HashMap, HashSet};

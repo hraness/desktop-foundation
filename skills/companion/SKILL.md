@@ -47,6 +47,11 @@ Quit; distinguish quitting the companion from stopping the product daemon.
 Do not depend on tray-title text, tooltips, hover or global shortcuts across all
 platforms. Keep protected provider capabilities on their supported platforms.
 
+For credential entry, the SDK's `promptSecret` shows one bounded native dialog
+or falls back to a masked TTY prompt; it returns the value to the product and
+stores nothing. Probe hosts with `promptCapability` and keep secrets out of
+argv, labels, logs and the request's own title/message.
+
 Preserve separate evidence for portable tests, native builds, interactive smoke,
 clean installation and login behavior. Report untested combinations clearly.
 No app bundles, desktop installers, publisher signing credentials or Apple

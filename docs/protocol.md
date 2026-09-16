@@ -69,8 +69,9 @@ snapshot replaces the entire menu; there is no patch or append operation.
 | `type` | String `"snapshot"`. |
 | `appId` | Required stable identifier matching `^[a-z][a-z0-9.-]{0,63}$`, without consecutive dots. |
 | `name` | Required nonempty text, at most 128 Unicode scalar values. Fixed for the process lifetime. |
-| `title` | Required one or two ASCII letters or digits. Rendered as native text on macOS and a generated monogram icon on Windows/Linux. May change between snapshots. |
+| `title` | Required one or two ASCII letters or digits, **or** a single emoji grapheme (one pictographic scalar plus an optional U+FE0F selector — no ZWJ chains, flag pairs, or other sequences). Rendered as native text on macOS, so an emoji title shows as a colored emoji in the menu bar. On Windows/Linux it feeds the generated monogram icon when `icon` is absent. May change between snapshots. |
 | `tooltip` | Optional nonempty text, at most 256 Unicode scalar values. Defaults to `name`; Linux does not display native tooltips. |
+| `icon` | Optional `{ "width": W, "height": H, "rgba": "<base64>" }` where W/H are `1..=64` and `rgba` decodes to exactly `W*H*4` bytes. Supplies tray art on icon-only surfaces (Windows/Linux); macOS ignores it and renders `title` as text. When absent, Windows/Linux fall back to a generated monogram of the ASCII `title` (an emoji title without `icon` renders as a plain badge). Requires a runner built from this release or later — older runners reject snapshots carrying unknown fields. |
 | `revision` | Required integer from `0` through `9007199254740991`. Each later snapshot must be strictly greater than the previous one. |
 | `items` | Required array of menu items; an empty array is valid. |
 
@@ -326,9 +327,10 @@ authoritative answer whenever the two disagree.
 ## Wire surface versus the Rust host API
 
 Protocol v1 exposes actions, checkmarks, shortcuts, inert labels, separators,
-submenus, and Quit. Its icon is generated from `title`. It has no frames for
-arbitrary images, output directories, file previews, badges, progress,
-accessibility metadata, radio groups, webviews, shell commands, or networking.
+submenus, and Quit. Its tray mark comes from `title` plus the optional `icon`
+RGBA field. It has no frames for output directories, file previews, badges,
+progress, accessibility metadata, radio groups, webviews, shell commands, or
+networking.
 
 The existing [Rust `Host`/`MenuModel` API](../src/lib.rs) has richer presentation
 types and an [outputs-directory helper](../src/outputs.rs). Those are library

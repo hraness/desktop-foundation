@@ -46,6 +46,10 @@ interfaces in the browser. Include status, a useful setup/recovery action and
 Quit; distinguish quitting the companion from stopping the product daemon.
 Do not depend on tray-title text, tooltips, hover or global shortcuts across all
 platforms. Keep protected provider capabilities on their supported platforms.
+A product mark is `title`: one or two ASCII letters or a single emoji grapheme,
+which macOS renders as native text. Icon-only Windows/Linux trays need a
+pre-rendered `icon` (bounded base64 RGBA) shipped with the adapter; without one
+an emoji title falls back to a blank badge there.
 
 For credential entry, the SDK's `promptSecret` shows one bounded native dialog
 or falls back to a masked TTY prompt; it returns the value to the product and

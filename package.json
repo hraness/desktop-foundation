@@ -1,6 +1,6 @@
 {
   "name": "@hraness/desktop-foundation",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "CLI-owned, unbundled desktop companions for macOS, Windows and Linux",
   "type": "module",
   "license": "MIT",

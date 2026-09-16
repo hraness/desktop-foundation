@@ -355,31 +355,22 @@ impl Snapshot {
                 })
                 .collect()
         }
-        MenuModel {
-            title: if cfg!(target_os = "macos") {
-                Some(self.title.clone())
-            } else {
-                None
-            },
-            icon: if cfg!(target_os = "macos") {
-                None
-            } else {
-                Some(
-                    self.icon
-                        .as_ref()
-                        .and_then(|icon| {
-                            decode_rgba(&icon.rgba).map(|rgba| RgbaIcon {
-                                rgba,
-                                width: icon.width,
-                                height: icon.height,
-                            })
-                        })
-                        .unwrap_or_else(|| monogram(&self.title)),
-                )
-            },
+        let mut model = MenuModel {
             tooltip: Some(self.tooltip.clone().unwrap_or_else(|| self.name.clone())),
             nodes: nodes(&self.items, self.revision),
-        }
+            ..MenuModel::default()
+        };
+        model.mark(
+            &self.title,
+            self.icon.as_ref().and_then(|icon| {
+                decode_rgba(&icon.rgba).map(|rgba| RgbaIcon {
+                    rgba,
+                    width: icon.width,
+                    height: icon.height,
+                })
+            }),
+        );
+        model
     }
 
     pub fn action(&self, route: &str) -> Option<Event> {

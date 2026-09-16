@@ -338,6 +338,20 @@ impl MenuModel {
         }
         walk(&self.nodes, 0, &mut 0, &mut HashSet::new())
     }
+
+    /// Apply the platform-appropriate status mark. macOS renders `title` as
+    /// native status-item text — a single emoji shows as a colored menu-bar
+    /// mark; icon-only surfaces (Windows, Linux) render `icon` when supplied,
+    /// otherwise a monogram generated from `title`.
+    pub fn mark(&mut self, title: &str, icon: Option<RgbaIcon>) {
+        if cfg!(target_os = "macos") {
+            self.title = Some(title.to_owned());
+            self.icon = None;
+        } else {
+            self.title = None;
+            self.icon = Some(icon.unwrap_or_else(|| protocol::monogram(title)));
+        }
+    }
 }
 
 /// The product's UI authority. `snapshot` may perform bounded local IO; it is

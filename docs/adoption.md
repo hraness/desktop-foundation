@@ -75,6 +75,12 @@ export async function menubar(args: readonly string[]) {
 }
 ```
 
+`title` may also be a single emoji (`title: '👻'`) — macOS renders it as a
+colored emoji in the menu bar. Windows and Linux trays are icon-only, so pair
+an emoji title with `icon`: a `{ width, height, rgba }` record of pre-rendered
+base64 pixels (at most 64×64) that ships inside the adapter's package; see
+`docs/protocol.md` for the exact grammar and bounds.
+
 Here `import.meta.url` must identify the **installed CLI entrypoint** that
 routes `menubar`, not an imported helper module. Pass that entrypoint explicitly
 if the adapter lives elsewhere. Preserve required product/profile arguments in

@@ -15,6 +15,7 @@ pub const MAX_FRAME_BYTES: usize = 256 * 1024;
 pub const MAX_ITEMS: usize = 256;
 pub const MAX_DEPTH: usize = 8;
 pub const MAX_REVISION: u64 = 9_007_199_254_740_991;
+pub const MAX_ICON_SIDE: u32 = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
@@ -26,12 +27,25 @@ pub enum Frame {
         name: String,
         title: String,
         tooltip: Option<String>,
+        icon: Option<WireIcon>,
         revision: u64,
         items: Vec<WireItem>,
     },
     Quit {
         version: u8,
     },
+}
+
+/// Adapter-supplied tray art for icon-only surfaces (Windows/Linux). Pixels
+/// travel as standard base64 so the JSON wire stays a single bounded line;
+/// `width*height*4` decoded bytes are required. macOS renders the status-item
+/// title natively and ignores this field.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WireIcon {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -143,6 +157,7 @@ pub struct Snapshot {
     pub name: String,
     pub title: String,
     pub tooltip: Option<String>,
+    pub icon: Option<WireIcon>,
     pub revision: u64,
     pub items: Vec<WireItem>,
 }
@@ -173,17 +188,92 @@ fn valid_action_id(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || b"._:-".contains(&ch))
 }
 
+/// A status-item title is either the classic one-or-two ASCII letter badge or
+/// a single emoji grapheme (one pictographic scalar plus an optional emoji
+/// presentation selector). Multi-scalar sequences such as ZWJ chains and flag
+/// pairs are rejected so every platform can bound the rendered mark.
+fn valid_title(title: &str) -> bool {
+    if !title.is_empty()
+        && title.len() <= 2
+        && title.bytes().all(|ch| ch.is_ascii_alphanumeric())
+    {
+        return true;
+    }
+    let mut chars = title.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !is_pictographic(first) {
+        return false;
+    }
+    match chars.next() {
+        None => true,
+        Some('\u{fe0f}') => chars.next().is_none(),
+        _ => false,
+    }
+}
+
+fn is_pictographic(ch: char) -> bool {
+    matches!(ch as u32,
+        0x2190..=0x21ff | 0x2300..=0x23ff | 0x2600..=0x27bf | 0x2b00..=0x2bff | 0x1f000..=0x1faff)
+}
+
+/// Strict base64: canonical alphabet, no whitespace, padding only at the tail.
+fn decode_rgba(encoded: &str) -> Option<Vec<u8>> {
+    if encoded.is_empty() || encoded.len() % 4 != 0 {
+        return None;
+    }
+    let mut values = Vec::with_capacity(encoded.len());
+    for byte in encoded.bytes() {
+        values.push(match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => 64,
+            _ => return None,
+        });
+    }
+    let padding = encoded.len() - encoded.trim_end_matches('=').len();
+    if padding > 2 || encoded[..encoded.len() - padding].contains('=') {
+        return None;
+    }
+    // `=` is now confined to the tail of the final quad, so positions 0 and 1
+    // of every quad are guaranteed data and only trailing bytes can be pads.
+    let mut out = Vec::with_capacity(encoded.len() / 4 * 3);
+    for quad in values.chunks_exact(4) {
+        out.push(quad[0] << 2 | quad[1] >> 4);
+        if quad[2] != 64 {
+            out.push((quad[1] & 0x0f) << 4 | quad[2] >> 2);
+            if quad[3] != 64 {
+                out.push((quad[2] & 0x03) << 6 | quad[3]);
+            }
+        }
+    }
+    Some(out)
+}
+
+fn valid_icon(icon: &WireIcon) -> bool {
+    (1..=MAX_ICON_SIDE).contains(&icon.width)
+        && (1..=MAX_ICON_SIDE).contains(&icon.height)
+        && decode_rgba(&icon.rgba)
+            .is_some_and(|bytes| bytes.len() == icon.width as usize * icon.height as usize * 4)
+}
+
 impl Snapshot {
     fn validate(&self) -> Result<(), ProtocolError> {
         if !valid_app_id(&self.app_id)
             || !safe_text(&self.name, 128)
-            || self.title.is_empty()
-            || self.title.len() > 2
-            || !self.title.bytes().all(|ch| ch.is_ascii_alphanumeric())
+            || !valid_title(&self.title)
             || self
                 .tooltip
                 .as_ref()
                 .is_some_and(|value| !safe_text(value, 256))
+            || self
+                .icon
+                .as_ref()
+                .is_some_and(|icon| !valid_icon(icon))
             || self.revision > MAX_REVISION
         {
             return Err(ProtocolError("invalid-snapshot"));
@@ -274,7 +364,18 @@ impl Snapshot {
             icon: if cfg!(target_os = "macos") {
                 None
             } else {
-                Some(monogram(&self.title))
+                Some(
+                    self.icon
+                        .as_ref()
+                        .and_then(|icon| {
+                            decode_rgba(&icon.rgba).map(|rgba| RgbaIcon {
+                                rgba,
+                                width: icon.width,
+                                height: icon.height,
+                            })
+                        })
+                        .unwrap_or_else(|| monogram(&self.title)),
+                )
             },
             tooltip: Some(self.tooltip.clone().unwrap_or_else(|| self.name.clone())),
             nodes: nodes(&self.items, self.revision),
@@ -327,6 +428,7 @@ impl Session {
                 name,
                 title,
                 tooltip,
+                icon,
                 revision,
                 items,
             } => {
@@ -338,6 +440,7 @@ impl Session {
                     name,
                     title,
                     tooltip,
+                    icon,
                     revision,
                     items,
                 };
@@ -485,6 +588,7 @@ mod tests {
             name: "Test".into(),
             title: "AI".into(),
             tooltip: None,
+            icon: None,
             revision,
             items: vec![
                 WireItem::Action {
@@ -615,6 +719,85 @@ mod tests {
             b"{\"version\":1,\"type\":\"quit\",\"command\":\"arbitrary\"}\n"
         ))
         .is_err());
+    }
+
+    #[test]
+    fn titles_accept_a_badge_or_one_emoji_grapheme() {
+        for title in ["Gg", "A", "7x", "👻", "🧽", "🟠", "🤖", "📷", "⚔\u{fe0f}", "📸"] {
+            assert!(valid_title(title), "{title}");
+        }
+        for title in [
+            "",
+            "abc",
+            "👻👻",
+            "👻\u{fe0f}x",
+            "👨‍👩‍👧",
+            "🇺🇸",
+            "*",
+            "📷\u{fe0f}\u{fe0f}",
+            "é",
+        ] {
+            assert!(!valid_title(title), "{title}");
+        }
+        for title in ["Gg", "👻", "⚔\u{fe0f}"] {
+            let mut next = frame(1);
+            if let Frame::Snapshot { title: t, .. } = &mut next {
+                *t = title.into();
+            }
+            assert!(Session::default().accept(next).is_ok(), "{title}");
+        }
+    }
+
+    #[test]
+    fn icons_decode_strict_base64_within_side_and_length_bounds() {
+        let rgba = |pixels: usize| {
+            let bytes = vec![7u8; pixels * 4];
+            let mut encoded = String::new();
+            const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            for quad in bytes.chunks(3) {
+                encoded.push(ALPHABET[(quad[0] >> 2) as usize] as char);
+                encoded.push(ALPHABET[((quad[0] << 4 | quad.get(1).copied().unwrap_or(0) >> 4) & 0x3f) as usize] as char);
+                encoded.push(match quad.get(1) {
+                    Some(&b) => ALPHABET[((b << 2 | quad.get(2).copied().unwrap_or(0) >> 6) & 0x3f) as usize] as char,
+                    None => '=',
+                });
+                encoded.push(match quad.get(2) {
+                    Some(&b) => ALPHABET[(b & 0x3f) as usize] as char,
+                    None => '=',
+                });
+            }
+            encoded
+        };
+        let valid = WireIcon { width: 2, height: 2, rgba: rgba(4) };
+        assert!(valid_icon(&valid));
+        let mut next = frame(1);
+        if let Frame::Snapshot { icon, .. } = &mut next {
+            *icon = Some(valid);
+        }
+        assert!(Session::default().accept(next).is_ok());
+        for icon in [
+            WireIcon { width: 0, height: 2, rgba: rgba(4) },
+            WireIcon { width: 2, height: 0, rgba: rgba(4) },
+            WireIcon { width: MAX_ICON_SIDE + 1, height: 1, rgba: rgba(65) },
+            WireIcon { width: 2, height: 2, rgba: rgba(3) },
+            WireIcon { width: 2, height: 2, rgba: rgba(5) },
+            WireIcon { width: 2, height: 2, rgba: "!!!!".into() },
+            WireIcon { width: 2, height: 2, rgba: "abc".into() },
+            WireIcon { width: 2, height: 2, rgba: "abcd=efg".into() },
+            WireIcon { width: 2, height: 2, rgba: String::new() },
+        ] {
+            assert!(!valid_icon(&icon), "{icon:?}");
+        }
+    }
+
+    #[test]
+    fn snapshots_reject_an_icon_with_unknown_fields() {
+        let frame = b"{\"version\":1,\"type\":\"snapshot\",\"appId\":\"app.test\",\"name\":\"Test\",\"title\":\"Tb\",\"icon\":{\"width\":2,\"height\":2,\"rgba\":\"BwcHBwcHBwcHBwcHBwcHBw==\",\"opacity\":0.5},\"revision\":0,\"items\":[]}\n";
+        assert!(read_frame(&mut Cursor::new(frame)).is_err());
+        let good = b"{\"version\":1,\"type\":\"snapshot\",\"appId\":\"app.test\",\"name\":\"Test\",\"title\":\"Tb\",\"icon\":{\"width\":2,\"height\":2,\"rgba\":\"BwcHBwcHBwcHBwcHBwcHBw==\"},\"revision\":0,\"items\":[]}\n";
+        assert!(Session::default()
+            .accept(read_frame(&mut Cursor::new(good)).unwrap().unwrap())
+            .is_ok());
     }
 
     #[test]

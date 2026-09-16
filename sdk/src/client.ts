@@ -61,7 +61,7 @@ export async function runCompanion(options: CompanionOptions): Promise<Companion
     if (snapshotBusy) throw new Error('snapshot-busy');
     snapshotBusy = true;
     const items = await callback(options.snapshot, () => { snapshotBusy = false; });
-    const value: Snapshot = { version: 1, type: 'snapshot', appId: options.appId, name: options.name, title: options.title, ...(options.tooltip ? { tooltip: options.tooltip } : {}), revision: revision + 1, items };
+    const value: Snapshot = { version: 1, type: 'snapshot', appId: options.appId, name: options.name, title: options.title, ...(options.tooltip ? { tooltip: options.tooltip } : {}), ...(options.icon ? { icon: options.icon } : {}), revision: revision + 1, items };
     validateSnapshot(value);
     // Retain the exact values sent, not mutable arrays owned by the callback.
     return JSON.parse(JSON.stringify(value)) as Snapshot;

@@ -746,15 +746,21 @@ mod platform {
         dialog.set_default_response(gtk::ResponseType::Ok);
         dialog.show_all();
         entry.grab_focus();
+        // Removing an already-dispatched one-shot source panics in glib-rs, so
+        // track whether the timeout fired before deciding to remove it.
+        let fired = std::rc::Rc::new(std::cell::Cell::new(false));
         let timeout = glib::timeout_add_seconds_local(
             spec.timeout_seconds.min(u32::MAX as u64) as u32,
-            glib::clone!(@weak dialog => @default-return glib::ControlFlow::Break, move || {
+            glib::clone!(@weak dialog, @strong fired => @default-return glib::ControlFlow::Break, move || {
+                fired.set(true);
                 dialog.response(gtk::ResponseType::Other(TIMEOUT_RESPONSE));
                 glib::ControlFlow::Break
             }),
         );
         let response = dialog.run();
-        timeout.remove();
+        if !fired.get() {
+            timeout.remove();
+        }
         let result = match response {
             gtk::ResponseType::Ok => {
                 let mut value = entry.text().to_string();

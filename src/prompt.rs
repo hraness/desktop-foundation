@@ -399,7 +399,7 @@ mod platform {
     use windows::Win32::System::StationsAndDesktops::{
         CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS,
     };
-    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, VK_RETURN};
     use windows::Win32::UI::WindowsAndMessaging::*;
 
     const IDC_MESSAGE: i32 = 100;

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+export { openBrowser } from './browser.js';
 import { packagedManifest, type CompanionOptions } from './client.js';
 import { ensureBinary, inspectBinary } from './install.js';
 import { diagnosePlatform } from './platform.js';
@@ -43,18 +43,4 @@ export async function handleCompanionCommand(options: CompanionOptions, invocati
   if (!options.binary) await ensureBinary({ manifest: options.manifest ?? await packagedManifest(), cacheDir: options.cacheDir });
   write(await startCompanion({ appId: options.appId, stateDir: options.stateDir, ...invocation.foreground }));
   return 0;
-}
-
-/** Open browser UI only; never accept arbitrary URI schemes or shell commands. */
-export async function openBrowser(address: string): Promise<void> {
-  const url = new URL(address);
-  if (url.username || url.password || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(url.hostname)))) throw new Error('unsupported-browser-url');
-  const program = process.platform === 'darwin' ? '/usr/bin/open' : process.platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
-  const argv = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url.href] : [url.href];
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(program, argv, { stdio: 'ignore', windowsHide: true, shell: false });
-    const timeout = setTimeout(() => { child.kill(); reject(new Error('browser-open-timeout')); }, 10_000);
-    child.once('error', () => { clearTimeout(timeout); reject(new Error('browser-open-failed')); });
-    child.once('exit', code => { clearTimeout(timeout); code === 0 ? resolve() : reject(new Error('browser-open-failed')); });
-  });
 }

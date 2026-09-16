@@ -147,6 +147,35 @@ remain owned by their existing product helpers; a tray does not grant them.
 
 ## Interactive items
 
+### Human browser handoffs
+
+Existing Rust adapters can keep their `Host` implementation and store a
+`browser::BrowserOpener`. Call `open` only from an explicit menu dispatch with
+a product-owned HTTPS URL. Construction and `status()` are network-silent;
+keep the menu action available when the product daemon is offline. An accepted
+request runs away from the UI thread, admits one launcher at a time, and kills
+and reaps the launcher after its ten-second deadline. There is no automatic
+retry. Show a generic failure label using `BrowserStatus::Failed` in the next
+snapshot; `Opened` proves only a successful launcher exit.
+
+```rust
+use desktop_foundation::browser::{BrowserOpener, BrowserStatus};
+
+let browser = BrowserOpener::new();
+// Inside a human menu-action callback:
+browser.open("https://example.com/support?source=desktop")?;
+// A later snapshot may display an unavailable message:
+let failed = matches!(browser.status(), BrowserStatus::Failed(_));
+```
+
+The SDK's existing `openBrowser` provides the same explicit handoff with a
+Promise and a ten-second launcher deadline; it also preserves loopback HTTP
+for existing local dashboards. Both APIs use direct arguments without a shell,
+reject credentials and malformed addresses, and keep addresses out of error
+messages. Fixed public product/source routing parameters are appropriate;
+email, credentials, session data, and daemon-supplied URLs are not. A browser
+handoff does not establish signup, payment, consent, or successful navigation.
+
 Use a stable product command ID. The renderer gives each displayed row a separate
 native ID, so several rows may open the same panel and old menu events cannot
 activate a replacement row.

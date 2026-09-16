@@ -118,6 +118,14 @@ Honor the signal, use idempotency where the product already requires it, and
 refresh from confirmed state after an action. Do not retry an uncertain
 mutation. Open larger UI in the product's browser interface.
 
+When an action or CLI flow needs a credential, use the SDK's
+`promptSecret(request)` — it renders a native dialog through the pinned
+runner where the host supports one and falls back to a masked TTY prompt
+otherwise. Pass an existing value as `prefill` for editing flows, and bound
+the wait with `timeoutSeconds`. The foundation returns the entry or a status;
+validation, storage and rotation stay with the product. Keep secrets out of
+`title`/`message` and never pass them as arguments to any command.
+
 ## 5. Retire only the replaced paths
 
 Once the new path passes the product's gates, remove its superseded Swift or

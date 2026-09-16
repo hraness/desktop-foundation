@@ -92,14 +92,16 @@ try {
       'release-manifest.json', 'dist/src/index.js', 'dist/src/index.d.ts', 'dist/src/cli.js',
       'README.md', 'LICENSE', 'docs/installation.md', 'docs/platforms.md', 'skills/companion/SKILL.md',
       'docs/architecture.md', 'docs/adoption.md', 'docs/protocol.md',
-      'src/lib.rs', 'src/protocol.rs', 'src/bin/hraness-companion.rs', 'src/outputs.rs',
-      'sdk/src/protocol.ts', 'sdk/src/client.ts', 'sdk/src/commands.ts',
+      'src/lib.rs', 'src/protocol.rs', 'src/bin/hraness-companion.rs', 'src/outputs.rs', 'src/prompt.rs',
+      'sdk/src/protocol.ts', 'sdk/src/client.ts', 'sdk/src/commands.ts', 'sdk/src/prompt.ts',
     ]) await access(join(root, file));
     const sdk = await import(${JSON.stringify(packageName)});
     assert.equal(import.meta.resolve(${JSON.stringify(packageName)}), pathToFileURL(join(root, 'dist/src/index.js')).href);
     for (const name of ['runCompanion', 'startCompanion', 'stopCompanion', 'companionStatus',
       'handleCompanionCommand', 'packagedManifest', 'parseReleaseManifest', 'inspectBinary',
-      'diagnosePlatform', 'planAutostart', 'userPaths']) assert.equal(typeof sdk[name], 'function', name);
+      'diagnosePlatform', 'planAutostart', 'userPaths',
+      'promptSecret', 'promptNative', 'promptCapability', 'promptTui', 'validatePromptRequest'])
+      assert.equal(typeof sdk[name], 'function', name);
     const manifest = await sdk.packagedManifest();
     assert.deepEqual(manifest, sdk.parseReleaseManifest(await readFile(join(root, 'release-manifest.json'))));
     assert.equal(manifest.version, pkg.version);

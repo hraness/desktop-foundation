@@ -1,6 +1,6 @@
 [package]
 name = "desktop-foundation"
-version = "0.5.0"
+version = "0.6.0"
 description = "Product-neutral menu-bar desktop foundation for Hraness CLI products"
 edition = "2021"
 rust-version = "1.77.2"
@@ -14,11 +14,19 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "=2.11.5", features = ["tray-icon"] }
+zeroize = "=1.8.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSFont", "NSControl", "NSStatusItem", "NSStatusBarButton", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAlert", "NSApplication", "NSControl", "NSFont", "NSRunningApplication", "NSSecureTextField", "NSStatusItem", "NSStatusBarButton", "NSTextField", "NSView", "NSWindow", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSProcessInfo", "NSString"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_StationsAndDesktops", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+glib = "0.18"
+gtk = { version = "0.18", default-features = false, features = ["v3_24"] }
 
 [build-dependencies]
 tauri-build = { version = "=2.6.3", features = [] }

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+use desktop_foundation::prompt;
 use desktop_foundation::protocol::{self, Event, Frame, ProtocolError, Session, VERSION};
 use desktop_foundation::{
     DispatchOutcome, Host, MenuModel, Options, RefreshHandle, RenderError, RenderOperation,
@@ -400,6 +401,13 @@ fn execute() -> Result<(), ProtocolError> {
     }
     if args.len() == 1 && args[0] == "--check-protocol" {
         return check_protocol();
+    }
+    if args.len() == 1 && args[0] == "--prompt-probe" {
+        return prompt::probe().emit(&mut std::io::stdout());
+    }
+    if args.len() == 1 && args[0] == "--prompt" {
+        let spec = prompt::read_spec(&mut BufReader::new(std::io::stdin()))?;
+        return prompt::emit_result(&mut std::io::stdout(), &prompt::run(&spec));
     }
     if args.len() != 2 || args[0] != "--state-dir" {
         return Err(ProtocolError("invalid-arguments"));

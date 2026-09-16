@@ -79,6 +79,13 @@ The SDK also exports `runCompanion` for foreground owners and `planAutostart`
 for inspectable startup plans. `companion` runs a demonstration tray;
 `companion doctor --json` is network-silent.
 
+For credential entry — new passwords or editing an existing value — use
+`promptSecret(request)`: it shows a native dialog through the pinned runner
+when the host supports one, and a masked TTY prompt otherwise. `prefill`
+carries an existing value for editing and `timeoutSeconds` bounds the wait.
+Values travel over the child's stdin/stdout only; storage stays with the
+product. See [the prompt contract](docs/protocol.md#credential-prompt-one-shot-mode).
+
 ## Existing Rust products
 
 A product supplies a [`Host`](src/lib.rs) implementation that renders a

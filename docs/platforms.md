@@ -105,6 +105,20 @@ OS/architecture and desktop environment for each completed proof; unavailable
 targets remain explicitly unqualified. Login-registration claims need a separate
 sign-in/restart check, including Quit behavior.
 
+### Credential prompt capability
+
+`hraness-companion --prompt` is a separate capability axis from the tray. It
+uses a plain modal dialog — `NSAlert` on macOS, a Win32 dialog on Windows, a
+GTK dialog on Linux — so it can run on hosts where no notification-area item
+is possible, and it needs no state directory or singleton lock.
+`--prompt-probe` reports capability before showing anything: a GUI session on
+macOS (`macos-alert`), an input desktop on Windows (`win32-dialog`), GTK
+initialization on Linux (`gtk-dialog`). CI runs `scripts/prompt-smoke.mjs` on
+every leg: a capable host must return `timeout` from the bounded auto-dismiss
+dialog, an incapable host must return `unavailable`, and any other pairing
+fails the leg. Products should treat an `unavailable` result as the
+authoritative answer and fall back to a TUI prompt.
+
 ### Windows ARM64 qualification boundary
 
 GitHub's hosted Windows ARM64 image currently presents an interactive

@@ -258,6 +258,71 @@ For example, feed these complete lines to `--check-protocol`:
 The expected event types are `validated` for revisions 1 and 2, followed by
 `stopped`. No `ready` event is expected.
 
+## Credential prompt (one-shot mode)
+
+`hraness-companion --prompt` renders exactly one native text-entry dialog —
+for example, collecting a product credential — then exits. It needs no state
+directory, singleton lock, or tray, so it also works on hosts that cannot show
+a menu-bar item. The SDK wraps it in `promptNative`, `promptCapability`, and
+the TTY fallback `promptSecret`/`promptTui`.
+
+```text
+hraness-companion --prompt
+```
+
+Write one `prompt-request` frame to stdin and read one `prompt-result` frame
+from stdout:
+
+```jsonl
+{"type":"prompt-request","version":1,"title":"Example Butler","message":"Paste the relay token","secret":true,"prefill":"existing","timeoutSeconds":120}
+{"type":"prompt-result","version":1,"status":"submitted","value":"existing"}
+```
+
+| Field | Contract |
+| --- | --- |
+| `type` | String `"prompt-request"`. |
+| `version` | Integer `1`. |
+| `title` | Required nonempty display text, at most 128 Unicode scalar values. |
+| `message` | Required nonempty display text, at most 512 Unicode scalar values. |
+| `secret` | Optional boolean, default `true`. Masks the field when set. |
+| `prefill` | Optional existing value, at most 4,096 Unicode scalar values, for editing flows. |
+| `timeoutSeconds` | Optional integer `1`–`600`, default `120`. The dialog dismisses itself at this deadline. |
+
+`title` and `message` reject control characters and bidi controls
+U+202A–U+202E and U+2066–U+2069. The submitted value is bounded to 4,096
+Unicode scalar values. Only the first complete frame is read; trailing bytes
+after its newline are `trailing-input`, and EOF before a frame is
+`prompt-required` or `partial-frame`. `invalid-prompt` covers malformed,
+oversized, or unsafe requests; existing framing codes cover the rest.
+
+| Result `status` | Meaning |
+| --- | --- |
+| `submitted` | The user confirmed; `value` carries the entry. |
+| `cancelled` | The user cancelled or closed the dialog. |
+| `timeout` | `timeoutSeconds` elapsed without a choice; no `value`. |
+| `unavailable` | This host cannot render a dialog; no `value`. Fall back to a TUI prompt. |
+
+Secret hygiene: request input travels only over stdin — never argv, and never
+in diagnostics, which redact `prefill` and `value`. Keep product credentials
+out of `title` and `message` as well; those strings are display-rendered and
+validated, not confidential. The runner only collects and returns the value;
+storage, authorization, and use remain the product's responsibility.
+
+### Capability probe
+
+`hraness-companion --prompt-probe` prints one frame without showing a dialog:
+
+```jsonl
+{"type":"prompt-capability","version":1,"capable":true,"detail":"macos-alert"}
+```
+
+`capable` reports whether the host can currently render a dialog — a GUI
+session on macOS, an input desktop on Windows, GTK on Linux — and `detail`
+names the backend or the reason it is unavailable. Gate interactive prompt
+steps on it in CI, and use it to choose between the native dialog and the TUI
+fallback in product flows. An `unavailable` prompt result remains the
+authoritative answer whenever the two disagree.
+
 ## Wire surface versus the Rust host API
 
 Protocol v1 exposes actions, checkmarks, shortcuts, inert labels, separators,

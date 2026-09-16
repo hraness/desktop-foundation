@@ -10,6 +10,7 @@
 //! product CLI spawns. The shared renderer uses no application bundle or window;
 //! product helpers retain their own OS permission boundaries.
 
+pub mod browser;
 pub mod outputs;
 pub mod prompt;
 pub mod protocol;

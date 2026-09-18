@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: companion-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   native:
     name: Native (${{ matrix.target }})
@@ -40,14 +43,10 @@ jobs:
           if ('${{ runner.arch }}' -eq 'ARM64') { ./scripts/windows-desktop-fixture.ps1 -AllowUnsupported }
           else { ./scripts/windows-desktop-fixture.ps1 }
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/cache/restore@v4
-        id: native_cache
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: companion-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ matrix.target }}
+          cache-on-failure: true
       - name: Install Linux build and runtime dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11
@@ -81,16 +80,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - run: cargo build --locked --release --bin hraness-companion
-      # Compilation succeeded; retain reusable build inputs even if a later
+      # The cache's post step retains reusable build inputs even if a later
       # desktop integration test fails. Every gate still runs on every tree.
-      - uses: actions/cache/save@v4
-        if: steps.native_cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ steps.native_cache.outputs.cache-primary-key }}
       - name: Headless protocol probe
         run: node scripts/native-smoke.mjs --headless
       # The one-shot prompt needs no tray, so it qualifies on every leg —

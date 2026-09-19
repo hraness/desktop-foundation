@@ -8,9 +8,13 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::fs::{self, File, Metadata, OpenOptions};
-use std::io::{Cursor, Read};
+#[cfg(not(unix))]
+use std::fs::{File, OpenOptions};
+use std::fs::{self, Metadata};
 use std::hash::{Hash, Hasher};
+use std::io::Cursor;
+#[cfg(not(unix))]
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -221,22 +225,50 @@ impl OutputsSection {
         if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico") {
             return None;
         }
-        let mut options = OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        { use std::os::unix::fs::OpenOptionsExt; options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK); }
-        let file = options.open(path).ok()?;
-        let meta = file.metadata().ok()?;
-        if !meta.is_file() || Fingerprint::of(&meta) != *expected || meta.len() > MAX_DECODE_BYTES { return None; }
         let name = path.file_name()?.to_string_lossy().into_owned();
-        if let Ok(cache) = self.thumbs.lock() {
-            if let Some((cached, icon)) = cache.get(&name) {
-                if cached == expected {
-                    return Some(icon.clone());
-                }
+        #[cfg(unix)]
+        let bytes = {
+            // The listed identity must still own the path before the cache
+            // is consulted or a byte is read.
+            let meta = fs::symlink_metadata(path).ok()?;
+            if !meta.is_file() || Fingerprint::of(&meta) != *expected {
+                return None;
             }
-        }
-        let bytes = read_image(file, expected)?;
+            if let Some(icon) = self.cached_thumbnail(&name, expected) {
+                return Some(icon);
+            }
+            // Shared stable-read custody: `O_NOFOLLOW | O_NONBLOCK` open,
+            // fstat-vs-lstat identity proof, then a post-read recheck. The
+            // crate additionally requires the file to be owned by the
+            // current user and single-linked — bounds the previous
+            // open+fstat path never asserted, accepted as custody hardening.
+            let result = local_custody::stable_read(
+                path,
+                &local_custody::StableReadOptions {
+                    maximum_bytes: MAX_DECODE_BYTES,
+                    nonblocking: true,
+                    ..Default::default()
+                },
+            )
+            .ok()?;
+            // The read spanned one stable object; that object must still be
+            // the one this menu listed.
+            let meta = fs::symlink_metadata(path).ok()?;
+            if !meta.is_file() || Fingerprint::of(&meta) != *expected {
+                return None;
+            }
+            result.bytes
+        };
+        #[cfg(not(unix))]
+        let bytes = {
+            let file = OpenOptions::new().read(true).open(path).ok()?;
+            let meta = file.metadata().ok()?;
+            if !meta.is_file() || Fingerprint::of(&meta) != *expected || meta.len() > MAX_DECODE_BYTES { return None; }
+            if let Some(icon) = self.cached_thumbnail(&name, expected) {
+                return Some(icon);
+            }
+            read_image(file, expected)?
+        };
         let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(MAX_PIXELS_PER_AXIS);
@@ -255,12 +287,21 @@ impl OutputsSection {
         }
         Some(icon)
     }
+
+    /// A cached thumbnail is served only while the file still carries the
+    /// fingerprint it was decoded from.
+    fn cached_thumbnail(&self, name: &str, expected: &Fingerprint) -> Option<RgbaIcon> {
+        let cache = self.thumbs.lock().ok()?;
+        let (cached, icon) = cache.get(name)?;
+        (cached == expected).then(|| icon.clone())
+    }
 }
 
 fn reveal_label() -> &'static str {
     if cfg!(target_os = "macos") { "Reveal Output in Finder" } else { "Show Output in Folder" }
 }
 
+#[cfg(not(unix))]
 fn read_image(mut file: File, expected: &Fingerprint) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     (&mut file).take(MAX_DECODE_BYTES + 1).read_to_end(&mut bytes).ok()?;
@@ -295,6 +336,7 @@ fn file_key(name: &str, fingerprint: &Fingerprint) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::OpenOptions;
 
     fn fixture() -> PathBuf {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

@@ -286,11 +286,22 @@ fn private_directory(path: &Path) -> Result<(), ProtocolError> {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt;
-        let meta = fs::symlink_metadata(path).map_err(|_| ProtocolError("state-unavailable"))?;
-        if meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o022 != 0 {
-            return Err(ProtocolError("unsafe-state-dir"));
-        }
+        // Shared custody contract for the leaf: canonical parent chain,
+        // realpath-verified, lstat-not-symlink, owned by the current user,
+        // and `mode & 0o077 == 0`. The component walk above still owns
+        // creation: it makes every missing intermediate 0700, which
+        // `ensure_private_directory` alone would not apply to components it
+        // did not create. The mode bound is deliberately stricter than the
+        // former `mode & 0o022 == 0` leaf check — this code has only ever
+        // created these directories at 0700.
+        local_custody::ensure_private_directory(path).map_err(|error| {
+            ProtocolError(match error.code.as_str() {
+                // Transient filesystem failures keep the unavailable signal;
+                // custody violations stay unsafe.
+                "stat" | "create" | "chmod" | "not-found" => "state-unavailable",
+                _ => "unsafe-state-dir",
+            })
+        })?;
     }
     Ok(())
 }
@@ -323,17 +334,37 @@ fn lock_instance(state_dir: &Path, app_id: &str) -> Result<Option<File>, Protoco
     let file = options
         .open(&path)
         .map_err(|_| ProtocolError("lock-unavailable"))?;
-    let meta = file
-        .metadata()
-        .map_err(|_| ProtocolError("lock-unavailable"))?;
-    if redirected(&meta) || !meta.is_file() {
-        return Err(ProtocolError("unsafe-state-dir"));
-    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt;
-        if meta.uid() != unsafe { libc::geteuid() } || meta.nlink() != 1 || meta.mode() & 0o022 != 0
-        {
+        use std::os::unix::io::AsRawFd;
+        // Descriptor-level custody on the lock: an owned regular file with
+        // exactly one hard link and owner-only permissions. `O_NOFOLLOW` at
+        // open plus this fstat check subsume the old `redirected` test — a
+        // successfully opened descriptor cannot be a symlink. `owner_only`
+        // asserts `mode & 0o077 == 0`, deliberately stricter than the former
+        // `0o022` bound; the lock is only ever created at 0600.
+        local_custody::assert_owned_fd(
+            file.as_raw_fd(),
+            &local_custody::OwnedPathOptions {
+                kind: Some(local_custody::ObjectKind::File),
+                owner_only: true,
+                links: Some(1),
+                ..Default::default()
+            },
+        )
+        .map_err(|error| {
+            ProtocolError(match error.code.as_str() {
+                "dup" | "stat" => "lock-unavailable",
+                _ => "unsafe-state-dir",
+            })
+        })?;
+    }
+    #[cfg(windows)]
+    {
+        let meta = file
+            .metadata()
+            .map_err(|_| ProtocolError("lock-unavailable"))?;
+        if redirected(&meta) || !meta.is_file() {
             return Err(ProtocolError("unsafe-state-dir"));
         }
     }

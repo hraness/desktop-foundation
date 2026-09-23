@@ -183,7 +183,7 @@ async function ensureBinaryImpl(options: EnsureBinaryOptions): Promise<Installed
     return { ...result, reused: false };
   } catch (error) {
     if (error instanceof CompanionError) throw error;
-    if (errno(error, 'EPERM') || errno(error, 'EACCES')) throw new CompanionError('os_approval_required', 'The operating system denied the companion install.', 'Inspect the destination permissions and OS policy. Request human approval if needed; never disable policy or clear quarantine automatically.');
+    if (errno(error, 'EPERM') || errno(error, 'EACCES')) throw new CompanionError('os_approval_required', 'The operating system denied the companion install.', 'Check the destination permissions and OS policy, and ask the user to approve the executable if the OS requires it. Do not disable the policy or clear quarantine automatically.');
     throw new CompanionError('download_failed', 'Unable to install the pinned companion release.', 'Check network access and cache permissions, then retry.');
   } finally { await unlink(temp).catch(error => { if (!errno(error, 'ENOENT')) throw error; }); }
 }
@@ -192,7 +192,7 @@ export async function ensureBinary(options: EnsureBinaryOptions): Promise<Instal
   try { return await ensureBinaryImpl(options); }
   catch (error) {
     if (error instanceof CompanionError) throw error;
-    if (errno(error, 'EPERM') || errno(error, 'EACCES')) throw new CompanionError('os_approval_required', 'The operating system denied access to the companion cache.', 'Review cache permissions and OS policy with the human. Do not disable security policy.');
+    if (errno(error, 'EPERM') || errno(error, 'EACCES')) throw new CompanionError('os_approval_required', 'The operating system denied access to the companion cache.', 'Check the cache permissions and OS policy. Do not disable security policy to get past this.');
     throw new CompanionError('download_failed', 'Unable to prepare the companion cache.');
   }
 }

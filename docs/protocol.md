@@ -238,7 +238,7 @@ before UI initialization, but the desktop must still provide a tray host.
 for example:
 
 ```text
-hraness-companion 0.5.0 protocol/1
+hraness-companion 0.7.0 protocol/1
 ```
 
 `hraness-companion --check-protocol` reads JSONL from stdin without creating

@@ -1,19 +1,21 @@
 # desktop-foundation
 
-Shared desktop companions for CLI products: a native menu bar on macOS, a
-notification-area tray on Windows, and an AppIndicator tray on Linux.
+Give a CLI tool a menu bar icon on macOS, a notification-area tray icon on
+Windows, and an AppIndicator tray icon on Linux.
 
-One prebuilt `hraness-companion` executable renders menus for any product. The
-TypeScript SDK owns verified installation, launch, singleton discovery, status,
-stop and optional login startup. Product CLIs supply snapshots and action
-handlers; rich screens open in the normal browser. No `.app`, DMG, MSI,
-AppImage, publisher certificate, Apple Developer account or notarization job is
-part of this release pipeline. Native executables still exist and OS trust
-controls still apply.
+One prebuilt `hraness-companion` executable draws the menu for any product. The
+TypeScript SDK downloads and verifies it, launches it, finds an instance that
+is already running, reports status, stops it, and can start it at login. Your
+CLI supplies the menu contents and handles the clicks; larger screens open in
+the user's browser. There is no `.app`, DMG, MSI, AppImage, publisher
+certificate, Apple Developer account, or notarization step. The companion is
+still a native executable, so the operating system's trust controls still
+apply to it.
 
-The release matrix builds arm64 and x64 on all three systems. A portable tray
-does not make Apple Messages, Contacts or a macOS capture helper portable. See
-the [platform contract](docs/platforms.md), [installation and OS approval
+Each release builds arm64 and x64 executables for all three systems, and the
+tray runs on each of them. Features that depend on Apple Messages, Contacts,
+or a macOS capture helper work only on macOS. See the [platform
+contract](docs/platforms.md), [installation and OS approval
 guide](docs/installation.md), [architecture](docs/architecture.md),
 [product adoption guide](docs/adoption.md), [language-neutral protocol](docs/protocol.md),
 and [agent instructions](skills/companion/SKILL.md).
@@ -26,13 +28,12 @@ checked local cache. Users need no Cargo, Swift or Xcode. A source checkout
 has no release manifest until all six binary artifacts have been assembled.
 
 ```sh
-npm install https://github.com/hraness/desktop-foundation/releases/download/v0.5.0/hraness-desktop-foundation-0.5.0.tgz
+npm install https://github.com/hraness/desktop-foundation/releases/download/v0.7.0/hraness-desktop-foundation-0.7.0.tgz
 ```
 
-This is the release coordinate, not proof that it is already published. Check
-the [Releases page](https://github.com/hraness/desktop-foundation/releases) for
-the admitted version. GitHub Releases are canonical; npm registry publication
-is optional.
+The package is published only as GitHub Release assets, not on npm. Check the
+[Releases page](https://github.com/hraness/desktop-foundation/releases) for
+newer versions.
 
 Mount the handler inside the product's `menubar` command. Supply the absolute
 command that re-enters that same CLI with `--foreground`:
@@ -79,8 +80,8 @@ The SDK also exports `runCompanion` for foreground owners and `planAutostart`
 for inspectable startup plans. `companion` runs a demonstration tray;
 `companion doctor --json` is network-silent.
 
-For credential entry — new passwords or editing an existing value — use
-`promptSecret(request)`: it shows a native dialog through the pinned runner
+To collect a credential, such as a new password or an edited existing value,
+use `promptSecret(request)`. It shows a native dialog through the pinned runner
 when the host supports one, and a masked TTY prompt otherwise. `prefill`
 carries an existing value for editing and `timeoutSeconds` bounds the wait.
 Values travel over the child's stdin/stdout only; storage stays with the
@@ -91,16 +92,17 @@ product. See [the prompt contract](docs/protocol.md#credential-prompt-one-shot-m
 A product supplies a [`Host`](src/lib.rs) implementation that renders a
 `MenuModel` snapshot and answers action ids. The foundation owns the
 accessory-mode application lifecycle, the status item, menu construction,
-and the refresh loop. The product's daemon stays the sole authority; the
-menu-bar binary is a disposable client with no privilege of its own.
+and the refresh loop. The product's daemon stays in charge of state and
+permissions. The menu-bar process is a replaceable client of that daemon with
+no privileges of its own.
 
-## Usage
+## Rust usage
 
 Pin by immutable tag:
 
 ```toml
 [dependencies]
-desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.5.0" }
+desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.7.0" }
 ```
 
 Implement `Host`, then run the event loop with the product's own
@@ -124,7 +126,7 @@ new adapters so products do not each maintain a native build. OS permissions
 for camera, microphone, screen recording and other privileged capabilities
 remain owned by their existing product helpers; a tray does not grant them.
 
-## Contract
+## Rust host contract
 
 - `snapshot()` returns the complete status-item state: title, optional
   full-color RGBA icon, tooltip, and menu nodes. Called off the UI thread
@@ -133,8 +135,8 @@ remain owned by their existing product helpers; a tray does not grant them.
   a `RefreshHandle` for product events; polling remains the fallback.
 - `dispatch(id)` receives a menu action id. It must not block; the host
   owns whatever thread does the work.
-- `started(app)` runs once after the status item exists — spawn sidecars
-  and `manage` product state here. `cancel_snapshot()` signals cancellation
+- `started(app)` runs once after the status item exists. Spawn sidecars and
+  `manage` product state there. `cancel_snapshot()` signals cancellation
   before the worker joins; `stopping()` runs after it stops. Host reads must
   have finite deadlines. Use `snapshot_with_context` for cooperative cancellation.
 - `MenuNode::quit(title)` adds a working Quit item; inert items
@@ -147,7 +149,7 @@ remain owned by their existing product helpers; a tray does not grant them.
 
 ## Interactive items
 
-### Human browser handoffs
+### Open a browser from a menu item
 
 Existing Rust adapters can keep their `Host` implementation and store a
 `browser::BrowserOpener`. Call `open` only from an explicit menu dispatch with
@@ -250,16 +252,15 @@ removed files require a refreshed menu. This is stale-action protection, not a
 sandbox for other software running as the same user. Thumbnails have separate
 encoded-byte, dimension and allocation limits.
 
-Current consumers: Oompa, Ghostget, PeopleBlade, Slopcamera, AI Charts and Valhalla.
-Textbutler uses a separate native Swift control client.
+Ghostget, PeopleBlade, Slopcamera, AI Charts, Valhalla, Sponge, and Textbutler
+use this package.
 
 ## Validation and releases
 
-Run `cargo test --locked` and `cargo build --locked` on macOS. On managed Hraness
-hosts run these through the installed `oompa-host-run` mac-native lane. Tests use
+Run `cargo test --locked` and `cargo build --locked` on macOS. Tests use
 synthetic output files and do not open Finder or connect to product daemons.
 
 Release from the reviewed, validated tree by updating both Cargo version records
 and pushing a new immutable `v*` tag. Never move existing tags. Consumers update
-both their Git dependency tag and the exact Cargo lockfile commit; they retain
-their own native and source delivery gates.
+both their Git dependency tag and the exact Cargo lockfile commit, and they
+keep their own native and source release checks.

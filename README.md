@@ -12,10 +12,10 @@ certificate, Apple Developer account, or notarization step. The companion is
 still a native executable, so the operating system's trust controls still
 apply to it.
 
-Each release builds arm64 and x64 executables for all three systems. The tray
-runs everywhere, but features that depend on Apple Messages, Contacts, or a
-macOS capture helper work only on macOS. See
-the [platform contract](docs/platforms.md), [installation and OS approval
+Each release builds arm64 and x64 executables for all three systems, and the
+tray runs on each of them. Features that depend on Apple Messages, Contacts,
+or a macOS capture helper work only on macOS. See the [platform
+contract](docs/platforms.md), [installation and OS approval
 guide](docs/installation.md), [architecture](docs/architecture.md),
 [product adoption guide](docs/adoption.md), [language-neutral protocol](docs/protocol.md),
 and [agent instructions](skills/companion/SKILL.md).
@@ -93,8 +93,8 @@ A product supplies a [`Host`](src/lib.rs) implementation that renders a
 `MenuModel` snapshot and answers action ids. The foundation owns the
 accessory-mode application lifecycle, the status item, menu construction,
 and the refresh loop. The product's daemon stays in charge of state and
-permissions. The menu-bar process only draws the menu and reports clicks; it
-has no permissions of its own and stores no credentials.
+permissions. The menu-bar process is a replaceable client of that daemon with
+no privileges of its own.
 
 ## Rust usage
 

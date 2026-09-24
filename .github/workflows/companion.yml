@@ -1,6 +1,9 @@
 name: Companion
 on:
   push:
+    # main runs warm the shared Cargo caches that every pull request restores
+    # and rerun the same gate after integration.
+    branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -9,9 +12,52 @@ permissions:
 concurrency:
   group: companion-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: short
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      # true only when every file a pull request touches is documentation;
+      # pushes, tags and manual runs always build everything.
+      docs_only: ${{ steps.filter.outputs.docs == 'true' }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          predicate-quantifier: every
+          filters: |
+            docs:
+              - '**/*.md'
+              - 'docs/**'
+              - 'LICENSE'
+  sdk:
+    name: SDK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check:sdk
   native:
     name: Native (${{ matrix.target }})
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +77,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
       # The hosted Windows ARM64 image can prove its notification area
       # incapable; that leg still builds and runs unit/headless gates while
       # interactive tray qualification stays required on x64 Windows.
@@ -43,10 +90,12 @@ jobs:
           if ('${{ runner.arch }}' -eq 'ARM64') { ./scripts/windows-desktop-fixture.ps1 -AllowUnsupported }
           else { ./scripts/windows-desktop-fixture.ps1 }
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ matrix.target }}
           cache-on-failure: true
+          # Only main writes the cache; pull requests and tags restore it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux build and runtime dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11
@@ -59,10 +108,14 @@ jobs:
           rustc --edition=2021 examples/stdio_fixture.rs -o target/test-fixtures/stdio-fixture.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "COMPANION_STDIO_FIXTURE=$((Resolve-Path target/test-fixtures/stdio-fixture.exe).Path)" >> $env:GITHUB_ENV
+      # The smoke scripts import dist/src, and the SDK tests branch on the
+      # host platform, so every leg builds and tests the SDK once.
       - run: npm run check:sdk
+      # One profile for the whole leg: the tests compile the same optimized
+      # dependency tree the shipped binary uses, so nothing is built twice.
       - name: Native Rust tests
         id: native_tests
-        run: cargo test --locked
+        run: cargo test --locked --release
       # Auxiliary evidence must not replace or mask the required Rust test result.
       - name: Diagnose Windows native imports and manifests
         continue-on-error: true
@@ -79,6 +132,7 @@ jobs:
           path: target/windows-loader-diagnostics/*
           if-no-files-found: warn
           retention-days: 7
+      # Reuses the release artifacts the test build just produced.
       - run: cargo build --locked --release --bin hraness-companion
       # The cache's post step retains reusable build inputs even if a later
       # desktop integration test fails. Every gate still runs on every tree.
@@ -123,8 +177,10 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
   package:
-    needs: native
+    needs: [changes, sdk, native]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -132,13 +188,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
       - uses: actions/download-artifact@v4
         with:
           pattern: native-*
           path: artifacts
           merge-multiple: true
       - run: npm ci --ignore-scripts
-      - run: npm run check:sdk
+      # The SDK tests already ran on this tree in the sdk job and on every
+      # native leg; packaging only needs the compiled dist.
+      - run: npm run build:sdk
       - run: node scripts/release-manifest.mjs
       - name: Package verified SDK and pinned manifest
         run: npm pack --ignore-scripts --pack-destination artifacts
@@ -152,18 +211,31 @@ jobs:
   required:
     name: Required
     if: always()
-    needs: [native, package]
-    runs-on: ubuntu-22.04
+    needs: [changes, sdk, native, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - name: All targets and package must pass
+      - name: Every blocking job passed
         env:
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          SDK_RESULT: ${{ needs.sdk.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
-        run: test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = success
+        run: |
+          test "$CHANGES_RESULT" = success
+          test "$SDK_RESULT" = success
+          if [ "$DOCS_ONLY" = true ]; then
+            # A docs-only pull request deliberately skips the native matrix.
+            test "$NATIVE_RESULT" = skipped && test "$PACKAGE_RESULT" = skipped
+          else
+            test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = success
+          fi
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [required]
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
     permissions:
       contents: write
       id-token: write

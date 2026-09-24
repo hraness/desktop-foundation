@@ -1,0 +1,4 @@
+self-hosted-runner:
+  # GitHub-hosted image that actionlint's built-in label list does not know yet.
+  labels:
+    - windows-11-vs2026-arm

@@ -9,7 +9,6 @@ if (-not $IsWindows -or $env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONME
     throw 'windows-desktop-fixture-requires-github-hosted-windows'
 }
 
-$fixtureWatch = [System.Diagnostics.Stopwatch]::StartNew()
 $fixtureSession = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
 $fixtureInteractive = [Environment]::UserInteractive
 $explorerStarted = $false
@@ -194,6 +193,10 @@ public static class CompanionDesktopFixture {
     }
 }
 '@
+
+# The tray budget starts after type compilation: Add-Type alone can take
+# longer than the 15s wait on a cold hosted runner and must not consume it.
+$fixtureWatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 if ($ProbeOnly) {
     if ([CompanionDesktopFixture]::TrayProcessId($fixtureSession) -eq 0) {

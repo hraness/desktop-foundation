@@ -189,7 +189,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: native-*
           path: artifacts
@@ -241,7 +241,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: distribution
           path: artifacts

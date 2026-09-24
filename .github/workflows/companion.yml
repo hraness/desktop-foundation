@@ -126,7 +126,7 @@ jobs:
       - name: Preserve Windows loader evidence
         continue-on-error: true
         if: always() && runner.os == 'Windows' && steps.native_tests.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: loader-${{ matrix.target }}
           path: target/windows-loader-diagnostics/*
@@ -171,7 +171,7 @@ jobs:
         env:
           COMPANION_TARGET: ${{ matrix.target }}
         run: node scripts/artifact-evidence.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}
           path: artifacts/*
@@ -203,7 +203,7 @@ jobs:
         run: npm pack --ignore-scripts --pack-destination artifacts
       - name: Smoke test the installed SDK tarball
         run: node scripts/package-smoke.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: distribution
           path: artifacts/*

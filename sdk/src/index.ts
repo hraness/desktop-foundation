@@ -7,6 +7,7 @@ export * from './prompt.js';
 export * from './service.js';
 export * from './errors.js';
 export * from './commands.js';
+export * from './login-env.js';
 export * from './protocol-v2.js';
 export * from './menu-kit.js';
 export * from './audience.js';

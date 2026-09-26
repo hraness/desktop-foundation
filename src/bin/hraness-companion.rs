@@ -408,10 +408,11 @@ fn check_protocol() -> Result<(), ProtocolError> {
     let mut input = BufReader::new(std::io::stdin());
     let mut output = std::io::stdout();
     let mut session = Session::default();
-    while let Some(frame) = protocol::read_frame(&mut input)? {
-        if session.version().is_none() && matches!(frame, Frame::SnapshotV2(_)) {
+    while let Some(frame) = protocol::read_frame_noting_version(&mut input, |declared| {
+        if session.version().is_none() && declared == protocol::v2::VERSION {
             STARTUP_VERSION.store(protocol::v2::VERSION, Ordering::Release);
         }
+    })? {
         if !session.accept(frame)? {
             break;
         }
@@ -462,15 +463,18 @@ fn execute() -> Result<(), ProtocolError> {
         return Err(ProtocolError("unsafe-state-dir"));
     }
     let mut input = BufReader::new(std::io::stdin());
-    let Some(frame) = protocol::read_frame(&mut input)? else {
+    // A first frame that declares v2 is answered in v2, even when it fails
+    // to parse or is a quit.
+    let Some(frame) = protocol::read_frame_noting_version(&mut input, |declared| {
+        if declared == protocol::v2::VERSION {
+            STARTUP_VERSION.store(protocol::v2::VERSION, Ordering::Release);
+        }
+    })?
+    else {
         return Ok(());
     };
     if matches!(frame, Frame::Quit { .. }) {
         return Err(ProtocolError("snapshot-required"));
-    }
-    if matches!(frame, Frame::SnapshotV2(_)) {
-        // A rejected first v2 snapshot is still answered in v2.
-        STARTUP_VERSION.store(protocol::v2::VERSION, Ordering::Release);
     }
     let mut session = Session::default();
     session.accept(frame)?;

@@ -496,9 +496,9 @@ impl MenuModel {
                             }
                         }
                         if let Some(alternate) = &item.alternate {
-                            // An alternate is a second native row.
-                            *count += 1;
-                            if *count > MAX_MENU_NODES { return Err(ModelError::TooManyNodes); }
+                            // An alternate shares its item's row, so it does not
+                            // count toward the budget (the wire check and the
+                            // SDK count the same way).
                             if !id_valid(&alternate.id) { return Err(ModelError::InvalidActionId); }
                         }
                         (&item.id, &item.icon)
@@ -535,12 +535,12 @@ impl MenuModel {
         walk(&self.nodes, 0, &mut 0, &mut HashSet::new())
     }
 
-    /// Counts the native rows this model builds, including alternates.
+    /// Counts the rows toward the node budget. Alternates share their
+    /// item's row and are not counted.
     pub fn node_count(&self) -> usize {
         fn count(nodes: &[MenuNode]) -> usize {
             nodes.iter().map(|node| match node {
                 MenuNode::Submenu { items, .. } => 1 + count(items),
-                MenuNode::Interactive { item } if item.alternate.is_some() => 2,
                 _ => 1,
             }).sum()
         }

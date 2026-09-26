@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(item.kind, MenuItemKind::State { state: ItemState::On });
         assert!(model.validate().is_ok());
         // 13 rows plus two Option-key alternates.
-        assert_eq!(model.node_count(), 15);
+        assert_eq!(model.node_count(), 13, "alternates share their row");
     }
 
     #[test]

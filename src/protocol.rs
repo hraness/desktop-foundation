@@ -194,6 +194,20 @@ pub struct ProtocolError(pub &'static str);
 /// Limits allocation even if stdin never supplies a newline. Oversized and
 /// partial frames are rejected; the caller must close rather than resync.
 pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Frame>, ProtocolError> {
+    read_frame_noting_version(reader, |_| {})
+}
+
+/// Like [`read_frame`], but first reports the frame's declared `version`
+/// when it has one, even if the frame then fails to parse. The runner uses
+/// it to answer a malformed first v2 frame in v2.
+pub fn read_frame_noting_version(
+    reader: &mut impl BufRead,
+    declared: impl FnOnce(u8),
+) -> Result<Option<Frame>, ProtocolError> {
+    #[derive(Deserialize)]
+    struct Declared {
+        version: u8,
+    }
     let mut frame = Vec::new();
     loop {
         let bytes = reader
@@ -217,6 +231,9 @@ pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Frame>, ProtocolEr
         frame.extend_from_slice(&bytes[..take]);
         reader.consume(take);
         if end.is_some() {
+            if let Ok(Declared { version }) = serde_json::from_slice::<Declared>(&frame) {
+                declared(version);
+            }
             return parse_frame(&frame).map(Some);
         }
     }
@@ -746,6 +763,18 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn a_malformed_frame_still_reports_its_declared_version() {
+        let mut seen = None;
+        let bad = b"{\"type\":\"snapshot\",\"version\":2,\"title\":\"old\"}\n";
+        let result = read_frame_noting_version(&mut std::io::Cursor::new(&bad[..]), |version| seen = Some(version));
+        assert_eq!(result.unwrap_err(), ProtocolError("invalid-frame"));
+        assert_eq!(seen, Some(2));
+        let mut seen = None;
+        let _ = read_frame_noting_version(&mut std::io::Cursor::new(&b"not json\n"[..]), |version| seen = Some(version));
+        assert_eq!(seen, None);
     }
 
     #[test]

@@ -327,5 +327,8 @@ with muda as today, then runs an objc2 pass over the `NSMenu` reached through
 by build order and sets `image`, `subtitle`, `badge`, `toolTip`, `isAlternate`,
 section headers and state, guarding each API with `respondsToSelector:` for
 older macOS versions. The Georgia title font goes away with v1 marks. The
-existing 256-item and 8-level limits are unchanged; the SDK reports a node
-budget error with the offending count instead of letting a menu freeze.
+existing 256-item and 8-level limits are unchanged, and an `alternate` shares
+its item's row, so it does not count. The SDK reports a node budget error with
+the offending count instead of letting a menu freeze. A first frame that
+declares `"version":2` gets its startup error in v2 even when it fails to
+parse.

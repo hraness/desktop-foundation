@@ -511,7 +511,7 @@ pub fn error_message(item: &LoginItem, error: ServiceError, glyphs: Glyphs) -> S
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

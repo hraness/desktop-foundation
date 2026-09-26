@@ -332,3 +332,18 @@ its item's row, so it does not count. The SDK reports a node budget error with
 the offending count instead of letting a menu freeze. A first frame that
 declares `"version":2` gets its startup error in v2 even when it fails to
 parse.
+
+In this repository the plan lives in `src/menu_plan.rs` (portable, unit
+tested) and the AppKit pass in `src/macos_menu.rs`; `tests/macos_menu.rs`
+runs the pass against real AppKit objects without showing anything. A
+section header replaces its muda row, which stays in
+the menu hidden. Where an API is missing, the row keeps the text form from
+the down-level rules. The status button shows the template glyph, the count
+as its title, a 6 pt orange or red dot for `attention` or `error`, and the
+dimmed look for `paused` and `offline`.
+
+A Rust host whose model goes over the budget (`MenuModel::validate` returns
+`TooManyNodes` or `TooDeep`) still gets `render_failed`, and the foundation
+then renders `MenuModel::fit_to_budget()`: the rows that fit, in order, with
+Quit last and a `status.attention` row "Menu too large · Showing N of M rows"
+under the header, and it logs one line to stderr.

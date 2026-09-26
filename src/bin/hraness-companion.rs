@@ -165,7 +165,10 @@ impl Host for Runner {
 
     fn started_with_refresh(&self, app: &AppHandle, refresh: RefreshHandle) {
         *self.output.app.lock().unwrap() = Some(app.clone());
-        apply_serif(app);
+        if self.version == VERSION {
+            // v1 letters keep the serif title; v2 draws a template glyph.
+            apply_serif(app);
+        }
         let version = self.version;
         let mut input = self
             .input

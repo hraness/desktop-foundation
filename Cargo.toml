@@ -24,8 +24,8 @@ local-custody = { git = "https://github.com/hraness/local-custody", rev = "4fd65
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAlert", "NSApplication", "NSControl", "NSFont", "NSRunningApplication", "NSSecureTextField", "NSStatusItem", "NSStatusBarButton", "NSTextField", "NSView", "NSWindow", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSProcessInfo", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAlert", "NSApplication", "NSButton", "NSCell", "NSColor", "NSControl", "NSEvent", "NSFont", "NSGraphics", "NSImage", "NSImageView", "NSMenu", "NSMenuItem", "NSMenuItemBadge", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSStatusItem", "NSStatusBarButton", "NSTextField", "NSView", "NSWindow", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSArray", "NSData", "NSGeometry", "NSObject", "NSProcessInfo", "NSString"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_StationsAndDesktops", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
@@ -40,3 +40,7 @@ tauri-build = { version = "=2.6.3", features = [] }
 [[bin]]
 name = "hraness-companion"
 path = "src/bin/hraness-companion.rs"
+
+[[test]]
+name = "macos_menu"
+harness = false

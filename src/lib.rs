@@ -16,6 +16,12 @@ pub mod prompt;
 pub mod protocol;
 pub mod protocol_v2;
 pub mod symbols;
+mod menu_plan;
+#[cfg(target_os = "macos")]
+mod macos_menu;
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use macos_menu::native_menu_dump;
 
 pub use symbols::{Symbol, SymbolFamily, Tint};
 
@@ -495,11 +501,10 @@ impl MenuModel {
                                 return Err(ModelError::AmbiguousRadioGroup);
                             }
                         }
-                        if let Some(alternate) = &item.alternate {
-                            // An alternate shares its item's row, so it does not
-                            // count toward the budget (the wire check and the
-                            // SDK count the same way).
-                            if !id_valid(&alternate.id) { return Err(ModelError::InvalidActionId); }
+                        // Alternates share their item's slot in the node
+                        // budget, as on the wire.
+                        if item.alternate.as_ref().is_some_and(|alternate| !id_valid(&alternate.id)) {
+                            return Err(ModelError::InvalidActionId);
                         }
                         (&item.id, &item.icon)
                     }
@@ -545,6 +550,85 @@ impl MenuModel {
             }).sum()
         }
         count(&self.nodes)
+    }
+
+    /// A copy that fits the node and depth budgets, or `None` when this
+    /// model already fits. Rows are kept in order until the budget runs out,
+    /// submenus nested too deep are dropped, Quit stays last, and a
+    /// "Menu too large" status row near the top says how many rows are
+    /// shown, so an oversized menu is visible instead of frozen.
+    pub fn fit_to_budget(&self) -> Option<MenuModel> {
+        fn total(nodes: &[MenuNode]) -> usize {
+            nodes.iter().map(|node| match node {
+                MenuNode::Submenu { items, .. } => 1 + total(items),
+                _ => 1,
+            }).sum()
+        }
+        fn deepest(nodes: &[MenuNode], depth: usize) -> usize {
+            nodes.iter().map(|node| match node {
+                MenuNode::Submenu { items, .. } => deepest(items, depth + 1),
+                _ => depth,
+            }).max().unwrap_or(depth)
+        }
+        fn take(nodes: &[MenuNode], depth: usize, budget: &mut usize) -> Vec<MenuNode> {
+            let mut kept = Vec::new();
+            for node in nodes {
+                if *budget == 0 { break; }
+                match node {
+                    MenuNode::Submenu { title, items, symbol } => {
+                        if depth + 1 > MAX_MENU_DEPTH { continue; }
+                        *budget -= 1;
+                        let items = take(items, depth + 1, budget);
+                        if !items.is_empty() {
+                            kept.push(MenuNode::Submenu { title: title.clone(), items, symbol: *symbol });
+                        } else {
+                            *budget += 1;
+                        }
+                    }
+                    other => {
+                        *budget -= 1;
+                        kept.push(other.clone());
+                    }
+                }
+            }
+            while matches!(kept.last(), Some(MenuNode::Separator)) {
+                kept.pop();
+                *budget += 1;
+            }
+            kept
+        }
+        let rows = total(&self.nodes);
+        if rows <= MAX_MENU_NODES && deepest(&self.nodes, 0) <= MAX_MENU_DEPTH {
+            return None;
+        }
+        let quit = match self.nodes.last() {
+            Some(node @ MenuNode::Item { id: Some(id), .. }) if id == QUIT_ACTION_ID => Some(node.clone()),
+            _ => None,
+        };
+        let body = if quit.is_some() { &self.nodes[..self.nodes.len() - 1] } else { &self.nodes[..] };
+        let (header, body) = match body.first() {
+            Some(node @ MenuNode::Header { .. }) => (Some(node.clone()), &body[1..]),
+            _ => (None, body),
+        };
+        // The warning row, the header, a separator before Quit and Quit.
+        let reserved = 1 + usize::from(header.is_some()) + 2 * usize::from(quit.is_some());
+        let mut budget = MAX_MENU_NODES - reserved;
+        let kept = take(body, 0, &mut budget);
+        let mut nodes = Vec::with_capacity(kept.len() + 4);
+        nodes.extend(header);
+        let warning = nodes.len();
+        nodes.extend(kept);
+        if let Some(quit) = quit {
+            if !matches!(nodes.last(), Some(MenuNode::Separator)) { nodes.push(MenuNode::Separator); }
+            nodes.push(quit);
+        }
+        let shown = total(&nodes);
+        nodes.insert(warning, MenuNode::status(
+            Symbol::StatusAttention,
+            "Menu too large",
+            Some(format!("Showing {shown} of {rows} rows")),
+        ));
+        Some(MenuModel { nodes, ..self.clone() })
     }
 
     /// Set the v2 mark. Replaces any v1 `title`.
@@ -765,6 +849,9 @@ impl RefreshController {
         let interval = self.interval.max(Duration::from_secs(1));
         *owned_worker = Some(std::thread::spawn(move || {
             let mailbox = Arc::new(Mutex::new(PendingRender::default()));
+            // The shortened-menu warning is reported once per oversized run,
+            // not on every refresh.
+            let mut shortened = false;
             state.request();
             while let Some((generation, render_error)) = state.next(interval) {
                 if let Some(failure) = render_error {
@@ -781,10 +868,30 @@ impl RefreshController {
                     Err(error) => host.snapshot_failed(&error),
                 };
                 if context.is_cancelled() { continue; }
-                let Some(model) = model else { continue; };
-                if let Err(error) = model.validate() {
-                    host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
-                    continue;
+                let Some(mut model) = model else { continue; };
+                match model.validate() {
+                    Ok(()) => shortened = false,
+                    Err(error) => {
+                        // An oversized menu renders cut down with a visible
+                        // warning row instead of freezing on the last good one.
+                        let fitted = model.fit_to_budget().filter(|fitted| fitted.validate().is_ok());
+                        match fitted {
+                            Some(fitted) if matches!(error, ModelError::TooManyNodes | ModelError::TooDeep) => {
+                                if !shortened {
+                                    host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
+                                    eprintln!(
+                                        "desktop-foundation: the menu has more than {MAX_MENU_NODES} rows or {MAX_MENU_DEPTH} levels; showing a shortened menu"
+                                    );
+                                    shortened = true;
+                                }
+                                model = fitted;
+                            }
+                            _ => {
+                                host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
+                                continue;
+                            }
+                        }
+                    }
                 }
                 {
                     let mut pending = mailbox.lock().expect("render mailbox lock poisoned");
@@ -851,6 +958,9 @@ impl Default for Options {
 struct MenuRoute {
     command: Option<String>,
     check: Option<(CheckMenuItem<tauri::Wry>, bool)>,
+    /// A mixed-state toggle: muda restores only on or off, so a click
+    /// forces the next refresh to rebuild and redraw the dash.
+    mixed: bool,
 }
 
 #[derive(Default)]
@@ -880,6 +990,7 @@ impl MenuBuild {
         self.routes.insert(native_id.clone(), MenuRoute {
             command: command.filter(|_| enabled).cloned(),
             check: None,
+            mixed: false,
         });
         native_id
     }
@@ -952,6 +1063,7 @@ fn build_items(
                         )?;
                         let route = build.routes.get_mut(&item_id).expect("registered menu route");
                         route.check = Some((check.clone(), checked));
+                        route.mixed = matches!(item.kind, MenuItemKind::State { state: ItemState::Mixed });
                         if matches!(item.kind, MenuItemKind::Radio { selected: true, .. }) {
                             // Choosing the selected radio is a no-op, never a
                             // request to deselect the group's current value.
@@ -972,6 +1084,19 @@ fn build_items(
                             handle, item_id, title, enabled, accelerator,
                         )?)),
                     },
+                }
+                // macOS shows an alternate in place of its item while ⌥ is
+                // held; the post-pass pairs them. Other platforms drop it.
+                if let Some(alternate) = item.alternate.as_ref().filter(|_| menu_plan::BUILDS_ALTERNATES) {
+                    let alternate_id = build.route(Some(&alternate.id), enabled);
+                    let title = compose_title(TitleParts {
+                        prefix: alternate.symbol.and_then(Symbol::fallback),
+                        title: &alternate.title,
+                        ..TitleParts::default()
+                    });
+                    items.push(Box::new(TauriMenuItem::with_id(
+                        handle, alternate_id, title, enabled, None::<&str>,
+                    )?));
                 }
             }
             MenuNode::Submenu { title, items: children, .. } => {
@@ -1094,8 +1219,26 @@ fn apply_model(
         tauri::image::Image::new_owned(icon.rgba.clone(), icon.width, icon.height)
     );
     tray.set_icon(image).map_err(|_| RenderFailure::native(RenderOperation::SetIcon))?;
+    #[cfg(target_os = "macos")]
+    decorate_macos(&tray, model);
     rendered.lock().expect("rendered menu lock poisoned").model = Some(model.clone());
     Ok(())
+}
+
+/// Applies the native menu post-pass and the template mark. Failures leave
+/// the text forms muda already shows, so they are not render errors.
+#[cfg(target_os = "macos")]
+fn decorate_macos(tray: &tauri::tray::TrayIcon<tauri::Wry>, model: &MenuModel) {
+    let plan = menu_plan::plan(&model.nodes, macos_menu::capabilities(), menu_plan::BUILDS_ALTERNATES);
+    let mark = model.status_mark.clone();
+    let label = mark.as_ref().and_then(|mark| mark.accessibility_label.clone())
+        .or_else(|| model.tooltip.clone());
+    let _ = tray.with_inner_tray_icon(move |inner| {
+        let Some(mtm) = objc2::MainThreadMarker::new() else { return };
+        let Some(status) = inner.ns_status_item() else { return };
+        macos_menu::decorate_status_menu(&status, &plan, mtm);
+        macos_menu::apply_mark(&status, mark.as_ref(), label.as_deref(), mtm);
+    });
 }
 
 /// The status-item title and icon for a model. A v2 mark shows its letters
@@ -1270,6 +1413,9 @@ pub fn run(
             let route = event_rendered.lock().expect("rendered menu lock poisoned")
                 .routes.get(event.id.0.as_str()).cloned();
             let Some(route) = route else { return; };
+            if route.mixed {
+                event_rendered.lock().expect("rendered menu lock poisoned").model = None;
+            }
             if let Some((check, checked)) = route.check {
                 // Native check items auto-toggle even when the command fails.
                 // The next daemon snapshot, not this click, owns the mark.
@@ -1532,6 +1678,53 @@ mod tests {
         let title = render_item_title(&long);
         assert_eq!(title.chars().count(), MAX_MENU_TITLE_CHARS);
         assert!(title.ends_with("……"), "the cut mark and the dialog glyph both stay");
+    }
+
+    #[test]
+    fn oversized_menus_render_shortened_with_a_warning_row() {
+        let mut model = MenuModel::default();
+        assert!(model.fit_to_budget().is_none());
+        model.nodes.push(MenuNode::header("Ghostget"));
+        for index in 0..300 {
+            model.nodes.push(MenuNode::interactive(
+                MenuItem::action(format!("row.{index}"), format!("Row {index}"))
+                    .with_alternate(Alternate::new(format!("row.{index}.copy"), "Copy ID")),
+            ));
+        }
+        model.nodes.push(MenuNode::Separator);
+        model.nodes.push(MenuNode::quit("Quit Ghostget"));
+        assert_eq!(model.validate(), Err(ModelError::TooManyNodes));
+        let fitted = model.fit_to_budget().unwrap();
+        assert!(fitted.validate().is_ok());
+        assert_eq!(fitted.nodes[0], MenuNode::header("Ghostget"));
+        assert_eq!(
+            fitted.nodes[1],
+            MenuNode::status(Symbol::StatusAttention, "Menu too large", Some("Showing 255 of 303 rows".into()))
+        );
+        assert_eq!(fitted.nodes.len(), MAX_MENU_NODES);
+        assert_eq!(fitted.nodes.last(), Some(&MenuNode::quit("Quit Ghostget")));
+        assert_eq!(fitted.nodes[fitted.nodes.len() - 2], MenuNode::Separator);
+        // Alternates share their item's slot, as on the wire.
+        model.nodes.truncate(200);
+        assert!(model.validate().is_ok() && model.fit_to_budget().is_none());
+    }
+
+    #[test]
+    fn menus_nested_too_deep_drop_the_deep_branch() {
+        let mut nested = vec![MenuNode::item("deep", "Deep row")];
+        for level in 0..=MAX_MENU_DEPTH {
+            nested = vec![MenuNode::submenu(format!("Level {level}"), nested)];
+        }
+        let mut model = MenuModel::default();
+        model.nodes = vec![MenuNode::item("top", "Top row")];
+        model.nodes.extend(nested);
+        model.nodes.push(MenuNode::quit("Quit"));
+        assert_eq!(model.validate(), Err(ModelError::TooDeep));
+        let fitted = model.fit_to_budget().unwrap();
+        assert!(fitted.validate().is_ok());
+        assert!(matches!(&fitted.nodes[0], MenuNode::Status { title, .. } if title == "Menu too large"));
+        assert_eq!(fitted.nodes[1], MenuNode::item("top", "Top row"));
+        assert_eq!(fitted.nodes.last(), Some(&MenuNode::quit("Quit")));
     }
 
     #[test]

@@ -7,3 +7,4 @@ export * from './prompt.js';
 export * from './service.js';
 export * from './errors.js';
 export * from './commands.js';
+export type * from './protocol-v2.js';

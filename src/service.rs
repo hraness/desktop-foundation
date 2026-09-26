@@ -164,6 +164,8 @@ pub enum LoginState {
     Outdated,
     /// A file this foundation did not write, or one someone edited.
     NotOurs,
+    /// The file could not be read.
+    Unknown,
 }
 
 fn owned(path: &Path, app_id: &str) -> Result<Option<String>, ServiceError> {
@@ -176,7 +178,7 @@ fn owned(path: &Path, app_id: &str) -> Result<Option<String>, ServiceError> {
         return Err(ServiceError::new(ServiceErrorKind::NotOurs));
     }
     let text =
-        fs::read_to_string(path).map_err(|_| ServiceError::new(ServiceErrorKind::NotOurs))?;
+        fs::read_to_string(path).map_err(|_| ServiceError::new(ServiceErrorKind::Unwritable))?;
     let (first, body) = text
         .split_once('\n')
         .ok_or(ServiceError::new(ServiceErrorKind::NotOurs))?;
@@ -198,7 +200,10 @@ pub fn login_state(plan: &LaunchAgentPlan) -> LoginState {
         Ok(Some(text)) if text == plan.contents => LoginState::On,
         Ok(Some(_)) => LoginState::Outdated,
         Ok(None) => LoginState::Off,
-        Err(_) => LoginState::NotOurs,
+        Err(ServiceError {
+            kind: ServiceErrorKind::NotOurs,
+        }) => LoginState::NotOurs,
+        Err(_) => LoginState::Unknown,
     }
 }
 
@@ -270,13 +275,35 @@ pub fn install(plan: &LaunchAgentPlan) -> Result<Change, ServiceError> {
         }
         let mut file: File = options.open(&temp)?;
         file.write_all(plan.contents.as_bytes())?;
-        file.sync_all()?;
-        fs::rename(&temp, &plan.path)
+        file.sync_all()
     };
     if write().is_err() {
         let _ = fs::remove_file(&temp);
         return Err(ServiceError::new(ServiceErrorKind::Unwritable));
     }
+    // Re-check right before replacing, and create with a hard link (which
+    // fails if a file appeared), so a file someone else wrote meanwhile is
+    // never overwritten.
+    let publish = || -> Result<(), ServiceError> {
+        if owned(&plan.path, app_id)? != existing {
+            return Err(ServiceError::new(ServiceErrorKind::NotOurs));
+        }
+        let result = if existing.is_none() {
+            fs::hard_link(&temp, &plan.path)
+        } else {
+            fs::rename(&temp, &plan.path)
+        };
+        result.map_err(|error| {
+            ServiceError::new(if error.kind() == std::io::ErrorKind::AlreadyExists {
+                ServiceErrorKind::NotOurs
+            } else {
+                ServiceErrorKind::Unwritable
+            })
+        })
+    };
+    let published = publish();
+    let _ = fs::remove_file(&temp);
+    published?;
     remove_legacy(plan);
     Ok(if existing.is_some() {
         Change::Updated
@@ -350,15 +377,39 @@ fn open_lock(path: &Path) -> Result<File, ServiceError> {
 impl InstanceLock {
     /// `Ok(None)` means another copy is running.
     pub fn acquire(state_dir: &Path, app_id: &str) -> Result<Option<InstanceLock>, ServiceError> {
-        real_directory(state_dir)?;
-        let file = open_lock(&lock_path(state_dir, app_id)?)?;
-        match fs2::FileExt::try_lock_exclusive(&file) {
-            Ok(()) => Ok(Some(InstanceLock { _file: file })),
-            Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
-                Ok(None)
+        // Validate before creating anything.
+        let path = lock_path(state_dir, app_id)?;
+        if !state_dir.is_dir() {
+            let mut builder = fs::DirBuilder::new();
+            builder.recursive(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
             }
-            Err(_) => Err(ServiceError::new(ServiceErrorKind::Unwritable)),
+            builder
+                .create(state_dir)
+                .map_err(|_| ServiceError::new(ServiceErrorKind::Unwritable))?;
         }
+        real_directory(state_dir)?;
+        let file = open_lock(&path)?;
+        // `is_running` holds a shared lock for an instant; retry briefly so
+        // a status check never makes a starting menu bar think it is a
+        // second copy.
+        for attempt in 0..10 {
+            match fs2::FileExt::try_lock_exclusive(&file) {
+                Ok(()) => return Ok(Some(InstanceLock { _file: file })),
+                Err(error)
+                    if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+                {
+                    if attempt < 9 {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
+                }
+                Err(_) => return Err(ServiceError::new(ServiceErrorKind::Unwritable)),
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -435,11 +486,14 @@ impl ServiceStatus {
             LoginState::NotOurs => {
                 format!("{warn} A login item for {name} was changed outside {command}")
             }
+            LoginState::Unknown => format!("{warn} Couldn't read {name}'s login item"),
         });
         let hint = match (self.login, self.running) {
-            (LoginState::Outdated | LoginState::NotOurs, _) => {
-                Some(format!("{command} menubar install"))
-            }
+            (LoginState::NotOurs, _) => Some(format!(
+                "Remove it in {SETTINGS_PATH}, then run {command} menubar install"
+            )),
+            (LoginState::Unknown, _) => Some(format!("{command} doctor")),
+            (LoginState::Outdated, _) => Some(format!("{command} menubar install")),
             (_, Some(false)) => Some(format!("{command} menubar start")),
             (LoginState::Off, _) => Some(format!("{command} menubar install")),
             _ => None,
@@ -687,7 +741,7 @@ mod tests {
         );
         assert_eq!(
             ServiceStatus { login: LoginState::NotOurs, running: Some(true) }.human(&spec, Glyphs::Ascii),
-            "OK AI Charts is in your menu bar\nWARN A login item for AI Charts was changed outside aicharts\n-> aicharts menubar install\n"
+            "OK AI Charts is in your menu bar\nWARN A login item for AI Charts was changed outside aicharts\n-> Remove it in System Settings › General › Login Items & Extensions, then run aicharts menubar install\n"
         );
         assert_eq!(
             serde_json::to_string(&ServiceStatus {

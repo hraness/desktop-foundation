@@ -348,6 +348,11 @@ mod platform {
     }
 
     pub fn show(spec: &NoticeSpec) -> Choice {
+        // No interactive desktop (SSH, a service, headless CI): let the
+        // caller use its CLI copy instead of waiting out the timeout.
+        if !crate::prompt::probe_capable() {
+            return Choice::Unavailable;
+        }
         let title = wide(&spec.title);
         let message = wide(&spec.message);
         let primary = wide(&spec.primary);

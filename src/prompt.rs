@@ -171,7 +171,7 @@ impl PromptCapability {
     }
 }
 
-fn safe_display(value: &str, max: usize) -> bool {
+pub(crate) fn safe_display(value: &str, max: usize) -> bool {
     !value.is_empty()
         && value.chars().count() <= max
         && !value.chars().any(|ch| {
@@ -206,9 +206,13 @@ fn validate(wire: WireSpec) -> Result<PromptSpec, ProtocolError> {
     })
 }
 
-/// Reads exactly one bounded `prompt-request` frame. Trailing bytes after the
-/// first line are rejected so a piped spec cannot smuggle a second request.
-pub fn read_spec(reader: &mut impl BufRead) -> Result<PromptSpec, ProtocolError> {
+/// Reads exactly one bounded line. Trailing bytes after the first line are
+/// rejected so a piped request cannot smuggle a second one. `missing` is the
+/// error code for empty input.
+pub(crate) fn read_single_frame(
+    reader: &mut impl BufRead,
+    missing: &'static str,
+) -> Result<Vec<u8>, ProtocolError> {
     let mut frame = Vec::new();
     loop {
         let bytes = reader
@@ -216,7 +220,7 @@ pub fn read_spec(reader: &mut impl BufRead) -> Result<PromptSpec, ProtocolError>
             .map_err(|_| ProtocolError("input-unavailable"))?;
         if bytes.is_empty() {
             return Err(if frame.is_empty() {
-                ProtocolError("prompt-required")
+                ProtocolError(missing)
             } else {
                 ProtocolError("partial-frame")
             });
@@ -232,9 +236,6 @@ pub fn read_spec(reader: &mut impl BufRead) -> Result<PromptSpec, ProtocolError>
         frame.extend_from_slice(&bytes[..take]);
         reader.consume(take);
         if end.is_some() {
-            let wire: WireSpec =
-                serde_json::from_slice(&frame).map_err(|_| ProtocolError("invalid-prompt"))?;
-            let spec = validate(wire)?;
             // A second request already buffered in the same write is smuggling;
             // never block waiting for EOF — callers may hold the pipe open.
             if !reader
@@ -244,9 +245,17 @@ pub fn read_spec(reader: &mut impl BufRead) -> Result<PromptSpec, ProtocolError>
             {
                 return Err(ProtocolError("trailing-input"));
             }
-            return Ok(spec);
+            return Ok(frame);
         }
     }
+}
+
+/// Reads exactly one bounded `prompt-request` frame.
+pub fn read_spec(reader: &mut impl BufRead) -> Result<PromptSpec, ProtocolError> {
+    let frame = read_single_frame(reader, "prompt-required")?;
+    let wire: WireSpec =
+        serde_json::from_slice(&frame).map_err(|_| ProtocolError("invalid-prompt"))?;
+    validate(wire)
 }
 
 pub fn emit_result(writer: &mut impl Write, result: &PromptResult) -> Result<(), ProtocolError> {
@@ -259,6 +268,11 @@ pub fn emit_result(writer: &mut impl Write, result: &PromptResult) -> Result<(),
 
 pub fn probe() -> PromptCapability {
     platform::probe()
+}
+
+/// Whether this host can show a native dialog right now.
+pub(crate) fn probe_capable() -> bool {
+    platform::probe().capable
 }
 
 /// Renders one dialog on the calling thread. Callers must run this on the

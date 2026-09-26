@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { exitQuietlyOnBrokenPipe } from './cli-style.js';
 import { handleCompanionCommand, openBrowser } from './commands.js';
 import { lintMenuCommand } from './lint-menu-command.js';
+import { layout } from './menu-kit.js';
 import { userPaths } from './platform.js';
 
 const HELP = `Usage: companion [command] [--json]
@@ -33,12 +34,17 @@ if (args[0] === 'lint-menu') {
 } else {
   try {
     process.exitCode = await handleCompanionCommand({
-      appId: 'org.hraness.companion.demo', name: 'Hraness Companion', title: 'Hc',
+      appId: 'org.hraness.companion.demo', name: 'Hraness Companion', mark: { symbol: 'mark.agent', letters: 'Hc' },
       stateDir: join(userPaths().dataDir, 'org.hraness.companion.demo'),
       ...(process.env.HRANESS_COMPANION_BINARY ? { binary: process.env.HRANESS_COMPANION_BINARY } : {}),
-      snapshot: () => [{ kind: 'label', label: 'CLI companion is running' }, { kind: 'action', id: 'docs', label: 'Open documentation' }, { kind: 'separator' }, { kind: 'quit', label: 'Quit' }],
+      snapshot: () => layout({
+        name: 'Hraness Companion',
+        status: { kind: 'status', symbol: 'status.running', label: 'Running' },
+        primary: { kind: 'action', id: 'docs', label: 'Open documentation', symbol: 'action.help', opens: 'browser' },
+        openAtLogin: true,
+      }),
       onAction: async id => { if (id === 'docs') await openBrowser('https://github.com/hraness/desktop-foundation'); },
       onDiagnostic: code => process.stderr.write(`companion: ${code}\n`),
-    }, { args, foreground: { executable: process.execPath, args: [fileURLToPath(import.meta.url), '--foreground'] } });
+    }, { args, command: 'companion', foreground: { executable: process.execPath, args: [fileURLToPath(import.meta.url), '--foreground'] } });
   } catch (error) { console.error(error instanceof Error ? error.message : 'companion-failed'); process.exitCode = 1; }
 }

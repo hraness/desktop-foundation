@@ -100,10 +100,10 @@ runtime and platform.
 | Command | Result |
 | --- | --- |
 | `<product> menubar` or `menubar start` | Verify/install the pinned executable, start one companion, then return after confirmation. |
-| `<product> menubar status --json` | Report running, stopped or unreachable owner state. |
-| `<product> menubar doctor --json` | Inspect artifact identity/integrity and platform guidance without downloading or launching. |
+| `<product> menubar status` | Report running, stopped or unreachable owner state, and whether it opens at login (`--json` for the owner state object). |
+| `<product> menubar doctor` | Check the platform, the helper and login startup without downloading or launching (`--json` adds artifact identity and integrity). |
 | `<product> menubar stop` | Ask the authenticated owner to stop; report ambiguous failures. |
-| `<product> menubar install` | Explicitly register next-login startup for the current user. |
+| `<product> menubar install` | Show the login item notice, then register next-login startup for the current user and save any `loginEnv` credentials. |
 | `<product> menubar uninstall` | Remove owned login registration; retain the running companion and product data. |
 
 Do not enable login startup as a side effect of ordinary installation or first

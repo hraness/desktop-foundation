@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { autostartState, planAutostart, removeAutostart, setAutostart, type AutostartPlan } from './autostart.js';
 import { ensureBinary, parseReleaseManifest, type ReleaseManifest } from './install.js';
+import { removeLoginEnvironment, saveLoginEnvironment } from './login-env.js';
 import { actionErrorItem, degradedMenu, OPEN_AT_LOGIN_SUBTITLE, type DegradedMenuOptions } from './menu-kit.js';
 import { defaultPermissionIO, openPermissionSettings, type PermissionIO } from './permissions.js';
 import { validateSnapshot, parseRunnerEvent, MAX_FRAME_BYTES, type CompanionIdentity, type MenuItem, type Snapshot } from './protocol.js';
@@ -70,6 +71,13 @@ export interface CompanionOptions extends Omit<CompanionIdentity, 'title'> {
     home?: string;
     env?: NodeJS.ProcessEnv;
   };
+  /**
+   * Environment variables a login-started menu bar needs, such as an API
+   * token. `menubar install` (and turning on "Open at login") saves their
+   * current values to a private file in `stateDir`; the login-started
+   * process fills in any that are unset. See `saveLoginEnvironment`.
+   */
+  loginEnv?: readonly string[];
   /** Test hook for `foundation.settings.<kind>` actions. */
   permissionIO?: PermissionIO;
   refreshMs?: number;
@@ -322,7 +330,10 @@ export async function runCompanion(options: CompanionOptions): Promise<Companion
     if (id === 'foundation.login') {
       if (!loginPlan) throw new MenuActionError("Couldn't change Open at login");
       const on = (await loginState()) === 'on';
-      try { if (on) await removeAutostart(loginPlan); else await setAutostart(loginPlan); }
+      try {
+        if (on) { await removeAutostart(loginPlan); await removeLoginEnvironment(options.stateDir); }
+        else { await setAutostart(loginPlan); if (options.loginEnv?.length) await saveLoginEnvironment(options.stateDir, options.loginEnv); }
+      }
       catch { throw new MenuActionError(on ? "Couldn't turn off Open at login" : "Couldn't turn on Open at login"); }
       return;
     }

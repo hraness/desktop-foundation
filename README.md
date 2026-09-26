@@ -66,9 +66,22 @@ await handleCompanionCommand({
 The default command returns after startup is confirmed. The companion remains
 until Quit or `menubar stop`; another start reports the existing instance.
 `install` opts into next-login startup, `uninstall` removes that entry,
-`status` checks the authenticated owner, and `doctor --json` provides platform
-guidance. Uninstall preserves the running companion and shared cache; use
+`status` checks the authenticated owner, and `doctor` checks the platform and
+the helper. Uninstall preserves the running companion and shared cache; use
 `stop` separately.
+
+People at a terminal get plain lines (`✓ My Tool is in your menu bar.`, one
+`Next:` hint), and the first start shows one `↻ Downloading the menu bar
+helper (1.8 MB)…` line. `--json`, or an agent audience from `detectAudience`,
+prints the JSON result instead, through `write` when the product passes one.
+Pass `command: 'mytool menubar'` so help and next steps name the real command.
+`install` prints the login item notice first.
+
+A login item starts without the terminal's environment. List the variables
+the menu bar needs in `loginEnv` (for example `['MYTOOL_API_TOKEN']`):
+`install` saves their current values to a private file in `stateDir`, and the
+login-started process fills in any that are unset. `uninstall` deletes the
+file. Values never go into the login item, argv, menus or logs.
 
 Reads and actions receive cancellation signals. Product handlers preserve
 their permission checks and reconcile uncertain outcomes; the SDK never

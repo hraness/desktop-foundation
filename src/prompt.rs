@@ -209,7 +209,8 @@ fn validate(wire: WireSpec) -> Result<PromptSpec, ProtocolError> {
 /// Reads exactly one bounded line. Trailing bytes after the first line are
 /// rejected so a piped request cannot smuggle a second one. `missing` is the
 /// error code for empty input.
-pub(crate) fn read_single_frame(
+#[doc(hidden)]
+pub fn read_single_frame(
     reader: &mut impl BufRead,
     missing: &'static str,
 ) -> Result<Vec<u8>, ProtocolError> {

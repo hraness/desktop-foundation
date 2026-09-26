@@ -2,12 +2,13 @@
 
 - `src/lib.rs` contains the product-neutral foundation core: `MenuNode`/`MenuModel` data model (including per-item preview icons), `Host` trait, accessory activation, status-item lifecycle, menu construction, and the refresh loop. It is built on Tauri's maintained tray and activation APIs.
 - `src/outputs.rs` contains the reusable outputs-directory section: bounded newest-first listing, image thumbnails, and open/reveal dispatch for agent-dropped files.
+- `src/service.rs` owns login startup and liveness for Rust menu bars; `src/identity.rs` builds and signs the local macOS app and runs `--launch`; `src/notice.rs` is the one-shot notice dialog.
 - `src/browser.rs` provides human-initiated, asynchronous HTTPS handoffs for existing Rust adapters; `sdk/src/browser.ts` owns the matching SDK launcher. Keep product URLs and support policy in the consumer.
 
 # Guidelines
 
 - Keep this crate product-neutral. It owns UI mechanics only — never daemon semantics, credentials, product state, paths, or command names. Product adapters live in each product's repository.
-- Ship unbundled CLI companions only. The shared runner creates no windows. Do not introduce app bundles, installer packages, publisher signing credentials, notarization jobs, or automatic OS trust-policy workarounds. Existing Rust window APIs remain for pinned consumers; new adapters use the shared runner and browser UI.
+- Ship CLI companions. The shared runner creates no windows. On macOS the only app bundle is the local one `src/identity.rs` assembles on the person's own Mac and signs with the local identity (see `docs/identity.md`); never distribute a bundle, and do not introduce installer packages, publisher signing credentials, notarization jobs, trust-setting edits, or automatic OS trust-policy workarounds. Create the local signing identity only through the explicit call a product makes after its notice, and never against the real login keychain in tests. Existing Rust window APIs remain for pinned consumers; new adapters use the shared runner and browser UI.
 - `sdk/` owns the portable TypeScript installer, lifecycle, diagnostics and protocol client. Keep Node 22 compatibility and use the built-in Node test runner. `scripts/` and `.github/workflows/companion.yml` build and verify the six target artifacts from one source. Run `npm run check:sdk` plus the Rust gates before delivery.
 - Human OS approval is a documented installation step, never an automatic security-policy edit. Fail closed on corrupted assets and managed-device policy blocks. Product actions retain their original permissions and live qualification.
 - `Host::snapshot` may perform bounded local IO and always runs off the UI thread. `Host::dispatch` must not block.

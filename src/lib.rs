@@ -11,6 +11,7 @@
 //! product helpers retain their own OS permission boundaries.
 
 pub mod browser;
+pub mod identity;
 pub mod notice;
 pub mod outputs;
 pub mod prompt;

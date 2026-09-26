@@ -2,7 +2,7 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Audience } from '../src/audience.js';
@@ -43,6 +43,7 @@ async function setup(t: TestContext, overrides: Partial<CompanionOptions> = {}) 
       write: result => { results.push(result); }, audience: extra.audience ?? 'human', output, permissionIO: io, home: dir, env,
       ...(extra.fetch ? { fetch: extra.fetch } : {}),
       ...(extra.foreground ? { foreground: extra.foreground } : {}),
+      ...(extra.app ? { app: extra.app } : {}),
     });
     return { code, stdout, stderr, results, notices: notices.join('') };
   };
@@ -124,6 +125,31 @@ test('install shows the login item notice once, saves login credentials, uninsta
   assert.equal(none.stdout, "○ Sponge wasn't set to open at login.\n");
   const agent = await run(['install'], { audience: 'agent' });
   assert.equal(agent.notices, '{"type":"permission-notice","product":"Sponge","kind":"login-item","message":"macOS will show a notice that bun can open at login. That\'s Sponge\'s menu bar. Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions."}\n');
+});
+
+test('install through the product app names the app and replaces the old login entry', { skip: process.platform === 'darwin' ? false : 'macOS app bundles' }, async t => {
+  const { run, dir } = await setup(t);
+  const app = { name: 'Sponge', argvFile: join(dir, 'state', 'launch.json') };
+  const legacy = join(dir, 'Library', 'LaunchAgents', 'app.hraness.companion.sponge.plist');
+  await run(['install']);
+  assert.ok(existsSync(legacy));
+
+  const missing = await run(['install'], { app });
+  assert.equal(missing.code, 1);
+  assert.equal(missing.notices, '', 'no notice for a login item that cannot be made');
+  assert.equal(missing.stderr, "✗ Sponge.app isn't built yet, so it can't open at login.\n→ sponge menubar doctor\n");
+
+  const macos = join(dir, 'Applications', 'Hraness', 'Sponge.app', 'Contents', 'MacOS');
+  await mkdir(macos, { recursive: true });
+  await writeFile(join(macos, 'Sponge'), 'fake runner, never executed', { mode: 0o755 });
+  const moved = await run(['install'], { app });
+  assert.equal(moved.code, 0);
+  assert.equal(moved.notices, "🔐 macOS will show a notice that Sponge can open at login.\n   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.\n");
+  assert.equal(moved.stdout, '✓ Sponge will open at login.\n');
+  assert.ok(existsSync(join(dir, 'Library', 'LaunchAgents', 'app.hraness.sponge.plist')));
+  assert.equal(existsSync(legacy), false);
+  const removed = await run(['uninstall'], { app });
+  assert.equal(removed.stdout, "✓ Sponge won't open at login anymore.\n");
 });
 
 test('login credentials load only into unset variables and only from a private file', { skip: process.platform === 'win32' ? 'POSIX file modes' : false }, async t => {

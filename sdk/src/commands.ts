@@ -1,7 +1,7 @@
 export { openBrowser } from './browser.js';
 import { basename } from 'node:path';
 import { detectAudience, type Audience } from './audience.js';
-import { autostartState, planAutostart, removeAutostart, setAutostart, type AutostartPlan } from './autostart.js';
+import { assertAppBuilt, autostartState, planAutostart, removeAutostart, setAutostart, type AutostartApp, type AutostartPlan } from './autostart.js';
 import { packagedManifest, type CompanionOptions } from './client.js';
 import { createCliOutput, formatBytes, type CliOutput } from './cli-style.js';
 import { CompanionError } from './errors.js';
@@ -15,6 +15,12 @@ export interface CompanionInvocation {
   args: readonly string[];
   /** Exact product-owned command for the foreground branch, without shell interpolation. */
   foreground: { executable: string; args: readonly string[] };
+  /**
+   * On macOS, the product's local app (docs/identity.md). When set, the login
+   * item starts the product through it, so Login Items shows the product's
+   * name, and an older login entry for the product is replaced.
+   */
+  app?: AutostartApp;
   /**
    * Receives the result object when the output is JSON (`--json`, or an agent
    * audience). People at a terminal get text instead.
@@ -66,6 +72,7 @@ export function describeCompanionError(error: unknown, name: string, command = '
       cache_conflict: [`Another install of the menu bar helper got in the way.`, command],
       autostart_conflict: [`A login item with ${name}'s name already exists that ${name} didn't create, so it was left alone.`, doctor],
       os_approval_required: [`Your computer blocked the menu bar helper.`, doctor],
+      app_missing: [`${name}.app isn't built yet, so it can't open at login.`, doctor],
     };
     const [message, next] = messages[error.code] ?? [error.message, doctor];
     return { code: error.code, message, next };
@@ -96,7 +103,7 @@ export async function handleCompanionCommand(options: CompanionOptions, invocati
 
   if (verb === '--foreground') {
     if (options.loginEnv?.length) await loadLoginEnvironment(options.stateDir, options.loginEnv);
-    return await serveCompanion({ ...options, loginItem: options.loginItem ?? invocation.foreground });
+    return await serveCompanion({ ...options, loginItem: options.loginItem ?? { ...invocation.foreground, ...(invocation.app ? { app: invocation.app } : {}) } });
   }
   if (verb === 'help' || verb === '--help' || verb === '-h' || args.includes('--help') || args.includes('-h')) {
     output.result(companionHelp(name, command).trimEnd());
@@ -111,6 +118,7 @@ export async function handleCompanionCommand(options: CompanionOptions, invocati
 
   const plan = (): AutostartPlan => planAutostart({
     id: options.appId, label: name, executable: invocation.foreground.executable, args: [...invocation.foreground.args],
+    ...(invocation.app ? { app: invocation.app } : {}),
     ...(invocation.home ? { home: invocation.home } : {}), ...(invocation.env ? { env: invocation.env } : {}),
   });
   const loginState = async () => { try { return await autostartState(plan()); } catch { return 'unknown' as const; } };
@@ -197,9 +205,12 @@ export async function handleCompanionCommand(options: CompanionOptions, invocati
   async function install(): Promise<number> {
     const current = plan();
     const state = await autostartState(current);
+    await assertAppBuilt(current);
     if (state !== 'on' && state !== 'conflict') {
       // Login items only notify, so the notice needs no confirmation.
-      const need = LOGIN_ITEM({ product: name, command, requester: basename(invocation.foreground.executable).replace(/\.exe$/i, '') });
+      // macOS names whatever the login item starts: the app when there is one.
+      const requester = current.launch ? invocation.app!.name : basename(invocation.foreground.executable).replace(/\.exe$/i, '');
+      const need = LOGIN_ITEM({ product: name, command, requester });
       await prePrompt(need, { audience: json ? 'agent' : output.audience, ...(invocation.permissionIO ? { io: invocation.permissionIO } : {}) });
     }
     await setAutostart(current);

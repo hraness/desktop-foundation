@@ -1,6 +1,7 @@
 export type CompanionErrorCode =
   | 'unsupported_target' | 'invalid_manifest' | 'download_failed' | 'integrity_failed'
-  | 'unsafe_path' | 'cache_conflict' | 'autostart_conflict' | 'os_approval_required';
+  | 'unsafe_path' | 'cache_conflict' | 'autostart_conflict' | 'os_approval_required'
+  | 'app_missing';
 
 export class CompanionError extends Error {
   constructor(readonly code: CompanionErrorCode, message: string, readonly guidance?: string) {

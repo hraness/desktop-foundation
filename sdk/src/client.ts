@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { autostartState, planAutostart, removeAutostart, setAutostart, type AutostartPlan } from './autostart.js';
+import { autostartState, planAutostart, removeAutostart, setAutostart, type AutostartApp, type AutostartPlan } from './autostart.js';
 import { ensureBinary, parseReleaseManifest, type ReleaseManifest } from './install.js';
 import { removeLoginEnvironment, saveLoginEnvironment } from './login-env.js';
 import { actionErrorItem, degradedMenu, OPEN_AT_LOGIN_SUBTITLE, type DegradedMenuOptions } from './menu-kit.js';
@@ -67,6 +67,8 @@ export interface CompanionOptions extends Omit<CompanionIdentity, 'title'> {
   loginItem?: {
     executable: string;
     args: readonly string[];
+    /** On macOS, start through the product's local app so Login Items shows its name. */
+    app?: AutostartApp;
     /** Test hooks: the home directory and environment the login entry is planned for. */
     home?: string;
     env?: NodeJS.ProcessEnv;
@@ -178,8 +180,8 @@ export async function runCompanion(options: CompanionOptions): Promise<Companion
   // The foundation "Open at login" row.
   const loginPlan: AutostartPlan | undefined = (() => {
     if (!options.loginItem) return undefined;
-    const { executable, args, home, env } = options.loginItem;
-    try { return planAutostart({ id: options.appId, label: options.name, executable, args: [...args], ...(home ? { home } : {}), ...(env ? { env } : {}) }); }
+    const { executable, args, app, home, env } = options.loginItem;
+    try { return planAutostart({ id: options.appId, label: options.name, executable, args: [...args], ...(app ? { app } : {}), ...(home ? { home } : {}), ...(env ? { env } : {}) }); }
     catch { return undefined; }
   })();
   async function loginState(): Promise<'on' | 'off' | undefined> {

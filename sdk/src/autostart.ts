@@ -6,7 +6,23 @@ import { CompanionError } from './errors.js';
 import { assertPhysicalPath } from './install.js';
 import type { PlatformOptions } from './platform.js';
 
-export interface AutostartOptions extends PlatformOptions { id: string; label: string; executable: string; args?: string[] }
+/**
+ * A product's local app, built by `hraness-companion --assemble-app` at
+ * `~/Applications/Hraness/<name>.app` (see docs/identity.md). With it, the
+ * macOS login item starts the product through the app, so Login Items and
+ * privacy prompts show the product's name instead of `node`, `bun` or `env`.
+ * Ignored on Windows and Linux.
+ */
+export interface AutostartApp {
+  /** Registry display name, such as "Textbutler". The app is `<name>.app`. */
+  name: string;
+  /**
+   * Owner-only file in the product's state directory that `--launch` reads
+   * the product command from, so no values show in `ps` or the plist.
+   */
+  argvFile: string;
+}
+export interface AutostartOptions extends PlatformOptions { id: string; label: string; executable: string; args?: string[]; app?: AutostartApp }
 export interface AutostartPlan {
   id: string;
   platform: 'darwin' | 'linux' | 'win32';
@@ -14,6 +30,10 @@ export interface AutostartPlan {
   contents: string;
   activation: 'next-login';
   requirements: string[];
+  /** Older login entries for this product. Turning login on removes them when they are ours. */
+  legacy?: string[];
+  /** The argv file `--launch` reads, when the login item starts the product's app. */
+  launch?: { path: string; contents: string; program: string };
 }
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 function prefix(platform: string) { return platform === 'darwin' ? '<!-- ' : platform === 'win32' ? "' " : '# '; }
@@ -47,7 +67,25 @@ export function planAutostart(options: AutostartOptions): AutostartPlan {
   let path: string;
   let body: string;
   const requirements: string[] = [];
-  if (platform === 'darwin') {
+  if (platform === 'darwin' && options.app) {
+    // Same file the Rust service helper writes (src/service.rs `plan`), so
+    // either side recognizes and migrates the other's login item.
+    const { name, argvFile } = options.app;
+    if (typeof name !== 'string' || !name || name.length > 128 || name.startsWith('.') || /[/:\x00-\x1f\x7f]/.test(name)) throw new CompanionError('unsafe_path', 'The app name must be a short display name without slashes.');
+    if (typeof argvFile !== 'string' || !posix.isAbsolute(argvFile) || /[\x00-\x1f\x7f]/.test(argvFile) || argvFile.length > 1024) throw new CompanionError('unsafe_path', 'The app launch file must be an absolute path.');
+    // `--launch` reads at most 64 entries, the executable included.
+    if (args.length > 63) throw new CompanionError('unsafe_path', 'Autostart configuration is too large.');
+    const label = `app.hraness.${options.id}`;
+    const agents = posix.join(home, 'Library', 'LaunchAgents');
+    const program = posix.join(home, 'Applications', 'Hraness', `${name}.app`, 'Contents', 'MacOS', name);
+    path = posix.join(agents, `${label}.plist`);
+    body = `<plist version="1.0"><dict>\n<key>Label</key><string>${xml(label)}</string>\n<key>ProgramArguments</key><array>${[program, '--launch', argvFile].map(arg => `<string>${xml(arg)}</string>`).join('')}</array>\n<key>AssociatedBundleIdentifiers</key><array><string>${xml(label)}</string></array>\n<key>RunAtLoad</key><true/>\n<key>LimitLoadToSessionType</key><string>Aqua</string>\n<key>ProcessType</key><string>Interactive</string>\n</dict></plist>\n`;
+    return {
+      id: options.id, platform: 'darwin', path, contents: header(options.id, platform, body) + body, activation: 'next-login', requirements,
+      legacy: [posix.join(agents, `app.hraness.companion.${options.id}.plist`)],
+      launch: { path: argvFile, contents: JSON.stringify([options.executable, ...args]), program },
+    };
+  } else if (platform === 'darwin') {
     const label = `app.hraness.companion.${options.id}`;
     path = posix.join(home, 'Library', 'LaunchAgents', `${label}.plist`);
     body = `<plist version="1.0"><dict>\n<key>Label</key><string>${label}</string>\n<key>ProgramArguments</key><array>${[options.executable, ...args].map(arg => `<string>${xml(arg)}</string>`).join('')}</array>\n<key>RunAtLoad</key><true/>\n<key>LimitLoadToSessionType</key><string>Aqua</string>\n</dict></plist>\n`;
@@ -69,21 +107,67 @@ export function planAutostart(options: AutostartOptions): AutostartPlan {
   }
   return { id: options.id, platform: platform as AutostartPlan['platform'], path, contents: header(options.id, platform, body) + body, activation: 'next-login', requirements };
 }
-async function ownedContents(plan: AutostartPlan): Promise<string | undefined> {
+async function ownedAt(path: string, id: string, platform: string): Promise<string | undefined> {
   let info;
-  try { info = await lstat(plan.path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  try { info = await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
   if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024) throw new CompanionError('autostart_conflict', 'Refusing to change an autostart file that is not an owned regular file.');
-  const existing = await readFile(plan.path, 'utf8');
+  const existing = await readFile(path, 'utf8');
   const newline = existing.indexOf('\n');
-  if (newline < 0 || existing.slice(0, newline + 1) !== header(plan.id, plan.platform, existing.slice(newline + 1))) throw new CompanionError('autostart_conflict', 'Refusing to change an unrelated or manually edited autostart file.');
+  if (newline < 0 || existing.slice(0, newline + 1) !== header(id, platform, existing.slice(newline + 1))) throw new CompanionError('autostart_conflict', 'Refusing to change an unrelated or manually edited autostart file.');
   return existing;
+}
+const ownedContents = (plan: AutostartPlan) => ownedAt(plan.path, plan.id, plan.platform);
+/** Our legacy files that still exist. Anything that is not ours is left alone. */
+async function ownedLegacy(plan: AutostartPlan): Promise<string[]> {
+  const found: string[] = [];
+  for (const path of plan.legacy ?? []) {
+    try { if (await ownedAt(path, plan.id, plan.platform) !== undefined) found.push(path); }
+    catch (error) { if (!(error instanceof CompanionError && error.code === 'autostart_conflict')) throw error; }
+  }
+  return found;
+}
+/** The launch file's contents when it is an owner-only regular file, otherwise undefined. */
+async function launchContents(path: string): Promise<string | undefined> {
+  let info;
+  try { info = await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024 || (info.mode & 0o077) !== 0) return;
+  if (typeof process.getuid === 'function' && info.uid !== process.getuid()) return;
+  return readFile(path, 'utf8');
 }
 function validatePlan(plan: AutostartPlan) {
   if (plan.platform !== process.platform) throw new CompanionError('unsupported_target', 'Cannot modify autostart files for another operating system.');
-  const filename = plan.platform === 'darwin' ? `app.hraness.companion.${plan.id}.plist` : `hraness-companion-${plan.id}.${plan.platform === 'win32' ? 'vbs' : 'desktop'}`;
+  const app = plan.launch !== undefined;
+  const filename = plan.platform === 'darwin' ? `app.hraness.${app ? '' : 'companion.'}${plan.id}.plist` : `hraness-companion-${plan.id}.${plan.platform === 'win32' ? 'vbs' : 'desktop'}`;
   const newline = plan.contents.indexOf('\n');
+  const legacyName = `app.hraness.companion.${plan.id}.plist`;
+  let argv: unknown;
+  try { argv = app ? JSON.parse(plan.launch!.contents) : undefined; } catch { argv = undefined; }
   if (!/^[a-z][a-z0-9.-]{0,63}$/.test(plan.id) || plan.id.includes('..') || basename(plan.path) !== filename
-      || newline < 0 || plan.contents.slice(0, newline + 1) !== header(plan.id, plan.platform, plan.contents.slice(newline + 1))) throw new CompanionError('unsafe_path', 'Autostart plan is not a valid framework-owned file.');
+      || newline < 0 || plan.contents.slice(0, newline + 1) !== header(plan.id, plan.platform, plan.contents.slice(newline + 1))
+      || (plan.legacy ?? []).some(path => dirname(path) !== dirname(plan.path) || basename(path) !== legacyName)
+      || (app && (plan.platform !== 'darwin' || !posix.isAbsolute(plan.launch!.path) || !Array.isArray(argv) || argv.length === 0 || argv.length > 64
+        || !argv.every(arg => typeof arg === 'string') || !posix.isAbsolute(argv[0] as string) || !posix.isAbsolute(plan.launch!.program)
+        || !plan.contents.includes(`<array><string>${xml(plan.launch!.program)}</string><string>--launch</string><string>${xml(plan.launch!.path)}</string></array>`)))) throw new CompanionError('unsafe_path', 'Autostart plan is not a valid framework-owned file.');
+}
+/** Writes the launch file atomically and owner-only. Returns whether it changed. */
+async function writeLaunch(launch: NonNullable<AutostartPlan['launch']>): Promise<boolean> {
+  const parent = dirname(launch.path);
+  await assertPhysicalPath(parent);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  await assertPhysicalPath(parent);
+  const info = await lstat(parent);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new CompanionError('unsafe_path', 'The app launch file must be in a real directory.');
+  try {
+    const current = await lstat(launch.path);
+    if (!current.isFile() || current.isSymbolicLink()) throw new CompanionError('autostart_conflict', 'Refusing to replace an app launch file that is not a regular file.');
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  if (await launchContents(launch.path) === launch.contents) return false;
+  const temp = join(parent, `.launch-argv-${randomUUID()}.tmp`);
+  try {
+    await writeFile(temp, launch.contents, { flag: 'wx', mode: 0o600 });
+    await rename(temp, launch.path);
+  } finally { await unlink(temp).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
+  return true;
 }
 /**
  * Whether this framework's login entry exists: `on` (exactly this plan),
@@ -94,11 +178,24 @@ export async function autostartState(plan: AutostartPlan): Promise<'on' | 'outda
   validatePlan(plan);
   try {
     const existing = await ownedContents(plan);
-    return existing === undefined ? 'off' : existing === plan.contents ? 'on' : 'outdated';
+    // A login entry this product wrote before it had an app still starts it.
+    if (existing === undefined) return (await ownedLegacy(plan)).length ? 'outdated' : 'off';
+    if (existing !== plan.contents) return 'outdated';
+    if (plan.launch && await launchContents(plan.launch.path) !== plan.launch.contents) return 'outdated';
+    return (await ownedLegacy(plan)).length ? 'outdated' : 'on';
   } catch (error) {
     if (error instanceof CompanionError && error.code === 'autostart_conflict') return 'conflict';
     throw error;
   }
+}
+/**
+ * Fails with `app_missing` when the plan starts the product's app and the
+ * app isn't built, so a login item never points at nothing.
+ */
+export async function assertAppBuilt(plan: AutostartPlan): Promise<void> {
+  if (!plan.launch) return;
+  const program = await lstat(plan.launch.program).catch(() => undefined);
+  if (!program?.isFile()) throw new CompanionError('app_missing', `${basename(plan.launch.program)}.app is not built in ${dirname(dirname(dirname(dirname(plan.launch.program))))}.`);
 }
 /** Explicit opt-in only. Activates at the next graphical login, not immediately. */
 export async function setAutostart(plan: AutostartPlan): Promise<{ path: string; changed: boolean; activation: 'next-login' }> {
@@ -110,7 +207,10 @@ export async function setAutostart(plan: AutostartPlan): Promise<{ path: string;
   const info = await lstat(parent);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new CompanionError('unsafe_path', 'Autostart destination must be a real directory.');
   const existing = await ownedContents(plan);
-  if (existing === plan.contents) return { path: plan.path, changed: false, activation: 'next-login' };
+  await assertAppBuilt(plan);
+  // The launch file goes first, so the login item never points at a missing one.
+  const launched = plan.launch ? await writeLaunch(plan.launch) : false;
+  if (existing === plan.contents) return { path: plan.path, changed: (await removeLegacy(plan)) || launched, activation: 'next-login' };
   const temp = join(parent, `.hraness-companion-${randomUUID()}.tmp`);
   try {
     await writeFile(temp, plan.contents, { flag: 'wx', mode: 0o600 });
@@ -123,13 +223,28 @@ export async function setAutostart(plan: AutostartPlan): Promise<{ path: string;
       }
     } else await rename(temp, plan.path);
   } finally { await unlink(temp).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
+  // Replace the old login entry in the same command, after the new one exists.
+  await removeLegacy(plan);
   return { path: plan.path, changed: true, activation: 'next-login' };
 }
-/** Removes only this framework's unedited file. Does not stop a running companion. */
+async function removeLegacy(plan: AutostartPlan): Promise<boolean> {
+  let removed = false;
+  for (const path of await ownedLegacy(plan)) {
+    await unlink(path).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    removed = true;
+  }
+  return removed;
+}
+/**
+ * Removes only this framework's unedited files, including an older login
+ * entry for the same product. Does not stop a running companion. The app's
+ * launch file stays, like the app itself.
+ */
 export async function removeAutostart(plan: AutostartPlan): Promise<{ path: string; removed: boolean }> {
   validatePlan(plan);
   await assertPhysicalPath(dirname(plan.path));
-  if (await ownedContents(plan) === undefined) return { path: plan.path, removed: false };
-  await unlink(plan.path);
-  return { path: plan.path, removed: true };
+  const current = await ownedContents(plan) !== undefined;
+  if (current) await unlink(plan.path);
+  const legacy = await removeLegacy(plan);
+  return { path: plan.path, removed: current || legacy };
 }

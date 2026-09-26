@@ -14,6 +14,7 @@ pub mod browser;
 pub mod notice;
 pub mod outputs;
 pub mod prompt;
+pub mod service;
 pub mod protocol;
 pub mod protocol_v2;
 pub mod symbols;

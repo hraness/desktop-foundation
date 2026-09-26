@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use crate::{MenuItem, MenuNode, RgbaIcon};
+use crate::{Alternate, MenuItem, MenuNode, Opens, RgbaIcon, Symbol};
 
-const DEFAULT_LIMIT: usize = 20;
+const DEFAULT_LIMIT: usize = 5;
 const MAX_LABEL: usize = 80;
 const MAX_DECODE_BYTES: u64 = 24 * 1024 * 1024;
 const THUMB_SIZE: u32 = 32;
@@ -72,7 +72,7 @@ impl Fingerprint {
 }
 
 struct ListedFile { name: String, path: PathBuf, fingerprint: Fingerprint }
-struct Listing { files: Vec<ListedFile>, partial: bool, available: bool }
+struct Listing { files: Vec<ListedFile>, total: usize, partial: bool, available: bool }
 
 impl OutputsSection {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
@@ -100,7 +100,7 @@ impl OutputsSection {
     }
 
     fn scan(&self) -> Listing {
-        let mut listing = Listing { files: Vec::new(), partial: false, available: false };
+        let mut listing = Listing { files: Vec::new(), total: 0, partial: false, available: false };
         // Do not follow a redirected output root or offer links as files.
         if !fs::symlink_metadata(&self.dir).is_ok_and(|m| m.is_dir()) { return listing; }
         let Ok(read) = fs::read_dir(&self.dir) else { return listing };
@@ -115,38 +115,68 @@ impl OutputsSection {
             listing.files.push(ListedFile { name, path: entry.path(), fingerprint: Fingerprint::of(&meta) });
         }
         listing.files.sort_by(|a, b| b.fingerprint.modified.cmp(&a.fingerprint.modified).then_with(|| a.name.cmp(&b.name)));
+        listing.total = listing.files.len();
         listing.files.truncate(self.limit);
         listing
     }
 
-    /// Menu nodes for the section: one item per entry plus a folder item.
-    /// Empty directories retain the folder action so users can find the destination.
+    /// Menu nodes for the section: the newest files (5 by default), each
+    /// with its type as a badge, size and age as a subtitle and an Option-key
+    /// alternate that shows it in the folder; then one folder row, which
+    /// reads "Show all N outputs" when more files exist. Empty and
+    /// unavailable folders keep a plain explanation.
     pub fn nodes(&self) -> Vec<MenuNode> {
+        self.nodes_at(SystemTime::now())
+    }
+
+    fn nodes_at(&self, now: SystemTime) -> Vec<MenuNode> {
         let listing = self.scan();
         let mut offered = HashMap::new();
         let mut nodes = Vec::new();
-        let mut reveal = Vec::new();
         if !listing.available {
             if let Ok(mut old) = self.offered.lock() { old.clear(); }
             return vec![MenuNode::disabled("Outputs folder unavailable")];
         }
-        if listing.files.is_empty() { nodes.push(MenuNode::disabled("No outputs yet")); }
-        if listing.partial { nodes.push(MenuNode::disabled("Showing outputs from a partial folder scan")); }
+        if listing.files.is_empty() {
+            nodes.push(MenuNode::interactive(
+                MenuItem::inert("No outputs yet").with_subtitle("Agents save finished files here"),
+            ));
+        }
+        let shown = listing.files.len();
+        // Alternates exist only on macOS; elsewhere "Show in folder" keeps
+        // its own submenu so the action stays reachable.
+        let mut reveal = Vec::new();
         for file in listing.files {
             let key = file_key(&file.name, &file.fingerprint);
             offered.insert(key.clone(), (file.path.clone(), file.fingerprint.clone()));
             let entry = self.entry(file);
-            let label = label_of(&entry.name);
-            let mut item = MenuItem::action(format!("{OPEN_PREFIX}{key}"), label.clone())
-                .with_badge(file_detail(&entry.name, entry.size));
+            let mut item = MenuItem::action(format!("{OPEN_PREFIX}{key}"), label_of(&entry.name))
+                .with_symbol(if is_image(&entry.name) { Symbol::ItemImage } else { Symbol::ItemFile })
+                .with_badge(file_kind(&entry.name))
+                .with_subtitle(file_detail(entry.size, entry.modified, now))
+                .with_alternate(
+                    Alternate::new(format!("{REVEAL_PREFIX}{key}"), reveal_label()).with_symbol(Symbol::ActionFolder),
+                );
             if let Some(icon) = entry.icon { item = item.with_icon(icon); }
+            if !cfg!(target_os = "macos") {
+                reveal.push(MenuNode::item(format!("{REVEAL_PREFIX}{key}"), item.title.clone()));
+            }
             nodes.push(MenuNode::interactive(item));
-            reveal.push(MenuNode::item(format!("{REVEAL_PREFIX}{key}"), label));
+        }
+        if !reveal.is_empty() {
+            nodes.push(MenuNode::submenu(reveal_label(), reveal));
+        }
+        if listing.partial {
+            nodes.push(MenuNode::disabled("Some outputs couldn't be listed"));
         }
         if let Ok(mut old) = self.offered.lock() { *old = offered; }
-        if !reveal.is_empty() { nodes.push(MenuNode::submenu(reveal_label(), reveal)); }
-        nodes.push(MenuNode::Separator);
-        nodes.push(MenuNode::item(FOLDER_ID, "Reveal Outputs Folder"));
+        let folder = if listing.total > shown {
+            let more = if listing.partial { format!("{}+", listing.total) } else { listing.total.to_string() };
+            MenuItem::action(FOLDER_ID, format!("Show all {more} outputs"))
+        } else {
+            MenuItem::action(FOLDER_ID, "Open outputs folder").with_symbol(Symbol::ActionFolder)
+        };
+        nodes.push(MenuNode::interactive(folder.opens(Opens::Finder)));
         nodes
     }
 
@@ -298,7 +328,7 @@ impl OutputsSection {
 }
 
 fn reveal_label() -> &'static str {
-    if cfg!(target_os = "macos") { "Reveal Output in Finder" } else { "Show Output in Folder" }
+    if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in folder" }
 }
 
 #[cfg(not(unix))]
@@ -309,11 +339,29 @@ fn read_image(mut file: File, expected: &Fingerprint) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-fn file_detail(name: &str, size: u64) -> String {
-    let ext = Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("file");
-    let kind: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(10).collect::<String>().to_uppercase();
+fn is_image(name: &str) -> bool {
+    Path::new(name).extension().and_then(|s| s.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "heic" | "svg"))
+}
+
+/// The file type as a short badge: `PNG`, `PDF`, `MD`, or `FILE`.
+fn file_kind(name: &str) -> String {
+    let ext = Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("");
+    let kind: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect::<String>().to_uppercase();
+    if kind.is_empty() { "FILE".into() } else { kind }
+}
+
+/// Size and age in days, for example `42 KB · today`. Days, not minutes,
+/// so an unchanged folder does not rebuild the menu every minute.
+fn file_detail(size: u64, modified: Option<SystemTime>, now: SystemTime) -> String {
     let size = if size < 1024 { format!("{size} B") } else if size < 1024 * 1024 { format!("{} KB", size / 1024) } else { format!("{} MB", size / (1024 * 1024)) };
-    format!("{kind} · {size}")
+    let Some(age) = modified.and_then(|modified| now.duration_since(modified).ok()) else { return size };
+    let age = match age.as_secs() / 86_400 {
+        0 => "today".to_owned(),
+        1 => "yesterday".to_owned(),
+        days => format!("{days} days ago"),
+    };
+    format!("{size} · {age}")
 }
 
 fn label_of(name: &str) -> String {
@@ -377,24 +425,72 @@ mod tests {
     }
 
     #[test]
-    fn nodes_use_stem_and_stable_ids() {
+    fn nodes_use_stem_badge_subtitle_and_an_option_key_reveal() {
         let dir = fixture();
         fs::write(dir.join("chart of options.png"), tiny_png()).unwrap();
         let section = OutputsSection::new(&dir);
         let nodes = section.nodes();
-        assert!(matches!(&nodes[0], MenuNode::Interactive { item } if item.title == "chart of options" && item.icon.is_some() && item.badge.as_ref().is_some_and(|s| s.starts_with("PNG"))));
-        assert!(matches!(&nodes[1], MenuNode::Submenu { title, items, .. } if title == reveal_label() && items.len() == 1));
-        assert!(matches!(&nodes[2], MenuNode::Separator));
-        assert!(matches!(&nodes[3], MenuNode::Item { title, .. } if title == "Reveal Outputs Folder"));
+        assert_eq!(nodes.len(), if cfg!(target_os = "macos") { 2 } else { 3 });
+        let MenuNode::Interactive { item } = &nodes[0] else { panic!("file row") };
+        assert_eq!(item.title, "chart of options");
+        assert!(item.icon.is_some());
+        assert_eq!(item.symbol, Some(Symbol::ItemImage));
+        assert_eq!(item.badge.as_deref(), Some("PNG"));
+        assert!(item.subtitle.as_deref().is_some_and(|s| s.ends_with(" B · today")), "{:?}", item.subtitle);
+        let alternate = item.alternate.as_ref().unwrap();
+        assert!(alternate.id.starts_with(REVEAL_PREFIX));
+        assert_eq!(alternate.title, reveal_label());
+        let folder = if cfg!(target_os = "macos") { 1 } else {
+            assert!(matches!(&nodes[1], MenuNode::Submenu { title, items, .. } if title == reveal_label() && items.len() == 1));
+            2
+        };
+        let MenuNode::Interactive { item } = &nodes[folder] else { panic!("folder row") };
+        assert_eq!((item.id.as_deref(), item.title.as_str()), (Some(FOLDER_ID), "Open outputs folder"));
+        assert_eq!(item.opens, Some(Opens::Finder));
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn empty_dir_retains_folder_action() {
+    fn more_files_than_the_limit_end_in_show_all() {
         let dir = fixture();
-        let section = OutputsSection::new(&dir);
-        assert_eq!(section.nodes(), vec![MenuNode::disabled("No outputs yet"), MenuNode::Separator, MenuNode::item(FOLDER_ID, "Reveal Outputs Folder")]);
+        for index in 0..8 { fs::write(dir.join(format!("report {index}.md")), b"x").unwrap(); }
+        let nodes = OutputsSection::new(&dir).nodes();
+        let last = nodes.len() - 1;
+        assert_eq!(last, if cfg!(target_os = "macos") { 5 } else { 6 }, "five newest files, a reveal submenu off macOS, one folder row");
+        let MenuNode::Interactive { item } = &nodes[last] else { panic!("folder row") };
+        assert_eq!(item.title, "Show all 8 outputs");
+        assert_eq!(item.id.as_deref(), Some(FOLDER_ID));
+        let mut model = crate::MenuModel { nodes, ..Default::default() };
+        model.nodes.push(MenuNode::quit("Quit"));
+        assert!(model.validate().is_ok());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn empty_dir_explains_itself_and_keeps_the_folder_row() {
+        let dir = fixture();
+        let nodes = OutputsSection::new(&dir).nodes();
+        assert_eq!(nodes, vec![
+            MenuNode::interactive(MenuItem::inert("No outputs yet").with_subtitle("Agents save finished files here")),
+            MenuNode::interactive(MenuItem::action(FOLDER_ID, "Open outputs folder").with_symbol(Symbol::ActionFolder).opens(Opens::Finder)),
+        ]);
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(OutputsSection::new(&dir).nodes(), vec![MenuNode::disabled("Outputs folder unavailable")]);
+    }
+
+    #[test]
+    fn details_read_as_size_and_age() {
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10 * 86_400);
+        let ago = |seconds: u64| Some(now - std::time::Duration::from_secs(seconds));
+        assert_eq!(file_detail(2048, ago(10), now), "2 KB · today");
+        assert_eq!(file_detail(3 << 20, ago(3 * 3600), now), "3 MB · today");
+        assert_eq!(file_detail(1, ago(30 * 3600), now), "1 B · yesterday");
+        assert_eq!(file_detail(1, ago(5 * 86_400), now), "1 B · 5 days ago");
+        assert_eq!(file_detail(1, None, now), "1 B");
+        assert_eq!(file_kind("chart.png"), "PNG");
+        assert_eq!(file_kind("data.jsonl"), "JSONL");
+        assert_eq!(file_kind("notes.markdown"), "MARKDOWN");
+        assert_eq!(file_kind("README"), "FILE");
     }
 
     #[test]
@@ -481,8 +577,8 @@ mod tests {
     #[test]
     fn labels_are_safe_and_file_types_disambiguate_equal_stems() {
         assert_eq!(label_of("a\n\u{202e}b.png"), "ab");
-        assert!(file_detail("chart.png", 2048).starts_with("PNG · 2 KB"));
-        assert!(file_detail("chart.svg", 2048).starts_with("SVG · 2 KB"));
+        assert_eq!(file_kind("chart.png"), "PNG");
+        assert_eq!(file_kind("chart.svg"), "SVG");
         assert!(label_of(&"x".repeat(200)).chars().count() <= MAX_LABEL + 1);
     }
 }

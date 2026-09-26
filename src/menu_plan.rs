@@ -106,7 +106,8 @@ pub(crate) fn plan(nodes: &[MenuNode], caps: Capabilities, alternates: bool) -> 
             }
             MenuNode::Interactive { item } => {
                 let mixed = matches!(item.kind, MenuItemKind::State { state: ItemState::Mixed });
-                let image = item.symbol.filter(|_| caps.symbols);
+                // A preview thumbnail from muda wins over the symbol.
+                let image = item.symbol.filter(|_| caps.symbols && item.icon.is_none());
                 let subtitle = item.subtitle.as_deref().filter(|_| caps.subtitle);
                 let badge = item.badge.as_deref().filter(|_| caps.badge);
                 let touched = image.is_some()

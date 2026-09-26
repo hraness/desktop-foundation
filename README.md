@@ -331,12 +331,15 @@ impl Host for MyHost {
 }
 ```
 
-It lists files newest-first, adds file-type/size labels and image thumbnails,
-opens a file on click, and offers per-file Reveal in Finder in a submenu. The
-folder action remains available when the folder is empty. Hidden entries,
-directories, symlinks and non-UTF-8 names are skipped. Listing scans at most
-10,000 entries; a larger or partially unreadable directory is explicitly labeled
-as a partial scan. Ties are ordered by filename.
+It lists the 5 newest files (`with_limit` changes that) with the file type as a
+badge, size and age in days as a subtitle and an image thumbnail, opens a file
+on click, and shows it in Finder when the row is chosen with ⌥ held (a "Show in
+folder" submenu on Windows and Linux). The last row opens
+the folder, reading "Show all N outputs" when more files exist, and stays when
+the folder is empty. Hidden entries, directories, symlinks and non-UTF-8 names
+are skipped. Listing scans at most 10,000 entries; a larger or partially
+unreadable directory adds "Some outputs couldn't be listed". Ties are ordered
+by filename.
 
 Actions refer only to files offered by the latest snapshot and verify size,
 timestamp and (on Unix) device/inode/change-time before opening. Replaced or

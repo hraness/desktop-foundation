@@ -10,7 +10,9 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use desktop_foundation::prompt;
-use desktop_foundation::protocol::{self, Event, Frame, ProtocolError, Session, VERSION};
+use desktop_foundation::protocol::{
+    self, Event, Frame, ProtocolError, Session, SUPPORTED_VERSIONS, VERSION,
+};
 use desktop_foundation::{
     DispatchOutcome, Host, MenuModel, Options, RefreshHandle, RenderError, RenderOperation,
 };
@@ -69,12 +71,12 @@ impl Output {
         true
     }
 
-    fn stopped(&self) {
+    fn stopped(&self, version: u8) {
         let (flushed, receiver) = mpsc::sync_channel(1);
         if self
             .sender
             .try_send(Message {
-                event: Event::Stopped { version: VERSION },
+                event: Event::Stopped { version },
                 flushed: Some(flushed),
             })
             .is_ok()
@@ -91,6 +93,8 @@ fn write_event(writer: &mut impl Write, event: &Event) -> std::io::Result<()> {
 }
 
 struct Runner {
+    /// Fixed by the first snapshot; every event carries it.
+    version: u8,
     session: Arc<Mutex<Session>>,
     input: Mutex<Option<BufReader<std::io::Stdin>>>,
     output: Output,
@@ -143,7 +147,7 @@ impl Host for Runner {
             RenderOperation::SetIcon => "render-icon-failed",
             RenderOperation::SetChecked => "render-check-failed",
         };
-        self.output.emit(Event::error(code));
+        self.output.emit(Event::error_in(self.version, code));
         if let Some(app) = self.output.app.lock().unwrap().as_ref() {
             app.exit(1);
         }
@@ -152,7 +156,7 @@ impl Host for Runner {
     fn model_rendered(&self, _app: &AppHandle) {
         if !self.rendered_once.swap(true, Ordering::AcqRel) {
             self.output.emit(Event::Ready {
-                version: VERSION,
+                version: self.version,
                 pid: std::process::id(),
                 platform: std::env::consts::OS,
             });
@@ -162,6 +166,7 @@ impl Host for Runner {
     fn started_with_refresh(&self, app: &AppHandle, refresh: RefreshHandle) {
         *self.output.app.lock().unwrap() = Some(app.clone());
         apply_serif(app);
+        let version = self.version;
         let mut input = self
             .input
             .lock()
@@ -179,7 +184,7 @@ impl Host for Runner {
                     return;
                 }
                 Err(ProtocolError(code)) => {
-                    output.emit(Event::error(code));
+                    output.emit(Event::error_in(version, code));
                     app.exit(1);
                     return;
                 }
@@ -191,7 +196,7 @@ impl Host for Runner {
                     return;
                 }
                 Err(ProtocolError(code)) => {
-                    output.emit(Event::error(code));
+                    output.emit(Event::error_in(version, code));
                     app.exit(1);
                     return;
                 }
@@ -200,7 +205,7 @@ impl Host for Runner {
     }
 
     fn stopping(&self) {
-        self.output.stopped();
+        self.output.stopped(self.version);
     }
 }
 
@@ -404,29 +409,38 @@ fn check_protocol() -> Result<(), ProtocolError> {
     let mut output = std::io::stdout();
     let mut session = Session::default();
     while let Some(frame) = protocol::read_frame(&mut input)? {
+        if session.version().is_none() && matches!(frame, Frame::SnapshotV2(_)) {
+            STARTUP_VERSION.store(protocol::v2::VERSION, Ordering::Release);
+        }
         if !session.accept(frame)? {
             break;
         }
         write_event(
             &mut output,
             &Event::Validated {
-                version: VERSION,
+                version: session.version().unwrap_or(VERSION),
                 revision: session.latest().unwrap().revision,
             },
         )
         .map_err(|_| ProtocolError("output-unavailable"))?;
     }
-    write_event(&mut output, &Event::Stopped { version: VERSION })
-        .map_err(|_| ProtocolError("output-unavailable"))
+    write_event(
+        &mut output,
+        &Event::Stopped {
+            version: session.version().unwrap_or(VERSION),
+        },
+    )
+    .map_err(|_| ProtocolError("output-unavailable"))
 }
 
 fn execute() -> Result<(), ProtocolError> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() == 1 && args[0] == "--version" {
+        let protocols: Vec<String> = SUPPORTED_VERSIONS.iter().map(u8::to_string).collect();
         println!(
             "hraness-companion {} protocol/{}",
             env!("CARGO_PKG_VERSION"),
-            VERSION
+            protocols.join(",")
         );
         return Ok(());
     }
@@ -454,13 +468,15 @@ fn execute() -> Result<(), ProtocolError> {
     if matches!(frame, Frame::Quit { .. }) {
         return Err(ProtocolError("snapshot-required"));
     }
+    if matches!(frame, Frame::SnapshotV2(_)) {
+        // A rejected first v2 snapshot is still answered in v2.
+        STARTUP_VERSION.store(protocol::v2::VERSION, Ordering::Release);
+    }
     let mut session = Session::default();
     session.accept(frame)?;
+    let version = session.version().unwrap_or(VERSION);
     let Some(_instance) = lock_instance(&state_dir, &session.latest().unwrap().app_id)? else {
-        write_event(
-            &mut std::io::stdout(),
-            &Event::AlreadyRunning { version: VERSION },
-        )
+        write_event(&mut std::io::stdout(), &Event::AlreadyRunning { version })
         .map_err(|_| ProtocolError("output-unavailable"))?;
         return Ok(());
     };
@@ -474,6 +490,7 @@ fn execute() -> Result<(), ProtocolError> {
         None
     };
     let host = Arc::new(Runner {
+        version,
         session: Arc::new(Mutex::new(session)),
         input: Mutex::new(Some(input)),
         output: Output::new(),
@@ -489,6 +506,9 @@ fn execute() -> Result<(), ProtocolError> {
     .map_err(|_| ProtocolError("tray-unavailable"))
 }
 
+/// The version startup errors use: v1 until a v2 snapshot arrives.
+static STARTUP_VERSION: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(VERSION);
+
 fn main() {
     // Tauri errors and panic payloads may include paths. Emit only stable codes
     // on the wire; Rust/Tauri build diagnostics remain developer-only.
@@ -496,7 +516,8 @@ fn main() {
         let _ = write_event(&mut std::io::stderr(), &Event::error("internal-error"));
     }));
     if let Err(ProtocolError(code)) = execute() {
-        let _ = write_event(&mut std::io::stdout(), &Event::error(code));
+        let version = STARTUP_VERSION.load(Ordering::Acquire);
+        let _ = write_event(&mut std::io::stdout(), &Event::error_in(version, code));
         std::process::exit(1);
     }
 }

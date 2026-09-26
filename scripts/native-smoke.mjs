@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 const root = await mkdtemp(join(await realpath(tmpdir()), 'companion-smoke-'));
 const binary = resolve(process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? `target/release/hraness-companion${process.platform === 'win32' ? '.exe' : ''}`);
-const initial = { version:1, type:'snapshot', appId:'org.hraness.companion.smoke', name:'Companion Smoke', title:'Te', revision:1, items:[{kind:'label',label:'Synthetic smoke test'}, {kind:'action',id:'toggle',label:'Example toggle',checked:true}, {kind:'quit',label:'Quit'}] };
+// --v2 drives the same lifecycle with protocol v2 snapshots: a template mark
+// with a tone and count, headers, status rows, symbols, subtitles, badges,
+// three-state toggles and Option-key alternates.
+const v2 = process.argv.includes('--v2');
+const initial = v2
+  ? { version:2, type:'snapshot', appId:'org.hraness.companion.smoke', name:'Companion Smoke', revision:1, mark:{symbol:'mark.agent',letters:'Te',tone:'attention',text:'3'}, tooltip:'Companion Smoke · 3 waiting', items:[{kind:'header',label:'Companion Smoke'},{kind:'status',symbol:'status.running',label:'Running',detail:'Synthetic smoke test'},{kind:'separator'},{kind:'action',id:'open',label:'Open dashboard',symbol:'action.open',role:'primary',opens:'browser'},{kind:'action',id:'row',label:'Recent row',symbol:'item.file',subtitle:'Two minutes ago',badge:'2',tooltip:'A recent row',alternate:{id:'row.copy',label:'Copy row ID',symbol:'action.copy'}},{kind:'label',label:'Inert row',subtitle:'With detail'},{kind:'action',id:'toggle',label:'Example toggle',state:'mixed'},{kind:'separator'},{kind:'quit',label:'Quit Companion Smoke'}] }
+  : { version:1, type:'snapshot', appId:'org.hraness.companion.smoke', name:'Companion Smoke', title:'Te', revision:1, items:[{kind:'label',label:'Synthetic smoke test'}, {kind:'action',id:'toggle',label:'Example toggle',checked:true}, {kind:'quit',label:'Quit'}] };
+const toggle = revision => v2 ? {state:['on','off','mixed'][revision%3]} : {checked:revision%2===0};
+const nextMark = revision => v2 ? {mark:{...initial.mark,tone:['normal','attention','error','paused','offline'][revision%5],text:revision%5===1||revision%5===2?String(revision):undefined}} : {};
 const args = process.argv.includes('--headless') ? ['--check-protocol'] : ['--state-dir',root];
 const child = spawn(binary,args,{stdio:['pipe','pipe','pipe']});
 const expected = process.argv.includes('--headless') ? 'validated' : 'ready';
@@ -32,10 +40,10 @@ try {
             if (++revision > 9) {
               clearInterval(updateTimer);
               quitSent = true;
-              child.stdin.end(JSON.stringify({version:1,type:'quit'})+'\n');
+              child.stdin.end(JSON.stringify({version:initial.version,type:'quit'})+'\n');
               return;
             }
-            child.stdin.write(JSON.stringify({...initial,revision,items:[{kind:'submenu',label:'Updated '+revision,items:[{kind:'action',id:'toggle',label:'Example toggle',checked:revision%2===0}]}]})+'\n');
+            child.stdin.write(JSON.stringify({...initial,...nextMark(revision),revision,items:[{kind:'submenu',label:'Updated '+revision,items:[{kind:'action',id:'toggle',label:'Example toggle',...toggle(revision)}]},...(v2?[{kind:'quit',label:'Quit Companion Smoke'}]:[])]})+'\n');
           },250);
         }
       }
@@ -44,5 +52,5 @@ try {
   });
   child.stdin.write(JSON.stringify(initial)+'\n');
   await done;
-  console.log(`${expected}: native startup, sustained protocol updates and exit (${process.platform}/${process.arch}); this is not visual tray qualification`);
+  console.log(`${expected}${v2 ? ' (protocol v2)' : ''}: native startup, sustained protocol updates and exit (${process.platform}/${process.arch}); this is not visual tray qualification`);
 } finally { clearTimeout(timer); clearInterval(updateTimer); if(child.exitCode===null)child.kill(); await rm(root,{recursive:true,force:true}); }

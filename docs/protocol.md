@@ -241,6 +241,9 @@ for example:
 hraness-companion 0.7.0 protocol/1
 ```
 
+It lists every protocol the runner accepts. Runners from 0.8.0 print
+`protocol/1,2` and also accept [protocol v2](protocol-v2.md) snapshots.
+
 `hraness-companion --check-protocol` reads JSONL from stdin without creating
 UI, a state directory, or a singleton lock. It emits `validated` with the
 revision after each accepted snapshot, then `stopped` on Quit or EOF. It uses

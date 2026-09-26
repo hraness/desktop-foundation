@@ -137,7 +137,7 @@ jobs:
       # The cache's post step retains reusable build inputs even if a later
       # desktop integration test fails. Every gate still runs on every tree.
       - name: Headless protocol probe
-        run: node scripts/native-smoke.mjs --headless
+        run: node scripts/native-smoke.mjs --headless && node scripts/native-smoke.mjs --headless --v2
       # The one-shot prompt needs no tray, so it qualifies on every leg —
       # including hosts that prove their notification area incapable.
       - name: Native prompt smoke (macOS and Windows)
@@ -148,10 +148,12 @@ jobs:
         run: dbus-run-session -- xvfb-run -a node scripts/prompt-smoke.mjs
       - name: Native event loop smoke (macOS and Windows)
         if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
-        run: node scripts/native-smoke.mjs
+        run: node scripts/native-smoke.mjs && node scripts/native-smoke.mjs --v2
       - name: Native event loop smoke (Linux)
         if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a node scripts/native-smoke.mjs
+        run: |
+          dbus-run-session -- xvfb-run -a node scripts/native-smoke.mjs
+          dbus-run-session -- xvfb-run -a node scripts/native-smoke.mjs --v2
       - name: Detached CLI lifecycle smoke (macOS and Windows)
         if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
         run: node scripts/lifecycle-smoke.mjs

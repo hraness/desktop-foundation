@@ -3,7 +3,8 @@
 Status: specification for desktop-foundation 0.8.0. Runners and SDKs up to
 0.7.x speak only [protocol v1](protocol.md). The TypeScript shapes live in
 [`sdk/src/protocol-v2.ts`](../sdk/src/protocol-v2.ts); the Rust wire schema in
-`src/protocol.rs` mirrors them when the 0.8.0 renderer lands.
+[`src/protocol_v2.rs`](../src/protocol_v2.rs) and the symbol table in
+[`src/symbols.rs`](../src/symbols.rs) mirror them.
 
 Protocol v2 keeps v1's framing, limits, lifecycle, revision rules, action
 handling and error behavior. It changes three things:
@@ -266,7 +267,9 @@ Windows/Linux renderer uses the same text forms. v2 runners never down-level
 on macOS. Each label is composed in full first (prefix, label, subtitle or
 detail, badge, `opens` glyph) and then cut to 256 Unicode scalar values, the
 last one replaced by `…`, so a down-leveled snapshot always passes v1
-validation.
+validation. The prefix is `– ` for a mixed state, then the symbol's fallback
+glyph and a space: `– ↻ Sync now · 2 left  3 ↗`. The native renderer keeps
+the badge and `opens` glyph whole and shortens the label and subtitle instead.
 
 | v2 | v1 result |
 | --- | --- |
@@ -324,5 +327,8 @@ with muda as today, then runs an objc2 pass over the `NSMenu` reached through
 by build order and sets `image`, `subtitle`, `badge`, `toolTip`, `isAlternate`,
 section headers and state, guarding each API with `respondsToSelector:` for
 older macOS versions. The Georgia title font goes away with v1 marks. The
-existing 256-item and 8-level limits are unchanged; the SDK reports a node
-budget error with the offending count instead of letting a menu freeze.
+existing 256-item and 8-level limits are unchanged, and an `alternate` shares
+its item's row, so it does not count. The SDK reports a node budget error with
+the offending count instead of letting a menu freeze. A first frame that
+declares `"version":2` gets its startup error in v2 even when it fails to
+parse.

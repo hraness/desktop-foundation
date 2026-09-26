@@ -144,7 +144,7 @@ impl OutputsSection {
             reveal.push(MenuNode::item(format!("{REVEAL_PREFIX}{key}"), label));
         }
         if let Ok(mut old) = self.offered.lock() { *old = offered; }
-        if !reveal.is_empty() { nodes.push(MenuNode::Submenu { title: reveal_label().into(), items: reveal }); }
+        if !reveal.is_empty() { nodes.push(MenuNode::submenu(reveal_label(), reveal)); }
         nodes.push(MenuNode::Separator);
         nodes.push(MenuNode::item(FOLDER_ID, "Reveal Outputs Folder"));
         nodes
@@ -383,7 +383,7 @@ mod tests {
         let section = OutputsSection::new(&dir);
         let nodes = section.nodes();
         assert!(matches!(&nodes[0], MenuNode::Interactive { item } if item.title == "chart of options" && item.icon.is_some() && item.badge.as_ref().is_some_and(|s| s.starts_with("PNG"))));
-        assert!(matches!(&nodes[1], MenuNode::Submenu { title, items } if title == reveal_label() && items.len() == 1));
+        assert!(matches!(&nodes[1], MenuNode::Submenu { title, items, .. } if title == reveal_label() && items.len() == 1));
         assert!(matches!(&nodes[2], MenuNode::Separator));
         assert!(matches!(&nodes[3], MenuNode::Item { title, .. } if title == "Reveal Outputs Folder"));
         fs::remove_dir_all(&dir).unwrap();

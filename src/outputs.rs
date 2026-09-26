@@ -143,6 +143,9 @@ impl OutputsSection {
             ));
         }
         let shown = listing.files.len();
+        // Alternates exist only on macOS; elsewhere "Show in folder" keeps
+        // its own submenu so the action stays reachable.
+        let mut reveal = Vec::new();
         for file in listing.files {
             let key = file_key(&file.name, &file.fingerprint);
             offered.insert(key.clone(), (file.path.clone(), file.fingerprint.clone()));
@@ -155,7 +158,13 @@ impl OutputsSection {
                     Alternate::new(format!("{REVEAL_PREFIX}{key}"), reveal_label()).with_symbol(Symbol::ActionFolder),
                 );
             if let Some(icon) = entry.icon { item = item.with_icon(icon); }
+            if !cfg!(target_os = "macos") {
+                reveal.push(MenuNode::item(format!("{REVEAL_PREFIX}{key}"), item.title.clone()));
+            }
             nodes.push(MenuNode::interactive(item));
+        }
+        if !reveal.is_empty() {
+            nodes.push(MenuNode::submenu(reveal_label(), reveal));
         }
         if listing.partial {
             nodes.push(MenuNode::disabled("Some outputs couldn't be listed"));
@@ -338,21 +347,19 @@ fn is_image(name: &str) -> bool {
 /// The file type as a short badge: `PNG`, `PDF`, `MD`, or `FILE`.
 fn file_kind(name: &str) -> String {
     let ext = Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("");
-    let kind: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(4).collect::<String>().to_uppercase();
+    let kind: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect::<String>().to_uppercase();
     if kind.is_empty() { "FILE".into() } else { kind }
 }
 
-/// Size and age, for example `42 KB · 2 min ago`.
+/// Size and age in days, for example `42 KB · today`. Days, not minutes,
+/// so an unchanged folder does not rebuild the menu every minute.
 fn file_detail(size: u64, modified: Option<SystemTime>, now: SystemTime) -> String {
     let size = if size < 1024 { format!("{size} B") } else if size < 1024 * 1024 { format!("{} KB", size / 1024) } else { format!("{} MB", size / (1024 * 1024)) };
     let Some(age) = modified.and_then(|modified| now.duration_since(modified).ok()) else { return size };
-    let minutes = age.as_secs() / 60;
-    let age = match minutes {
-        0 => "just now".to_owned(),
-        1..=59 => format!("{minutes} min ago"),
-        60..=1439 => format!("{} h ago", minutes / 60),
-        1440..=2879 => "yesterday".to_owned(),
-        _ => format!("{} days ago", minutes / 1440),
+    let age = match age.as_secs() / 86_400 {
+        0 => "today".to_owned(),
+        1 => "yesterday".to_owned(),
+        days => format!("{days} days ago"),
     };
     format!("{size} · {age}")
 }
@@ -423,17 +430,21 @@ mod tests {
         fs::write(dir.join("chart of options.png"), tiny_png()).unwrap();
         let section = OutputsSection::new(&dir);
         let nodes = section.nodes();
-        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes.len(), if cfg!(target_os = "macos") { 2 } else { 3 });
         let MenuNode::Interactive { item } = &nodes[0] else { panic!("file row") };
         assert_eq!(item.title, "chart of options");
         assert!(item.icon.is_some());
         assert_eq!(item.symbol, Some(Symbol::ItemImage));
         assert_eq!(item.badge.as_deref(), Some("PNG"));
-        assert!(item.subtitle.as_deref().is_some_and(|s| s.ends_with(" B · just now")), "{:?}", item.subtitle);
+        assert!(item.subtitle.as_deref().is_some_and(|s| s.ends_with(" B · today")), "{:?}", item.subtitle);
         let alternate = item.alternate.as_ref().unwrap();
         assert!(alternate.id.starts_with(REVEAL_PREFIX));
         assert_eq!(alternate.title, reveal_label());
-        let MenuNode::Interactive { item } = &nodes[1] else { panic!("folder row") };
+        let folder = if cfg!(target_os = "macos") { 1 } else {
+            assert!(matches!(&nodes[1], MenuNode::Submenu { title, items, .. } if title == reveal_label() && items.len() == 1));
+            2
+        };
+        let MenuNode::Interactive { item } = &nodes[folder] else { panic!("folder row") };
         assert_eq!((item.id.as_deref(), item.title.as_str()), (Some(FOLDER_ID), "Open outputs folder"));
         assert_eq!(item.opens, Some(Opens::Finder));
         fs::remove_dir_all(&dir).unwrap();
@@ -444,8 +455,9 @@ mod tests {
         let dir = fixture();
         for index in 0..8 { fs::write(dir.join(format!("report {index}.md")), b"x").unwrap(); }
         let nodes = OutputsSection::new(&dir).nodes();
-        assert_eq!(nodes.len(), 6, "five newest files and one folder row");
-        let MenuNode::Interactive { item } = &nodes[5] else { panic!("folder row") };
+        let last = nodes.len() - 1;
+        assert_eq!(last, if cfg!(target_os = "macos") { 5 } else { 6 }, "five newest files, a reveal submenu off macOS, one folder row");
+        let MenuNode::Interactive { item } = &nodes[last] else { panic!("folder row") };
         assert_eq!(item.title, "Show all 8 outputs");
         assert_eq!(item.id.as_deref(), Some(FOLDER_ID));
         let mut model = crate::MenuModel { nodes, ..Default::default() };
@@ -470,14 +482,14 @@ mod tests {
     fn details_read_as_size_and_age() {
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10 * 86_400);
         let ago = |seconds: u64| Some(now - std::time::Duration::from_secs(seconds));
-        assert_eq!(file_detail(2048, ago(10), now), "2 KB · just now");
-        assert_eq!(file_detail(512, ago(120), now), "512 B · 2 min ago");
-        assert_eq!(file_detail(3 << 20, ago(3 * 3600), now), "3 MB · 3 h ago");
+        assert_eq!(file_detail(2048, ago(10), now), "2 KB · today");
+        assert_eq!(file_detail(3 << 20, ago(3 * 3600), now), "3 MB · today");
         assert_eq!(file_detail(1, ago(30 * 3600), now), "1 B · yesterday");
         assert_eq!(file_detail(1, ago(5 * 86_400), now), "1 B · 5 days ago");
         assert_eq!(file_detail(1, None, now), "1 B");
         assert_eq!(file_kind("chart.png"), "PNG");
-        assert_eq!(file_kind("notes.markdown"), "MARK");
+        assert_eq!(file_kind("data.jsonl"), "JSONL");
+        assert_eq!(file_kind("notes.markdown"), "MARKDOWN");
         assert_eq!(file_kind("README"), "FILE");
     }
 

@@ -6,10 +6,13 @@
 import { spawn } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join, normalize } from 'node:path';
+import { posix } from 'node:path';
 import { detectAudience, type Audience } from './audience.js';
 import { cliStyle, cliSymbol, type CliStyle } from './cli-style.js';
 import type { MenuItemV2, NoticeRequest, NoticeResult, PermissionKind, SettingsPermissionKind } from './protocol-v2.js';
+
+// Probe paths are macOS paths, so use POSIX rules on every host (CI runs these tests on Windows too).
+const { isAbsolute, join, normalize } = posix;
 
 export type { Audience } from './audience.js';
 export { detectAudience } from './audience.js';

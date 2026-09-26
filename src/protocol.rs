@@ -8,6 +8,7 @@ use std::io::BufRead;
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::protocol_v2 as v2;
 use crate::{MenuItem, MenuItemKind, MenuModel, MenuNode, RgbaIcon};
 
 pub const VERSION: u8 = 1;
@@ -17,12 +18,12 @@ pub const MAX_DEPTH: usize = 8;
 pub const MAX_REVISION: u64 = 9_007_199_254_740_991;
 pub const MAX_ICON_SIDE: u32 = 64;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+/// One input frame. v1 and v2 snapshots have separate schemas; the first
+/// snapshot's version fixes the session version.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frame {
     Snapshot {
         version: u8,
-        #[serde(rename = "appId")]
         app_id: String,
         name: String,
         title: String,
@@ -31,9 +32,76 @@ pub enum Frame {
         revision: u64,
         items: Vec<WireItem>,
     },
+    SnapshotV2(Box<v2::SnapshotFrame>),
     Quit {
         version: u8,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnapshotFrameV1 {
+    version: u8,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(rename = "appId")]
+    app_id: String,
+    name: String,
+    title: String,
+    tooltip: Option<String>,
+    icon: Option<WireIcon>,
+    revision: u64,
+    items: Vec<WireItem>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuitFrame {
+    version: u8,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+/// Only the routing fields; everything else is checked by the typed schema.
+#[derive(Deserialize)]
+struct FrameHead {
+    #[serde(rename = "type")]
+    kind: String,
+    version: u8,
+}
+
+/// Every protocol version this runner accepts, for `--version`.
+pub const SUPPORTED_VERSIONS: &[u8] = &[VERSION, v2::VERSION];
+
+fn parse_frame(bytes: &[u8]) -> Result<Frame, ProtocolError> {
+    let invalid = |_| ProtocolError("invalid-frame");
+    let head: FrameHead = serde_json::from_slice(bytes).map_err(invalid)?;
+    match head.kind.as_str() {
+        "quit" => {
+            let frame: QuitFrame = serde_json::from_slice(bytes).map_err(invalid)?;
+            debug_assert_eq!(frame.kind, "quit");
+            Ok(Frame::Quit { version: frame.version })
+        }
+        "snapshot" if head.version == v2::VERSION => serde_json::from_slice(bytes)
+            .map(|frame| Frame::SnapshotV2(Box::new(frame)))
+            .map_err(invalid),
+        "snapshot" if head.version == VERSION => {
+            let frame: SnapshotFrameV1 = serde_json::from_slice(bytes).map_err(invalid)?;
+            debug_assert_eq!(frame.kind, "snapshot");
+            Ok(Frame::Snapshot {
+                version: frame.version,
+                app_id: frame.app_id,
+                name: frame.name,
+                title: frame.title,
+                tooltip: frame.tooltip,
+                icon: frame.icon,
+                revision: frame.revision,
+                items: frame.items,
+            })
+        }
+        "snapshot" => Err(ProtocolError("unsupported-version")),
+        _ => Err(ProtocolError("invalid-frame")),
+    }
 }
 
 /// Adapter-supplied tray art for icon-only surfaces (Windows/Linux). Pixels
@@ -112,6 +180,11 @@ impl Event {
             code,
         }
     }
+
+    /// An error in a session of the given protocol version.
+    pub fn error_in(version: u8, code: &'static str) -> Self {
+        Self::Error { version, code }
+    }
 }
 
 /// Safe machine-readable categories: never copy input into an error message.
@@ -144,25 +217,33 @@ pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Frame>, ProtocolEr
         frame.extend_from_slice(&bytes[..take]);
         reader.consume(take);
         if end.is_some() {
-            return serde_json::from_slice(&frame)
-                .map(Some)
-                .map_err(|_| ProtocolError("invalid-frame"));
+            return parse_frame(&frame).map(Some);
         }
     }
 }
 
+/// A validated snapshot of either protocol version.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
+    pub version: u8,
     pub app_id: String,
     pub name: String,
-    pub title: String,
-    pub tooltip: Option<String>,
-    pub icon: Option<WireIcon>,
     pub revision: u64,
-    pub items: Vec<WireItem>,
+    pub body: SnapshotBody,
 }
 
-fn safe_text(value: &str, max: usize) -> bool {
+#[derive(Debug, Clone)]
+pub enum SnapshotBody {
+    V1 {
+        title: String,
+        tooltip: Option<String>,
+        icon: Option<WireIcon>,
+        items: Vec<WireItem>,
+    },
+    V2(Box<v2::SnapshotFrame>),
+}
+
+pub(crate) fn safe_text(value: &str, max: usize) -> bool {
     !value.is_empty()
         && value.chars().count() <= max
         && !value.chars().any(|ch| {
@@ -180,7 +261,7 @@ pub fn valid_app_id(value: &str) -> bool {
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || b".-".contains(&ch))
 }
 
-fn valid_action_id(value: &str) -> bool {
+pub(crate) fn valid_action_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 256
         && value
@@ -219,7 +300,7 @@ fn is_pictographic(ch: char) -> bool {
 }
 
 /// Strict base64: canonical alphabet, no whitespace, padding only at the tail.
-fn decode_rgba(encoded: &str) -> Option<Vec<u8>> {
+pub(crate) fn decode_base64(encoded: &str) -> Option<Vec<u8>> {
     if encoded.is_empty() || encoded.len() % 4 != 0 {
         return None;
     }
@@ -254,125 +335,146 @@ fn decode_rgba(encoded: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn valid_icon(icon: &WireIcon) -> bool {
+pub(crate) fn valid_icon(icon: &WireIcon) -> bool {
     (1..=MAX_ICON_SIDE).contains(&icon.width)
         && (1..=MAX_ICON_SIDE).contains(&icon.height)
-        && decode_rgba(&icon.rgba)
+        && decode_base64(&icon.rgba)
             .is_some_and(|bytes| bytes.len() == icon.width as usize * icon.height as usize * 4)
 }
 
+fn validate_v1(
+    app_id: &str,
+    name: &str,
+    revision: u64,
+    title: &str,
+    tooltip: &Option<String>,
+    icon: &Option<WireIcon>,
+    items: &[WireItem],
+) -> Result<(), ProtocolError> {
+    if !valid_app_id(app_id)
+        || !safe_text(name, 128)
+        || !valid_title(title)
+        || tooltip.as_ref().is_some_and(|value| !safe_text(value, 256))
+        || icon.as_ref().is_some_and(|icon| !valid_icon(icon))
+        || revision > MAX_REVISION
+    {
+        return Err(ProtocolError("invalid-snapshot"));
+    }
+    fn walk(
+        items: &[WireItem],
+        depth: usize,
+        count: &mut usize,
+        ids: &mut HashSet<String>,
+    ) -> Result<(), ProtocolError> {
+        if depth > MAX_DEPTH {
+            return Err(ProtocolError("menu-too-deep"));
+        }
+        for item in items {
+            *count += 1;
+            if *count > MAX_ITEMS {
+                return Err(ProtocolError("menu-too-large"));
+            }
+            let label = match item {
+                WireItem::Action {
+                    id,
+                    label,
+                    shortcut,
+                    ..
+                } => {
+                    if !valid_action_id(id) || !ids.insert(id.clone()) {
+                        return Err(ProtocolError("invalid-action"));
+                    }
+                    if shortcut.as_ref().is_some_and(|value| !safe_text(value, 64)) {
+                        return Err(ProtocolError("invalid-shortcut"));
+                    }
+                    label
+                }
+                WireItem::Label { label } | WireItem::Quit { label } => label,
+                WireItem::Submenu { label, items } => {
+                    walk(items, depth + 1, count, ids)?;
+                    label
+                }
+                WireItem::Separator => continue,
+            };
+            if !safe_text(label, 256) {
+                return Err(ProtocolError("invalid-label"));
+            }
+        }
+        Ok(())
+    }
+    walk(items, 1, &mut 0, &mut HashSet::new())
+}
+
+fn v1_nodes(items: &[WireItem], revision: u64) -> Vec<MenuNode> {
+    items
+        .iter()
+        .map(|item| match item {
+            WireItem::Action {
+                id,
+                label,
+                enabled,
+                checked,
+                shortcut,
+            } => {
+                // Embedding revision in the route binds a native event to
+                // the exact offered snapshot, not the newest same-named action.
+                let mut item = MenuItem::action(format!("{revision}:{id}"), label);
+                item.enabled = *enabled;
+                item.shortcut = shortcut.clone();
+                if let Some(checked) = checked {
+                    item.kind = MenuItemKind::Check { checked: *checked };
+                }
+                MenuNode::interactive(item)
+            }
+            WireItem::Label { label } => MenuNode::disabled(label),
+            WireItem::Separator => MenuNode::Separator,
+            WireItem::Submenu { label, items } => {
+                MenuNode::submenu(label.clone(), v1_nodes(items, revision))
+            }
+            WireItem::Quit { label } => MenuNode::quit(label),
+        })
+        .collect()
+}
+
 impl Snapshot {
-    fn validate(&self) -> Result<(), ProtocolError> {
-        if !valid_app_id(&self.app_id)
-            || !safe_text(&self.name, 128)
-            || !valid_title(&self.title)
-            || self
-                .tooltip
-                .as_ref()
-                .is_some_and(|value| !safe_text(value, 256))
-            || self
-                .icon
-                .as_ref()
-                .is_some_and(|icon| !valid_icon(icon))
-            || self.revision > MAX_REVISION
-        {
-            return Err(ProtocolError("invalid-snapshot"));
+    /// The v1 status-item title, or the v2 mark's letters.
+    pub fn letters(&self) -> &str {
+        match &self.body {
+            SnapshotBody::V1 { title, .. } => title,
+            SnapshotBody::V2(frame) => &frame.mark.letters,
         }
-        fn walk(
-            items: &[WireItem],
-            depth: usize,
-            count: &mut usize,
-            ids: &mut HashSet<String>,
-        ) -> Result<(), ProtocolError> {
-            if depth > MAX_DEPTH {
-                return Err(ProtocolError("menu-too-deep"));
-            }
-            for item in items {
-                *count += 1;
-                if *count > MAX_ITEMS {
-                    return Err(ProtocolError("menu-too-large"));
-                }
-                let label = match item {
-                    WireItem::Action {
-                        id,
-                        label,
-                        shortcut,
-                        ..
-                    } => {
-                        if !valid_action_id(id) || !ids.insert(id.clone()) {
-                            return Err(ProtocolError("invalid-action"));
-                        }
-                        if shortcut.as_ref().is_some_and(|value| !safe_text(value, 64)) {
-                            return Err(ProtocolError("invalid-shortcut"));
-                        }
-                        label
-                    }
-                    WireItem::Label { label } | WireItem::Quit { label } => label,
-                    WireItem::Submenu { label, items } => {
-                        walk(items, depth + 1, count, ids)?;
-                        label
-                    }
-                    WireItem::Separator => continue,
-                };
-                if !safe_text(label, 256) {
-                    return Err(ProtocolError("invalid-label"));
-                }
-            }
-            Ok(())
-        }
-        walk(&self.items, 1, &mut 0, &mut HashSet::new())
     }
 
     pub fn model(&self) -> MenuModel {
-        fn nodes(items: &[WireItem], revision: u64) -> Vec<MenuNode> {
-            items
-                .iter()
-                .map(|item| match item {
-                    WireItem::Action {
-                        id,
-                        label,
-                        enabled,
-                        checked,
-                        shortcut,
-                    } => {
-                        // Embedding revision in the route binds a native event to
-                        // the exact offered snapshot, not the newest same-named action.
-                        let mut item = MenuItem::action(format!("{revision}:{id}"), label);
-                        item.enabled = *enabled;
-                        item.shortcut = shortcut.clone();
-                        if let Some(checked) = checked {
-                            item.kind = MenuItemKind::Check { checked: *checked };
-                        }
-                        MenuNode::interactive(item)
-                    }
-                    WireItem::Label { label } => MenuNode::disabled(label),
-                    WireItem::Separator => MenuNode::Separator,
-                    WireItem::Submenu { label, items } => MenuNode::Submenu {
-                        title: label.clone(),
-                        items: nodes(items, revision),
-                    },
-                    WireItem::Quit { label } => MenuNode::quit(label),
-                })
-                .collect()
+        match &self.body {
+            SnapshotBody::V2(frame) => frame.model(),
+            SnapshotBody::V1 {
+                title,
+                tooltip,
+                icon,
+                items,
+            } => {
+                let mut model = MenuModel {
+                    tooltip: Some(tooltip.clone().unwrap_or_else(|| self.name.clone())),
+                    nodes: v1_nodes(items, self.revision),
+                    ..MenuModel::default()
+                };
+                model.mark(
+                    title,
+                    icon.as_ref().and_then(|icon| {
+                        decode_base64(&icon.rgba).map(|rgba| RgbaIcon {
+                            rgba,
+                            width: icon.width,
+                            height: icon.height,
+                        })
+                    }),
+                );
+                model
+            }
         }
-        let mut model = MenuModel {
-            tooltip: Some(self.tooltip.clone().unwrap_or_else(|| self.name.clone())),
-            nodes: nodes(&self.items, self.revision),
-            ..MenuModel::default()
-        };
-        model.mark(
-            &self.title,
-            self.icon.as_ref().and_then(|icon| {
-                decode_rgba(&icon.rgba).map(|rgba| RgbaIcon {
-                    rgba,
-                    width: icon.width,
-                    height: icon.height,
-                })
-            }),
-        );
-        model
     }
 
+    /// The action event for a native route, in this session's version.
     pub fn action(&self, route: &str) -> Option<Event> {
         let (revision, id) = route.split_once(':')?;
         if revision.parse::<u64>().ok()? != self.revision {
@@ -385,8 +487,12 @@ impl Snapshot {
                 _ => false,
             })
         }
-        offered(&self.items, id).then(|| Event::Action {
-            version: VERSION,
+        let offers = match &self.body {
+            SnapshotBody::V1 { items, .. } => offered(items, id),
+            SnapshotBody::V2(frame) => frame.offers(id),
+        };
+        offers.then(|| Event::Action {
+            version: self.version,
             id: id.into(),
             revision: self.revision,
         })
@@ -403,15 +509,28 @@ impl Session {
         self.latest.as_ref()
     }
 
+    /// The protocol version fixed by the first snapshot.
+    pub fn version(&self) -> Option<u8> {
+        self.latest.as_ref().map(|snapshot| snapshot.version)
+    }
+
+    fn check_version(&self, version: u8) -> Result<(), ProtocolError> {
+        if !SUPPORTED_VERSIONS.contains(&version) {
+            return Err(ProtocolError("unsupported-version"));
+        }
+        match self.version() {
+            Some(current) if current != version => Err(ProtocolError("version-changed")),
+            _ => Ok(()),
+        }
+    }
+
     /// `false` means the parent requested a clean shutdown. A bad frame does
     /// not replace the authoritative snapshot; callers terminate the stream.
     pub fn accept(&mut self, frame: Frame) -> Result<bool, ProtocolError> {
-        match frame {
+        let snapshot = match frame {
             Frame::Quit { version } => {
-                if version != VERSION {
-                    return Err(ProtocolError("unsupported-version"));
-                }
-                Ok(false)
+                self.check_version(version)?;
+                return Ok(false);
             }
             Frame::Snapshot {
                 version,
@@ -426,28 +545,61 @@ impl Session {
                 if version != VERSION {
                     return Err(ProtocolError("unsupported-version"));
                 }
-                let snapshot = Snapshot {
+                self.check_version(version)?;
+                validate_v1(&app_id, &name, revision, &title, &tooltip, &icon, &items)?;
+                Snapshot {
+                    version,
                     app_id,
                     name,
-                    title,
-                    tooltip,
-                    icon,
                     revision,
-                    items,
-                };
-                snapshot.validate()?;
-                if let Some(previous) = &self.latest {
-                    if previous.app_id != snapshot.app_id || previous.name != snapshot.name {
-                        return Err(ProtocolError("identity-changed"));
-                    }
-                    if previous.revision >= snapshot.revision {
-                        return Err(ProtocolError("stale-revision"));
-                    }
+                    body: SnapshotBody::V1 {
+                        title,
+                        tooltip,
+                        icon,
+                        items,
+                    },
                 }
-                self.latest = Some(snapshot);
-                Ok(true)
+            }
+            Frame::SnapshotV2(frame) => {
+                self.check_version(frame.version)?;
+                frame.validate()?;
+                Snapshot {
+                    version: frame.version,
+                    app_id: frame.app_id.clone(),
+                    name: frame.name.clone(),
+                    revision: frame.revision,
+                    body: SnapshotBody::V2(frame),
+                }
+            }
+        };
+        if let Some(previous) = &self.latest {
+            if previous.app_id != snapshot.app_id || previous.name != snapshot.name {
+                return Err(ProtocolError("identity-changed"));
+            }
+            if previous.revision >= snapshot.revision {
+                return Err(ProtocolError("stale-revision"));
             }
         }
+        self.latest = Some(snapshot);
+        Ok(true)
+    }
+}
+
+/// Test helpers shared with the v2 module.
+#[cfg(test)]
+pub(crate) mod tests_support {
+    pub fn base64(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut encoded = String::new();
+        for chunk in bytes.chunks(3) {
+            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+            encoded.push(ALPHABET[(b[0] >> 2) as usize] as char);
+            encoded.push(ALPHABET[((b[0] << 4 | b[1] >> 4) & 0x3f) as usize] as char);
+            encoded.push(if chunk.len() > 1 { ALPHABET[((b[1] << 2 | b[2] >> 6) & 0x3f) as usize] as char } else { '=' });
+            encoded.push(if chunk.len() > 2 { ALPHABET[(b[2] & 0x3f) as usize] as char } else { '=' });
+        }
+        encoded
     }
 }
 
@@ -627,8 +779,12 @@ mod tests {
         assert_eq!(session.accept(next), Err(ProtocolError("identity-changed")));
         assert_eq!(session.latest().unwrap().revision, 3);
         assert_eq!(
-            session.accept(Frame::Quit { version: 2 }),
+            session.accept(Frame::Quit { version: 3 }),
             Err(ProtocolError("unsupported-version"))
+        );
+        assert_eq!(
+            session.accept(Frame::Quit { version: 2 }),
+            Err(ProtocolError("version-changed"))
         );
     }
 

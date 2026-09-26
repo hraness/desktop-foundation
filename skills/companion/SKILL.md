@@ -58,5 +58,11 @@ argv, labels, logs and the request's own title/message.
 
 Preserve separate evidence for portable tests, native builds, interactive smoke,
 clean installation and login behavior. Report untested combinations clearly.
-No app bundles, desktop installers, publisher signing credentials or Apple
-notarization workflow belong in this distribution model.
+On macOS each product gets a local app, `~/Applications/Hraness/<Product>.app`,
+assembled on the person's Mac around the verified runner (`--assemble-app`, or
+`identity::assemble_app` in Rust) and signed with the one `Hraness Local
+Signing` identity, so macOS shows the product's name and keeps its approvals
+across updates. Create that identity only after showing the `LOCAL_SIGNING`
+notice. Never distribute the app: no zip, DMG, cask, installer, publisher
+signing credentials or Apple notarization workflow belong in this model. See
+`docs/identity.md`.

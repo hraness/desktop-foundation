@@ -1,9 +1,9 @@
 # Product identity on macOS
 
-Status: design accepted on 2026-09-26 for desktop-foundation 0.8.0. It
-replaces the "unbundled companions only" rule for macOS: `AGENTS.md` and
-`skills/companion/SKILL.md` change in the same pull request that ships the
-implementation.
+Status: built for desktop-foundation 0.8.0 (see
+[implementation notes](#implementation-notes)). It replaces the "unbundled
+companions only" rule for macOS in `AGENTS.md` and
+`skills/companion/SKILL.md`.
 
 ## The problem
 
@@ -201,6 +201,40 @@ binary, which blocks that, at the cost of re-approval after every update. The
 key's access list, non-extractable storage and the one-time Always Allow are
 the mitigations in this design. The stronger alternative, asking for approval
 on every signing, would show a password prompt at each upgrade.
+
+## Implementation notes
+
+As built in 0.8.0 (`src/identity.rs`, runner commands in
+`src/bin/hraness-companion.rs`):
+
+- `status` lists identities with `security find-identity -p codesigning
+  <login keychain>` without `-v`, because the self-signed certificate is not
+  trusted, and takes the first `"Hraness Local Signing"` hash.
+- `ensure` makes the key and certificate with `/usr/bin/openssl` in an
+  owner-only temporary folder, exports a one-time-password PKCS#12 (3DES,
+  which `security import` reads on every macOS), and imports it with
+  `security import -x -T /usr/bin/codesign`. The folder is removed before it
+  returns. The keychain comment is not set yet.
+- Info.plist also carries `HranessInputsSha256`, the digest of every input
+  including the signing mode and runner version; `unchanged` means that digest
+  matches and `codesign --verify --strict` passes. The icon is resized only
+  when a build is needed.
+- A local-signing request without an identity fails with
+  `identity-unavailable`; it never creates one. The product shows the notice,
+  calls `--signing-identity ensure`, then retries, or falls back to ad-hoc.
+- `--launch` refuses to run outside a Hraness app (`launch-outside-app`) or
+  with an argv file that is not an owner-only JSON array whose first entry is
+  an absolute path (`invalid-launch-file`); a child that fails to start is
+  `launch-failed`. It forwards SIGTERM, SIGINT and SIGHUP and exits with the
+  child's code, or 128 plus its signal.
+- Rust products use `identity::login_item` with `service::plan` and
+  `service::install` so their LaunchAgent starts `--launch` from the app.
+  `identity::doctor_line` prints the doctor copy below.
+
+Not yet observed on a clean macOS user account: identity creation, the first
+signing prompt, an upgrade re-sign, the Login Items entry and a privacy prompt
+through `--launch`. The unit tests use a fake `security`, `openssl` and
+`codesign` and a temporary home; only ad-hoc signing has run for real.
 
 ## Doctor copy
 

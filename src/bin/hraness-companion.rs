@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use desktop_foundation::{notice, prompt};
+use desktop_foundation::{identity, notice, prompt};
+use sha2::Digest;
 use desktop_foundation::protocol::{
     self, Event, Frame, ProtocolError, Session, SUPPORTED_VERSIONS, VERSION,
 };
@@ -437,6 +438,157 @@ fn check_protocol() -> Result<(), ProtocolError> {
     .map_err(|_| ProtocolError("output-unavailable"))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppHelperWire {
+    name: String,
+    path: PathBuf,
+    sha256: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct AppRequestWire {
+    #[serde(rename = "type")]
+    kind: String,
+    version: u8,
+    app_id: String,
+    name: String,
+    product_version: String,
+    icon_path: Option<PathBuf>,
+    #[serde(default)]
+    usage: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    helpers: Vec<AppHelperWire>,
+    #[serde(default)]
+    signing: identity::Signing,
+}
+
+fn home_dir() -> Result<PathBuf, ProtocolError> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .ok_or(ProtocolError("unsafe-destination"))
+}
+
+/// `--assemble-app`: builds `~/Applications/Hraness/<Product>.app` around
+/// this runner. One `app-request` line in, one `app-result` line out.
+fn assemble_app() -> Result<(), ProtocolError> {
+    let frame = prompt::read_single_frame(&mut BufReader::new(std::io::stdin()), "invalid-app-request")?;
+    let wire: AppRequestWire =
+        serde_json::from_slice(&frame).map_err(|_| ProtocolError("invalid-app-request"))?;
+    if wire.kind != "app-request" {
+        return Err(ProtocolError("invalid-app-request"));
+    }
+    if wire.version != VERSION {
+        return Err(ProtocolError("unsupported-version"));
+    }
+    let executable = std::env::current_exe().map_err(|_| ProtocolError("invalid-app-request"))?;
+    let bytes = fs::read(&executable).map_err(|_| ProtocolError("invalid-app-request"))?;
+    let digest: String = sha2::Sha256::digest(&bytes).iter().map(|byte| format!("{byte:02x}")).collect();
+    let spec = identity::AppSpec {
+        app_id: wire.app_id,
+        name: wire.name,
+        product_version: wire.product_version,
+        executable,
+        executable_sha256: digest,
+        icon_png: wire.icon_path,
+        usage: wire.usage,
+        helpers: wire
+            .helpers
+            .into_iter()
+            .map(|helper| identity::HelperSpec { name: helper.name, path: helper.path, sha256: helper.sha256 })
+            .collect(),
+        signing: wire.signing,
+    };
+    let tools = identity::SystemTools;
+    let env = identity::Environment::for_user(home_dir()?, &tools);
+    #[derive(serde::Serialize)]
+    struct AppResult {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        version: u8,
+        status: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<PathBuf>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signing: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<&'static str>,
+    }
+    let result = match identity::assemble_app(&spec, &env, env!("CARGO_PKG_VERSION")) {
+        Ok(build) => AppResult { kind: "app-result", version: VERSION, status: build.status, path: Some(build.path), signing: Some(build.signing.wire()), code: None },
+        Err(error) => AppResult { kind: "app-result", version: VERSION, status: "failed", path: None, signing: None, code: Some(error.code()) },
+    };
+    let result = serde_json::to_string(&result).map_err(|_| ProtocolError("output-unavailable"))?;
+    println!("{result}");
+    Ok(())
+}
+
+/// `--signing-identity status|ensure`: one `signing-identity` line.
+fn signing_identity(action: &std::ffi::OsStr) -> Result<(), ProtocolError> {
+    let tools = identity::SystemTools;
+    let env = identity::Environment::for_user(home_dir()?, &tools);
+    let state = if action == "status" {
+        identity::signing_identity_status(&env)
+    } else if action == "ensure" {
+        identity::ensure_signing_identity(&env, &std::env::temp_dir())
+    } else {
+        return Err(ProtocolError("invalid-arguments"));
+    };
+    let (state, sha1) = match state {
+        identity::IdentityState::Ready { sha1 } => ("ready", Some(sha1)),
+        identity::IdentityState::Missing => ("missing", None),
+        identity::IdentityState::Unavailable => ("unavailable", None),
+    };
+    let mut line = format!("{{\"type\":\"signing-identity\",\"version\":{VERSION},\"state\":\"{state}\"");
+    if let Some(sha1) = sha1 {
+        line.push_str(&format!(",\"sha1\":\"{sha1}\""));
+    }
+    line.push('}');
+    println!("{line}");
+    Ok(())
+}
+
+#[cfg(unix)]
+static LAUNCHED_CHILD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+#[cfg(unix)]
+extern "C" fn forward_signal(signal: libc::c_int) {
+    let child = LAUNCHED_CHILD.load(Ordering::Acquire);
+    if child > 0 {
+        unsafe { libc::kill(child, signal) };
+    }
+}
+
+/// `--launch <argv file>`: runs the product's command as a child of this
+/// app's executable, so macOS attributes its prompts and grants to the app.
+/// Stays the parent on purpose; `exec` would make the child responsible for
+/// itself.
+#[cfg(unix)]
+fn launch(argv_file: &Path) -> Result<(), ProtocolError> {
+    use std::os::unix::process::ExitStatusExt;
+    let executable = std::env::current_exe().map_err(|_| ProtocolError("launch-outside-app"))?;
+    let bundle_id = identity::own_bundle_id(&executable).ok_or(ProtocolError("launch-outside-app"))?;
+    let argv = identity::read_argv_file(argv_file).ok_or(ProtocolError("invalid-launch-file"))?;
+    let mut child = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .env(identity::BUNDLE_ID_ENV, bundle_id)
+        .spawn()
+        .map_err(|_| ProtocolError("launch-failed"))?;
+    LAUNCHED_CHILD.store(child.id() as i32, Ordering::Release);
+    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+        unsafe { libc::signal(signal, forward_signal as *const () as libc::sighandler_t) };
+    }
+    let status = child.wait().map_err(|_| ProtocolError("launch-failed"))?;
+    std::process::exit(status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(1)));
+}
+
+#[cfg(not(unix))]
+fn launch(_argv_file: &Path) -> Result<(), ProtocolError> {
+    Err(ProtocolError("launch-outside-app"))
+}
+
 fn execute() -> Result<(), ProtocolError> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() == 1 && args[0] == "--version" {
@@ -453,6 +605,15 @@ fn execute() -> Result<(), ProtocolError> {
     }
     if args.len() == 1 && args[0] == "--prompt-probe" {
         return prompt::probe().emit(&mut std::io::stdout());
+    }
+    if args.len() == 1 && args[0] == "--assemble-app" {
+        return assemble_app();
+    }
+    if args.len() == 2 && args[0] == "--signing-identity" {
+        return signing_identity(&args[1]);
+    }
+    if args.len() == 2 && args[0] == "--launch" && Path::new(&args[1]).is_absolute() {
+        return launch(Path::new(&args[1]));
     }
     if args.len() == 1 && args[0] == "--notice" {
         let spec = notice::read_spec(&mut BufReader::new(std::io::stdin()))?;

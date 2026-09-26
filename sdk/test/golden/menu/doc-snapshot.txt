@@ -1,0 +1,16 @@
+[mark.chat Tb, attention, 3] Textbutler · 3 replies waiting
+Textbutler
+● Running · 3 chats on
+─────────
+↗ Open dashboard ↗ (primary)  ⌘O
+─────────
+Mom · Reply waiting for approval  2
+  ⌥ Copy chat ID
+Show all chats (23) ↗
+─────────
+⏸︎ Pause automatic replies  ⌘P
+✓ Open at login
+─────────
+♡ Help & support ↗
+  ⌥ Copy diagnostics
+Quit Textbutler

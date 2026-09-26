@@ -124,6 +124,30 @@ a terminal on stderr). `createCliOutput()` prints results, `✗` errors with one
 `→` next step, `Next:` hints and a progress line with the shared symbols, and
 respects `NO_COLOR`, `TERM=dumb` and pipes.
 
+### Menu kit v2: layout and lint
+
+`@hraness/desktop-foundation/menu-kit` builds menus in the shared layout and
+checks them against the menu rules in [protocol v2](docs/protocol-v2.md#menu-lint):
+
+```js
+import { layout, assertMenuFixture } from '@hraness/desktop-foundation/menu-kit';
+
+const items = layout({
+  name: 'My Tool',
+  status: { kind: 'status', symbol: 'status.running', label: 'Running', detail: '3 jobs today' },
+  primary: { kind: 'action', id: 'dashboard', label: 'Open dashboard', symbol: 'action.open', opens: 'browser' },
+  openAtLogin: true,
+  help: { kind: 'action', id: 'help', label: 'Help & support', symbol: 'action.support', opens: 'browser' },
+});
+```
+
+`layout` adds the header, separators, the foundation's "Open at login" row and
+`Quit My Tool`. In a product test, `assertMenuFixture(snapshot)` validates a
+state fixture, lints it strictly and throws with the rendered tree when a rule
+fails. `renderMenuTree` prints that tree for pull requests, and
+`companion lint-menu --strict fixtures/*.json` runs the same check in CI.
+`validateSnapshotV2` and `downlevelSnapshot` are exported for tests.
+
 ## Existing Rust products
 
 A product supplies a [`Host`](src/lib.rs) implementation that renders a

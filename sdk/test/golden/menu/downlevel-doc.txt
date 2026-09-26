@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "type": "snapshot",
+  "appId": "textbutler",
+  "name": "Textbutler",
+  "title": "Tb",
+  "tooltip": "Textbutler · 3 replies waiting",
+  "revision": 7,
+  "items": [
+    {
+      "kind": "label",
+      "label": "Textbutler"
+    },
+    {
+      "kind": "label",
+      "label": "● Running · 3 chats on"
+    },
+    {
+      "kind": "separator"
+    },
+    {
+      "kind": "action",
+      "id": "open",
+      "label": "↗ Open dashboard ↗",
+      "shortcut": "CmdOrCtrl+O"
+    },
+    {
+      "kind": "separator"
+    },
+    {
+      "kind": "action",
+      "id": "chat.1",
+      "label": "Mom · Reply waiting for approval  2"
+    },
+    {
+      "kind": "action",
+      "id": "chats.all",
+      "label": "Show all chats (23) ↗"
+    },
+    {
+      "kind": "separator"
+    },
+    {
+      "kind": "action",
+      "id": "pause",
+      "label": "⏸︎ Pause automatic replies",
+      "checked": false,
+      "shortcut": "CmdOrCtrl+P"
+    },
+    {
+      "kind": "action",
+      "id": "foundation.login",
+      "label": "Open at login",
+      "checked": true
+    },
+    {
+      "kind": "separator"
+    },
+    {
+      "kind": "action",
+      "id": "help",
+      "label": "♡ Help & support ↗"
+    },
+    {
+      "kind": "quit",
+      "label": "Quit Textbutler"
+    }
+  ]
+}

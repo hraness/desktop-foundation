@@ -32,6 +32,8 @@ export function assertAppId(id: string): void {
 function label(value: unknown, max = 256): asserts value is string {
   if (typeof value !== 'string' || !value || [...value].length > max || unsafe.test(value)) throw new Error('invalid-label');
 }
+/** Checks v1 full-color tray art (`invalid-icon`); shared with the v2 validator. */
+export function assertTrayIcon(value: unknown): asserts value is TrayIcon { icon(value); }
 function icon(value: unknown): asserts value is TrayIcon {
   exact(value as object, ['width', 'height', 'rgba']);
   const { width, height, rgba } = value as TrayIcon;
@@ -43,7 +45,12 @@ function icon(value: unknown): asserts value is TrayIcon {
 function exact(value: object, fields: readonly string[]): void {
   if (Object.keys(value).some(key => !fields.includes(key))) throw new Error('unknown-protocol-field');
 }
-export function validateSnapshot(value: Snapshot): ReadonlyMap<string, boolean> {
+/**
+ * Validates a v1 snapshot and returns its action IDs and whether each is
+ * enabled. `foundation.*` IDs are rejected unless listed in `reserved`: the
+ * SDK passes the reserved IDs its own helpers inserted and handles itself.
+ */
+export function validateSnapshot(value: Snapshot, reserved: ReadonlySet<string> = new Set()): ReadonlyMap<string, boolean> {
   exact(value, ['version','type','appId','name','title','tooltip','icon','revision','items']);
   assertAppId(value.appId);
   label(value.name, 128);
@@ -61,7 +68,7 @@ export function validateSnapshot(value: Snapshot): ReadonlyMap<string, boolean> 
       switch (item.kind) {
         case 'action':
           exact(item, ['kind','id','label','enabled','checked','shortcut']);
-          if (!/^[A-Za-z0-9._:-]{1,256}$/.test(item.id) || item.id.startsWith('foundation.') || actions.has(item.id)) throw new Error('invalid-action-id');
+          if (!/^[A-Za-z0-9._:-]{1,256}$/.test(item.id) || (item.id.startsWith('foundation.') && !reserved.has(item.id)) || actions.has(item.id)) throw new Error('invalid-action-id');
           if (item.enabled !== undefined && typeof item.enabled !== 'boolean') throw new Error('invalid-enabled');
           if (item.checked !== undefined && typeof item.checked !== 'boolean') throw new Error('invalid-checked');
           if (item.shortcut !== undefined) label(item.shortcut, 64);
@@ -78,12 +85,13 @@ export function validateSnapshot(value: Snapshot): ReadonlyMap<string, boolean> 
   if (Buffer.byteLength(JSON.stringify(value)) + 1 > MAX_FRAME_BYTES) throw new Error('oversize-frame');
   return actions;
 }
-export function parseRunnerEvent(line: string): RunnerEvent {
+/** Parses one runner frame. `version` is the session's protocol version (v2 sessions receive v2 events). */
+export function parseRunnerEvent(line: string, version: 1 | 2 = 1): RunnerEvent {
   if (Buffer.byteLength(line) > MAX_FRAME_BYTES) throw new Error('oversize-frame');
   const value: unknown = JSON.parse(line);
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid-runner-event');
   const v = value as Record<string, unknown>;
-  if (v.version !== 1) throw new Error('unsupported-protocol');
+  if (v.version !== version) throw new Error('unsupported-protocol');
   const keys: Record<string, string[]> = { ready: ['version','type','pid','platform'], action: ['version','type','id','revision'], error: ['version','type','code'], stopped: ['version','type'], 'already-running': ['version','type'], validated: ['version','type','revision'] };
   const allowed = typeof v.type === 'string' ? keys[v.type] : undefined;
   if (!allowed || Object.keys(v).some(key => !allowed.includes(key))) throw new Error('invalid-runner-event');

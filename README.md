@@ -188,6 +188,26 @@ and the refresh loop. The product's daemon stays in charge of state and
 permissions. The menu-bar process is a replaceable client of that daemon with
 no privileges of its own.
 
+`service` gives Rust products the same `menubar install`, `uninstall` and
+`status` behavior as the SDK: one owned LaunchAgent at
+`~/Library/LaunchAgents/app.hraness.<appId>.plist` (it replaces an older
+`app.hraness.companion.<appId>` agent and refuses to touch a file it did not
+write), an `InstanceLock` so a second launch exits with code 3, a liveness
+check for `status`, and the shared copy: the login-item notice to print before
+installing, results, status lines and errors, each with an ASCII fallback.
+Nothing calls `launchctl`; the agent starts at the next login and
+`menubar start` opens the menu now.
+
+```rust
+use desktop_foundation::service::{self, Glyphs, LoginItem, ServiceStatus};
+
+let plan = service::plan(&item, &home)?;
+eprint!("{}", service::login_item_notice(&item.name, &item.name, Glyphs::Unicode));
+let change = service::install(&plan)?;
+print!("{}", service::install_result(&item, change, Glyphs::Unicode));
+print!("{}", ServiceStatus::read(&plan, &state_dir, &item.app_id).human(&item, Glyphs::Unicode));
+```
+
 ## Rust usage
 
 Pin by immutable tag:

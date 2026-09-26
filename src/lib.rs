@@ -14,6 +14,10 @@ pub mod browser;
 pub mod outputs;
 pub mod prompt;
 pub mod protocol;
+pub mod protocol_v2;
+pub mod symbols;
+
+pub use symbols::{Symbol, SymbolFamily, Tint};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
@@ -81,9 +85,11 @@ const MAX_MENU_NODES: usize = 256;
 const MAX_MENU_DEPTH: usize = 8;
 const MAX_ACTION_ID_BYTES: usize = 1024;
 const MAX_ICON_DIMENSION: u32 = 512;
+const MAX_TEMPLATE_ICON_SIDE: u32 = 64;
 
 /// One menu node. Items with no `id` are inert labels.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)] // Boxing `Interactive` would break adapters that match on it.
 pub enum MenuNode {
     Item { id: Option<String>, title: String, enabled: bool, icon: Option<RgbaIcon> },
     /// An interactive item with native check semantics and richer presentation
@@ -91,7 +97,15 @@ pub enum MenuNode {
     /// compatible for existing product adapters.
     Interactive { item: MenuItem },
     Separator,
-    Submenu { title: String, items: Vec<MenuNode> },
+    /// `symbol` is an `action.*` or `item.*` name shown beside the title
+    /// where the platform can draw it.
+    Submenu { title: String, items: Vec<MenuNode>, symbol: Option<Symbol> },
+    /// A section title: the product name at the top of the menu, or a group
+    /// name. Rendered as a native section header on macOS 14 and later.
+    Header { title: String },
+    /// An inert status row: a tone symbol (a `status.*` name), plain words,
+    /// and optional detail shown as a subtitle.
+    Status { symbol: Symbol, title: String, detail: Option<String> },
 }
 
 impl MenuNode {
@@ -121,6 +135,19 @@ impl MenuNode {
     pub fn interactive(item: MenuItem) -> Self {
         MenuNode::Interactive { item }
     }
+
+    pub fn submenu(title: impl Into<String>, items: Vec<MenuNode>) -> Self {
+        MenuNode::Submenu { title: title.into(), items, symbol: None }
+    }
+
+    pub fn header(title: impl Into<String>) -> Self {
+        MenuNode::Header { title: title.into() }
+    }
+
+    /// A status row. `symbol` should be a `status.*` name.
+    pub fn status(symbol: Symbol, title: impl Into<String>, detail: Option<String>) -> Self {
+        MenuNode::Status { symbol, title: title.into(), detail }
+    }
 }
 
 /// Presentation semantics for an interactive menu item. Toggle/check/radio
@@ -134,6 +161,68 @@ pub enum MenuItemKind {
     Toggle { checked: bool },
     Check { checked: bool },
     Radio { selected: bool, group: Option<String> },
+    /// Protocol v2 three-state toggle. Like the other kinds, a click never
+    /// commits the state; the host sends the confirmed state next.
+    State { state: ItemState },
+}
+
+/// A v2 toggle state, including the mixed dash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemState {
+    On,
+    Off,
+    Mixed,
+}
+
+/// What an action opens. The renderer adds the glyph; titles never carry it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Opens {
+    /// Appends ` ↗`.
+    Browser,
+    /// No glyph.
+    Finder,
+    /// Appends `…`.
+    Settings,
+    /// Appends `…`.
+    Dialog,
+}
+
+impl Opens {
+    fn suffix(self) -> &'static str {
+        match self {
+            Opens::Browser => " ↗",
+            Opens::Finder => "",
+            Opens::Settings | Opens::Dialog => "…",
+        }
+    }
+}
+
+/// An action's role in the layout. `Primary` marks the one main action;
+/// `Destructive` actions confirm through the notice dialog before acting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Primary,
+    Destructive,
+}
+
+/// An Option-key alternate: shown in place of its item while ⌥ is held on
+/// macOS and omitted elsewhere, so it never holds an essential action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alternate {
+    pub id: String,
+    pub title: String,
+    pub symbol: Option<Symbol>,
+}
+
+impl Alternate {
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self { id: id.into(), title: title.into(), symbol: None }
+    }
+
+    pub fn with_symbol(mut self, symbol: Symbol) -> Self {
+        self.symbol = Some(symbol);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -181,11 +270,22 @@ pub struct MenuItem {
     pub icon: Option<RgbaIcon>,
     pub kind: MenuItemKind,
     pub shortcut: Option<String>,
-    /// Bounded text appended to the title, not a separate native badge.
+    /// A short count or word such as `3` or `New`: a native badge on macOS
+    /// 14 and later, otherwise appended after two spaces.
     pub badge: Option<String>,
     /// Percentage appended to the title, not a native progress control.
     pub progress: Option<ProgressValue>,
     pub accessibility: AccessibilityMetadata,
+    /// An `action.*` or `item.*` symbol drawn as the item image.
+    pub symbol: Option<Symbol>,
+    /// Secondary text: a native subtitle on macOS 14.4 and later, otherwise
+    /// appended as ` · subtitle`.
+    pub subtitle: Option<String>,
+    /// Hover text on macOS; dropped elsewhere.
+    pub tooltip: Option<String>,
+    pub alternate: Option<Alternate>,
+    pub opens: Option<Opens>,
+    pub role: Option<Role>,
 }
 
 impl MenuItem {
@@ -194,7 +294,23 @@ impl MenuItem {
             id: Some(id.into()), title: title.into(), enabled: true, icon: None,
             kind: MenuItemKind::Action, shortcut: None, badge: None, progress: None,
             accessibility: AccessibilityMetadata::default(),
+            symbol: None, subtitle: None, tooltip: None, alternate: None, opens: None, role: None,
         }
+    }
+
+    /// An inert row with an optional subtitle (the v2 `label` kind).
+    pub fn inert(title: impl Into<String>) -> Self {
+        let mut item = Self::action(String::new(), title);
+        item.id = None;
+        item.enabled = false;
+        item
+    }
+
+    /// A v2 three-state toggle.
+    pub fn state(id: impl Into<String>, title: impl Into<String>, state: ItemState) -> Self {
+        let mut item = Self::action(id, title);
+        item.kind = MenuItemKind::State { state };
+        item
     }
 
     pub fn toggle(id: impl Into<String>, title: impl Into<String>, checked: bool) -> Self {
@@ -221,6 +337,13 @@ impl MenuItem {
     pub fn with_progress(mut self, percent: u8) -> Self { self.progress = Some(ProgressValue::new(percent)); self }
     pub fn with_icon(mut self, icon: RgbaIcon) -> Self { self.icon = Some(icon); self }
     pub fn with_accessibility(mut self, metadata: AccessibilityMetadata) -> Self { self.accessibility = metadata.bounded(); self }
+    pub fn with_symbol(mut self, symbol: Symbol) -> Self { self.symbol = Some(symbol); self }
+    pub fn with_subtitle(mut self, subtitle: impl Into<String>) -> Self { self.subtitle = Some(subtitle.into()); self }
+    pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self { self.tooltip = Some(tooltip.into()); self }
+    pub fn with_alternate(mut self, alternate: Alternate) -> Self { self.alternate = Some(alternate); self }
+    pub fn opens(mut self, opens: Opens) -> Self { self.opens = Some(opens); self }
+    pub fn primary(mut self) -> Self { self.role = Some(Role::Primary); self }
+    pub fn destructive(mut self) -> Self { self.role = Some(Role::Destructive); self }
 }
 
 /// A full-color status-item icon. `rgba` is straight (non-premultiplied)
@@ -232,17 +355,72 @@ pub struct RgbaIcon {
     pub height: u32,
 }
 
+/// A monochrome glyph: `alpha` is 8-bit coverage, `width * height` bytes.
+/// macOS draws it as a template image that follows the menu bar appearance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlphaIcon {
+    pub alpha: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The menu-bar tone. Only `Attention` and `Error` add a colored dot.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MarkTone {
+    #[default]
+    Normal,
+    Attention,
+    Error,
+    Paused,
+    Offline,
+}
+
+/// The protocol v2 menu-bar mark: a template glyph from the `mark.*`
+/// vocabulary (or a custom template icon), a tone dot, and a short count.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusMark {
+    /// A `mark.*` symbol.
+    pub symbol: Symbol,
+    /// A custom glyph that wins over `symbol` on every platform.
+    pub template_icon: Option<AlphaIcon>,
+    /// One or two ASCII letters or digits: the Windows and Linux monogram.
+    pub letters: String,
+    pub tone: MarkTone,
+    /// A count such as `3`, shown beside the glyph. Only with an
+    /// `Attention` or `Error` tone.
+    pub text: Option<String>,
+    pub accessibility_label: Option<String>,
+}
+
+impl StatusMark {
+    pub fn new(symbol: Symbol, letters: impl Into<String>) -> Self {
+        Self {
+            symbol, template_icon: None, letters: letters.into(), tone: MarkTone::Normal,
+            text: None, accessibility_label: None,
+        }
+    }
+
+    pub fn with_tone(mut self, tone: MarkTone) -> Self { self.tone = tone; self }
+    pub fn with_text(mut self, text: impl Into<String>) -> Self { self.text = Some(text.into()); self }
+    pub fn with_template_icon(mut self, icon: AlphaIcon) -> Self { self.template_icon = Some(icon); self }
+}
+
 /// One complete rendered state of the status item and its menu.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MenuModel {
     /// Status-item text. Present alongside or instead of the icon.
     /// `None` clears a previously rendered title.
     pub title: Option<String>,
-    /// `None` clears a previously rendered icon.
+    /// `None` clears a previously rendered icon. With a `status_mark`, this
+    /// is the full-color Windows/Linux art used when the mark has no
+    /// template icon.
     pub icon: Option<RgbaIcon>,
     /// `None` clears a previously rendered tooltip.
     pub tooltip: Option<String>,
     pub nodes: Vec<MenuNode>,
+    /// The v2 mark. When set it replaces `title` and draws the glyph, tone
+    /// and count natively.
+    pub status_mark: Option<StatusMark>,
 }
 
 /// A safe category; model errors never include product labels or command IDs.
@@ -298,6 +476,9 @@ impl MenuModel {
                 && icon.width <= MAX_ICON_DIMENSION && icon.height <= MAX_ICON_DIMENSION
                 && u64::from(icon.width) * u64::from(icon.height) * 4 == icon.rgba.len() as u64
         }
+        fn id_valid(id: &str) -> bool {
+            !id.is_empty() && id.len() <= MAX_ACTION_ID_BYTES && !id.chars().any(char::is_control)
+        }
         fn walk(
             nodes: &[MenuNode], depth: usize, count: &mut usize,
             selected_groups: &mut HashSet<String>,
@@ -314,16 +495,22 @@ impl MenuModel {
                                 return Err(ModelError::AmbiguousRadioGroup);
                             }
                         }
+                        if let Some(alternate) = &item.alternate {
+                            // An alternate is a second native row.
+                            *count += 1;
+                            if *count > MAX_MENU_NODES { return Err(ModelError::TooManyNodes); }
+                            if !id_valid(&alternate.id) { return Err(ModelError::InvalidActionId); }
+                        }
                         (&item.id, &item.icon)
                     }
                     MenuNode::Submenu { items, .. } => {
                         walk(items, depth + 1, count, selected_groups)?;
                         continue;
                     }
-                    MenuNode::Separator => continue,
+                    MenuNode::Separator | MenuNode::Header { .. } | MenuNode::Status { .. } => continue,
                 };
                 if let Some(id) = id {
-                    if id.is_empty() || id.len() > MAX_ACTION_ID_BYTES || id.chars().any(char::is_control) {
+                    if !id_valid(id) {
                         return Err(ModelError::InvalidActionId);
                     }
                 }
@@ -336,7 +523,34 @@ impl MenuModel {
         if self.icon.as_ref().is_some_and(|icon| !icon_valid(icon)) {
             return Err(ModelError::InvalidIcon);
         }
+        if let Some(mark) = &self.status_mark {
+            if mark.template_icon.as_ref().is_some_and(|icon| {
+                !(1..=MAX_TEMPLATE_ICON_SIDE).contains(&icon.width)
+                    || !(1..=MAX_TEMPLATE_ICON_SIDE).contains(&icon.height)
+                    || u64::from(icon.width) * u64::from(icon.height) != icon.alpha.len() as u64
+            }) {
+                return Err(ModelError::InvalidIcon);
+            }
+        }
         walk(&self.nodes, 0, &mut 0, &mut HashSet::new())
+    }
+
+    /// Counts the native rows this model builds, including alternates.
+    pub fn node_count(&self) -> usize {
+        fn count(nodes: &[MenuNode]) -> usize {
+            nodes.iter().map(|node| match node {
+                MenuNode::Submenu { items, .. } => 1 + count(items),
+                MenuNode::Interactive { item } if item.alternate.is_some() => 2,
+                _ => 1,
+            }).sum()
+        }
+        count(&self.nodes)
+    }
+
+    /// Set the v2 mark. Replaces any v1 `title`.
+    pub fn set_mark(&mut self, mark: StatusMark) {
+        self.title = None;
+        self.status_mark = Some(mark);
     }
 
     /// Apply the platform-appropriate status mark. macOS renders `title` as
@@ -700,6 +914,22 @@ fn build_items(
                     )?)),
                 }
             }
+            MenuNode::Header { title } => {
+                let item_id = build.route(None, false);
+                items.push(Box::new(TauriMenuItem::with_id(
+                    handle, item_id, bounded_text(title, MAX_MENU_TITLE_CHARS), false, None::<&str>,
+                )?));
+            }
+            MenuNode::Status { symbol, title, detail } => {
+                let item_id = build.route(None, false);
+                let text = compose_title(TitleParts {
+                    prefix: symbol.fallback(),
+                    title,
+                    subtitle: detail.as_deref(),
+                    ..TitleParts::default()
+                });
+                items.push(Box::new(TauriMenuItem::with_id(handle, item_id, text, false, None::<&str>)?));
+            }
             MenuNode::Interactive { item } => {
                 let enabled = item.enabled && item.id.is_some();
                 let item_id = build.route(item.id.as_ref(), enabled);
@@ -708,15 +938,20 @@ fn build_items(
                 // invalid accelerator; drop oversized values before parsing.
                 let accelerator = item.shortcut.as_deref()
                     .filter(|value| value.len() <= MAX_MENU_SHORTCUT_CHARS);
-                match &item.kind {
+                let checked = match &item.kind {
                     MenuItemKind::Toggle { checked }
                     | MenuItemKind::Check { checked }
-                    | MenuItemKind::Radio { selected: checked, .. } => {
+                    | MenuItemKind::Radio { selected: checked, .. } => Some(*checked),
+                    MenuItemKind::State { state } => Some(*state == ItemState::On),
+                    MenuItemKind::Action => None,
+                };
+                match checked {
+                    Some(checked) => {
                         let check = CheckMenuItem::with_id(
-                            handle, item_id.clone(), title, enabled, *checked, accelerator,
+                            handle, item_id.clone(), title, enabled, checked, accelerator,
                         )?;
                         let route = build.routes.get_mut(&item_id).expect("registered menu route");
-                        route.check = Some((check.clone(), *checked));
+                        route.check = Some((check.clone(), checked));
                         if matches!(item.kind, MenuItemKind::Radio { selected: true, .. }) {
                             // Choosing the selected radio is a no-op, never a
                             // request to deselect the group's current value.
@@ -724,7 +959,7 @@ fn build_items(
                         }
                         items.push(Box::new(check));
                     }
-                    MenuItemKind::Action => match &item.icon {
+                    None => match &item.icon {
                         Some(icon) => {
                             let image = tauri::image::Image::new_owned(
                                 icon.rgba.clone(), icon.width, icon.height,
@@ -739,7 +974,7 @@ fn build_items(
                     },
                 }
             }
-            MenuNode::Submenu { title, items: children } => {
+            MenuNode::Submenu { title, items: children, .. } => {
                 let built = build_items(handle, children, build)?;
                 let refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
                     built.iter().map(|item| item.as_ref() as &dyn IsMenuItem<tauri::Wry>).collect();
@@ -752,20 +987,64 @@ fn build_items(
     Ok(items)
 }
 
-fn render_item_title(item: &MenuItem) -> String {
-    // Reserve suffix space so long titles cannot silently hide state.
+/// The pieces of one rendered row title, in display order.
+#[derive(Default)]
+struct TitleParts<'a> {
+    /// A leading glyph and a space: the state dash, then the symbol fallback.
+    state: Option<&'a str>,
+    prefix: Option<&'a str>,
+    title: &'a str,
+    subtitle: Option<&'a str>,
+    badge: Option<&'a str>,
+    progress: Option<u8>,
+    opens: Option<Opens>,
+}
+
+/// Composes the text form of a row: `– ↻ Title · subtitle  3  42% ↗`.
+/// The trailing state (badge, progress, opens glyph) is kept whole; the
+/// title and subtitle are shortened to fit, ending in `…` when cut.
+fn compose_title(parts: TitleParts<'_>) -> String {
     let mut suffix = String::new();
-    if let Some(badge) = &item.badge {
-        suffix.push_str("  [");
+    if let Some(badge) = parts.badge {
+        suffix.push_str("  ");
         suffix.push_str(&bounded_text(badge, MAX_MENU_BADGE_CHARS));
-        suffix.push(']');
     }
-    if let Some(progress) = item.progress {
-        suffix.push_str(&format!("  {}%", progress.percent.min(100)));
+    if let Some(percent) = parts.progress {
+        suffix.push_str(&format!("  {}%", percent.min(100)));
     }
-    let mut title = bounded_text(&item.title, MAX_MENU_TITLE_CHARS - suffix.chars().count());
+    if let Some(opens) = parts.opens {
+        suffix.push_str(opens.suffix());
+    }
+    let mut head = String::new();
+    for glyph in [parts.state, parts.prefix].into_iter().flatten() {
+        head.push_str(glyph);
+        head.push(' ');
+    }
+    head.push_str(parts.title);
+    if let Some(subtitle) = parts.subtitle {
+        head.push_str(" · ");
+        head.push_str(subtitle);
+    }
+    let room = MAX_MENU_TITLE_CHARS - suffix.chars().count();
+    let mut title = bounded_text(&head, room);
+    if head.chars().count() > room {
+        title.pop();
+        title.push('…');
+    }
     title.push_str(&suffix);
     title
+}
+
+fn render_item_title(item: &MenuItem) -> String {
+    compose_title(TitleParts {
+        state: matches!(item.kind, MenuItemKind::State { state: ItemState::Mixed }).then_some("–"),
+        prefix: item.symbol.and_then(Symbol::fallback),
+        title: &item.title,
+        subtitle: item.subtitle.as_deref(),
+        badge: item.badge.as_deref(),
+        progress: item.progress.map(|progress| progress.percent),
+        opens: item.opens,
+    })
 }
 
 fn bounded_text(value: &str, max_chars: usize) -> String {
@@ -806,16 +1085,101 @@ fn apply_model(
         // time instead of treating partially applied native state as final.
         rendered.model = None;
     }
-    tray.set_title(model.title.as_deref().map(|title| bounded_text(title, MAX_MENU_TITLE_CHARS)))
+    let (title, icon) = mark_presentation(model);
+    tray.set_title(title.as_deref().map(|title| bounded_text(title, MAX_MENU_TITLE_CHARS)))
         .map_err(|_| RenderFailure::native(RenderOperation::SetTitle))?;
     tray.set_tooltip(model.tooltip.as_deref().map(|tip| bounded_text(tip, MAX_MENU_TITLE_CHARS)))
         .map_err(|_| RenderFailure::native(RenderOperation::SetTooltip))?;
-    let image = model.icon.as_ref().map(|icon|
+    let image = icon.as_ref().map(|icon|
         tauri::image::Image::new_owned(icon.rgba.clone(), icon.width, icon.height)
     );
     tray.set_icon(image).map_err(|_| RenderFailure::native(RenderOperation::SetIcon))?;
     rendered.lock().expect("rendered menu lock poisoned").model = Some(model.clone());
     Ok(())
+}
+
+/// The status-item title and icon for a model. A v2 mark shows its letters
+/// as the macOS title until the native glyph renderer draws it; icon-only
+/// surfaces (Windows, Linux) get a composed tray icon with the tone dot.
+fn mark_presentation(model: &MenuModel) -> (Option<String>, Option<RgbaIcon>) {
+    let Some(mark) = &model.status_mark else {
+        return (model.title.clone(), model.icon.clone());
+    };
+    if cfg!(target_os = "macos") {
+        let mut title = mark.letters.clone();
+        if let Some(text) = &mark.text {
+            title.push(' ');
+            title.push_str(text);
+        }
+        (Some(title), None)
+    } else {
+        (None, Some(mark_icon(mark, model.icon.as_ref())))
+    }
+}
+
+/// Tray art for icon-only surfaces: the custom template glyph on the
+/// monogram tile, else the product's full-color art, else the monogram;
+/// then an orange or red dot for attention or error, or half opacity for
+/// paused and offline.
+pub fn mark_icon(mark: &StatusMark, art: Option<&RgbaIcon>) -> RgbaIcon {
+    let mut icon = match (&mark.template_icon, art) {
+        (Some(glyph), _) => template_tile(glyph),
+        (None, Some(art)) => art.clone(),
+        (None, None) => protocol::monogram(&mark.letters),
+    };
+    let (width, height) = (icon.width as i64, icon.height as i64);
+    match mark.tone {
+        MarkTone::Attention | MarkTone::Error => {
+            let color = if mark.tone == MarkTone::Error { [255, 59, 48] } else { [255, 149, 0] };
+            let radius = (width.min(height) / 5).max(2);
+            let (cx, cy) = (width - radius - 1, height - radius - 1);
+            for y in 0..height {
+                for x in 0..width {
+                    let distance = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                    let at = ((y * width + x) * 4) as usize;
+                    if distance <= radius * radius {
+                        icon.rgba[at..at + 4].copy_from_slice(&[color[0], color[1], color[2], 255]);
+                    } else if distance <= (radius + 1) * (radius + 1) {
+                        // A thin clear ring keeps the dot readable on any glyph.
+                        icon.rgba[at + 3] = 0;
+                    }
+                }
+            }
+        }
+        MarkTone::Paused | MarkTone::Offline => {
+            for pixel in icon.rgba.chunks_exact_mut(4) {
+                pixel[3] /= 2;
+            }
+        }
+        MarkTone::Normal => {}
+    }
+    icon
+}
+
+/// Draws a template glyph in white on the dark monogram tile, scaled to fit.
+fn template_tile(glyph: &AlphaIcon) -> RgbaIcon {
+    let mut tile = protocol::monogram("");
+    let (size, inset) = (32u32, 4u32);
+    let span = size - inset * 2;
+    let scale = (glyph.width.max(glyph.height) as f32 / span as f32).max(1.0 / 8.0);
+    let (drawn_w, drawn_h) = (
+        ((glyph.width as f32 / scale) as u32).clamp(1, span),
+        ((glyph.height as f32 / scale) as u32).clamp(1, span),
+    );
+    let (left, top) = (inset + (span - drawn_w) / 2, inset + (span - drawn_h) / 2);
+    for y in 0..drawn_h {
+        for x in 0..drawn_w {
+            let sx = ((x as f32 * scale) as u32).min(glyph.width - 1);
+            let sy = ((y as f32 * scale) as u32).min(glyph.height - 1);
+            let coverage = u32::from(glyph.alpha[(sy * glyph.width + sx) as usize]);
+            let at = (((top + y) * size + left + x) * 4) as usize;
+            for channel in 0..3 {
+                let base = u32::from(tile.rgba[at + channel]);
+                tile.rgba[at + channel] = ((base * (255 - coverage) + 255 * coverage) / 255) as u8;
+            }
+        }
+    }
+    tile
 }
 
 fn show_companion_window(app: &AppHandle) {
@@ -1110,7 +1474,7 @@ mod tests {
         assert_eq!(model.validate(), Err(ModelError::InvalidActionId));
         model.nodes.clear();
         for _ in 0..=MAX_MENU_DEPTH {
-            model.nodes = vec![MenuNode::Submenu { title: "Nested".into(), items: model.nodes }];
+            model.nodes = vec![MenuNode::submenu("Nested", model.nodes)];
         }
         assert_eq!(model.validate(), Err(ModelError::TooDeep));
     }
@@ -1125,7 +1489,7 @@ mod tests {
         model.icon = None;
         model.nodes = vec![
             MenuNode::interactive(MenuItem::radio("one", "One", "mode", true)),
-            MenuNode::Submenu { title: "More".into(), items: vec![
+            MenuNode::Submenu { title: "More".into(), symbol: None, items: vec![
                 MenuNode::interactive(MenuItem::radio("two", "Two", "mode", true)),
             ] },
         ];
@@ -1139,8 +1503,68 @@ mod tests {
         item.progress = Some(ProgressValue { percent: 255 });
         let title = render_item_title(&item);
         assert_eq!(title.chars().count(), MAX_MENU_TITLE_CHARS);
-        assert!(title.ends_with("  [12]  100%"));
+        assert!(title.ends_with("  12  100%"));
+        assert!(title.trim_end_matches("  12  100%").ends_with('…'));
         assert_eq!(bounded_text("first\nsecond\tthird\0", 30), "first second third ");
+    }
+
+    #[test]
+    fn v2_rows_compose_the_documented_text_forms() {
+        let item = MenuItem::state("sync", "Sync now", ItemState::Mixed)
+            .with_symbol(Symbol::ActionRefresh)
+            .with_subtitle("2 left")
+            .with_badge("3")
+            .opens(Opens::Browser);
+        assert_eq!(render_item_title(&item), "– ↻ Sync now · 2 left  3 ↗");
+        let settings = MenuItem::action("perm", "Open Full Disk Access settings")
+            .with_symbol(Symbol::ActionPermission)
+            .opens(Opens::Settings);
+        // `action.permission` has no fallback glyph.
+        assert_eq!(render_item_title(&settings), "Open Full Disk Access settings…");
+        let status = compose_title(TitleParts {
+            prefix: Symbol::StatusRunning.fallback(),
+            title: "Running",
+            subtitle: Some("3 chats on"),
+            ..TitleParts::default()
+        });
+        assert_eq!(status, "● Running · 3 chats on");
+        let long = MenuItem::action("x", "y".repeat(300)).opens(Opens::Dialog);
+        let title = render_item_title(&long);
+        assert_eq!(title.chars().count(), MAX_MENU_TITLE_CHARS);
+        assert!(title.ends_with("……"), "the cut mark and the dialog glyph both stay");
+    }
+
+    #[test]
+    fn tray_marks_compose_tone_dots_and_dimming() {
+        let base = StatusMark::new(Symbol::MarkChat, "Tb");
+        let normal = mark_icon(&base, None);
+        assert_eq!(normal, protocol::monogram("Tb"));
+        let corner = |icon: &RgbaIcon| {
+            let at = (((icon.height - 4) * icon.width + icon.width - 4) * 4) as usize;
+            icon.rgba[at..at + 4].to_vec()
+        };
+        let attention = mark_icon(&base.clone().with_tone(MarkTone::Attention), None);
+        assert_eq!(corner(&attention), vec![255, 149, 0, 255]);
+        let error = mark_icon(&base.clone().with_tone(MarkTone::Error), None);
+        assert_eq!(corner(&error), vec![255, 59, 48, 255]);
+        let paused = mark_icon(&base.clone().with_tone(MarkTone::Paused), None);
+        assert!(paused.rgba.chunks_exact(4).zip(normal.rgba.chunks_exact(4))
+            .all(|(dim, full)| dim[3] == full[3] / 2));
+        let glyph = AlphaIcon { alpha: vec![255; 16], width: 4, height: 4 };
+        let custom = mark_icon(&base.clone().with_template_icon(glyph), None);
+        assert_eq!((custom.width, custom.height), (32, 32));
+        let centre = ((16 * 32 + 16) * 4) as usize;
+        assert_eq!(&custom.rgba[centre..centre + 3], &[255, 255, 255]);
+        let mut model = MenuModel::default();
+        model.title = Some("Tb".into());
+        model.set_mark(base);
+        assert_eq!(model.title, None);
+        let (title, icon) = mark_presentation(&model);
+        if cfg!(target_os = "macos") {
+            assert!(title.is_some() && icon.is_none());
+        } else {
+            assert!(title.is_none() && icon.is_some());
+        }
     }
 
     #[test]
@@ -1159,7 +1583,7 @@ mod tests {
         assert_eq!(item.id.as_deref(), Some("daemon.pause"));
         assert_eq!(item.kind, MenuItemKind::Toggle { checked: true });
         assert_eq!(item.progress, Some(ProgressValue { percent: 100 }));
-        assert_eq!(render_item_title(&item), "Pause daemon  [3]  100%");
+        assert_eq!(render_item_title(&item), "Pause daemon  3  100%");
         assert!(matches!(MenuNode::interactive(item), MenuNode::Interactive { .. }));
     }
 

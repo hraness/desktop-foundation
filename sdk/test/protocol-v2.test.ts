@@ -8,7 +8,8 @@ import type {
 
 // Compiled to dist/test/protocol-v2.test.js; the repository root is two levels up.
 const root = new URL('../../', import.meta.url);
-const read = (path: string): string => readFileSync(new URL(path, root), 'utf8');
+// Windows checkouts may convert docs to CRLF; the table parsing below expects LF.
+const read = (path: string): string => readFileSync(new URL(path, root), 'utf8').replaceAll('\r\n', '\n');
 const protocolDoc = read('docs/protocol-v2.md');
 const permissionsDoc = read('docs/permissions.md');
 

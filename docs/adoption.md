@@ -166,8 +166,13 @@ product paths; retain explicit limitations for platform-specific providers.
 
 ## Upgrade from 0.7 to 0.8
 
-0.8.0 is additive: a product that only changes its pin keeps working, and a
-v1 snapshot stays valid on the new runner.
+For SDK products 0.8.0 is additive: a product that only changes its pin
+keeps working, and a v1 snapshot stays valid on the new runner. Rust adapters
+may need small edits: `MenuNode` has new `Header` and `Status` variants and
+`Submenu` gained a `symbol` field, so an exhaustive `match` or a
+`MenuNode::Submenu { title, items }` pattern needs a `..` or new arms, and a
+`MenuItem` or `MenuModel` built as a struct literal needs the new fields
+(use the constructors and `with_*` builders instead).
 
 1. Change the pin. SDK: install
    `releases/download/v0.8.0/hraness-desktop-foundation-0.8.0.tgz`. Rust: set
@@ -189,7 +194,13 @@ v1 snapshot stays valid on the new runner.
    subtitles, badges and alternates on `MenuItem`, a `StatusMark` with a tone
    and count, `service` for login items and a single instance, and
    `notice` for the `--notice` dialog.
-6. Leave local signing off for now. `identity` and the runner's
+6. SDK login items on macOS can start the product's own app. Once the
+   product has built `~/Applications/Hraness/<Name>.app`, pass
+   `app: { name, argvFile }` to `handleCompanionCommand` or
+   `runCompanion({ loginItem })`, so Login Items shows the product name
+   instead of `bun`. If the app is missing, `install` stops with
+   `app_missing`. See the README section on login items.
+7. Leave local signing off for now. `identity` and the runner's
    `--assemble-app`, `--signing-identity` and `--launch` build and sign a
    product-named app on the person's Mac, but nothing calls them by default.
    Turn them on only after the clean-account check in

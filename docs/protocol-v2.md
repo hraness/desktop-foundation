@@ -307,16 +307,24 @@ and it reads one frame from stdin and writes one frame to stdout.
 | `timeoutSeconds` | Optional integer 1 to 600, default 120. |
 
 Result `status` is `primary`, `secondary`, `settings` (primary chosen and the
-pane opened), `timeout` or `unavailable` (no GUI session; fall back to the CLI copy). New error code:
-`invalid-notice`. Inside the [local app](identity.md) the alert shows the
+pane opened), `timeout` or `unavailable` (no GUI session; fall back to the CLI copy). New error codes:
+`invalid-notice` (including a `secondary` equal to `primary`, or a `settings`
+kind without a pane) and `notice-required` (empty stdin). If the pane fails
+to open, the status stays `primary` so the product shows its own recovery
+copy. Inside the [local app](identity.md) the alert shows the
 product's name and icon; before that it shows the runner's generic icon.
+
+Settings panes open on macOS only. On Windows the notice is a task dialog and
+on Linux a GTK message dialog, both with the product's button labels; there a
+`settings` notice returns `primary`. Closing a notice that has no `secondary`
+counts as `primary`.
 
 ## New error codes
 
 `version-changed`, `invalid-mark`, `invalid-symbol`, `invalid-state`,
 `invalid-alternate`, `invalid-badge`, `invalid-role`, `invalid-opens`,
-`invalid-notice`, and `render-mark-failed`. The existing categories are
-unchanged.
+`invalid-notice`, `notice-required`, and `render-mark-failed`. The existing
+categories are unchanged.
 
 ## Implementation notes for the renderer
 

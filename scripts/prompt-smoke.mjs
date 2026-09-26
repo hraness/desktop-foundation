@@ -50,3 +50,16 @@ if ('value' in result.frame) {
   throw new Error('timeout/unavailable result must not carry a value');
 }
 console.log(`prompt: capability=${capable} (${probe.frame.detail}); dialog run returned "${status}" as expected (${process.platform}/${process.arch})`);
+
+// The notice dialog shares the one-shot contract: product button labels,
+// then an auto-dismissed timeout on capable hosts.
+const notice = JSON.stringify({ type: 'notice-request', version: 1, title: 'Companion Smoke needs access to Messages', message: 'Auto-dismissed qualification notice.', primary: 'Continue', secondary: 'Not now', settings: 'automation', timeoutSeconds: 3 });
+const noticeResult = await invoke(['--notice'], notice + '\n', 30_000);
+if (noticeResult.code !== 0 || noticeResult.frame?.type !== 'notice-result' || noticeResult.frame?.status !== expected) {
+  throw new Error(`notice contract failed (code=${noticeResult.code}, frame=${JSON.stringify(noticeResult.frame)}, expected=${expected}): ${noticeResult.stderr}`);
+}
+const invalid = await invoke(['--notice'], JSON.stringify({ type: 'notice-request', version: 1, title: 'T', message: 'M', primary: 'OK', settings: 'keychain' }) + '\n', 10_000);
+if (invalid.code !== 1 || invalid.frame?.code !== 'invalid-notice') {
+  throw new Error(`notice validation failed (code=${invalid.code}, frame=${JSON.stringify(invalid.frame)})`);
+}
+console.log(`notice: dialog run returned "${noticeResult.frame.status}" as expected (${process.platform}/${process.arch})`);

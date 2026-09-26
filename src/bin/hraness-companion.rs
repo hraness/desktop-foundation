@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use desktop_foundation::prompt;
+use desktop_foundation::{notice, prompt};
 use desktop_foundation::protocol::{
     self, Event, Frame, ProtocolError, Session, SUPPORTED_VERSIONS, VERSION,
 };
@@ -453,6 +453,10 @@ fn execute() -> Result<(), ProtocolError> {
     }
     if args.len() == 1 && args[0] == "--prompt-probe" {
         return prompt::probe().emit(&mut std::io::stdout());
+    }
+    if args.len() == 1 && args[0] == "--notice" {
+        let spec = notice::read_spec(&mut BufReader::new(std::io::stdin()))?;
+        return notice::emit_result(&mut std::io::stdout(), notice::run(&spec));
     }
     if args.len() == 1 && args[0] == "--prompt" {
         let spec = prompt::read_spec(&mut BufReader::new(std::io::stdin()))?;

@@ -23,8 +23,19 @@ export function openAtLoginItem(state: ItemState = 'off'): ActionItemV2 {
 }
 
 /** The status row the SDK shows after a menu action fails, until a later refresh. */
+/** Collapses control characters and runs of whitespace so any error text is one valid menu line. */
+function menuLine(value: string | undefined): string {
+  return (value ?? '').replace(/[\p{Cc}\p{Cf}\s]+/gu, ' ').trim();
+}
+
+/**
+ * A ⚠︎ status row for a failed action. Text is flattened to one line; an
+ * empty message falls back to "Something went wrong".
+ */
 export function actionErrorItem(message: string, detail?: string): StatusItemV2 {
-  return { kind: 'status', symbol: 'status.attention', label: fitText(message, 48), ...(detail ? { detail: fitText(detail, 80) } : {}) };
+  const label = menuLine(message) || 'Something went wrong';
+  const line = menuLine(detail);
+  return { kind: 'status', symbol: 'status.attention', label: fitText(label, 48), ...(line ? { detail: fitText(line, 80) } : {}) };
 }
 
 export interface DegradedMenuOptions {

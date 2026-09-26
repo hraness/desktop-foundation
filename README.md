@@ -148,6 +148,24 @@ fails. `renderMenuTree` prints that tree for pull requests, and
 `companion lint-menu --strict fixtures/*.json` runs the same check in CI.
 `validateSnapshotV2` and `downlevelSnapshot` are exported for tests.
 
+To send v2 menus, pass `mark` (for example `{ symbol: 'mark.chat', letters: 'Tb' }`)
+with the other companion options and return v2 items from `snapshot`. The SDK
+speaks v2 only to a runner that reports `protocol/…2` and down-levels to v1
+text rows otherwise, so one product build works with both. `snapshot` may also
+return `{ items, mark, tooltip }` to change the menu-bar dot, count or tooltip
+with product state. The session also:
+
+- refreshes as soon as the product calls the `refresh` it receives in
+  `subscribe(refresh, signal)`, instead of waiting for the timer;
+- replaces a menu it can no longer read with "Can't reach {name} · Retrying…"
+  (`degraded` picks the action that still works) and restores it on the next
+  good read;
+- shows a failed action as a ⚠︎ row under the status rows for at least 30
+  seconds. Throw `MenuActionError("Couldn't pause replies")` to choose the
+  words; other errors show a generic row and never their text;
+- handles `foundation.login` ("Open at login") and
+  `foundation.settings.<kind>` itself. The product never sees those actions.
+
 ## Existing Rust products
 
 A product supplies a [`Host`](src/lib.rs) implementation that renders a

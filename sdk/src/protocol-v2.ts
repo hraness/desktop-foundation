@@ -371,13 +371,16 @@ function downlevelItem(item: MenuItemV2): MenuItem {
   }
 }
 
+/** Down-levels v2 items to v1 items with the same text forms. */
+export function downlevelItems(items: readonly MenuItemV2[]): MenuItem[] { return items.map(downlevelItem); }
+
 /** Down-levels a v2 snapshot for a runner that reports no `protocol/…2` (docs/protocol-v2.md § Down-level rules). */
 export function downlevelSnapshot(value: SnapshotV2): Snapshot {
   return {
     version: 1, type: 'snapshot', appId: value.appId, name: value.name, title: value.mark.letters,
     ...(value.tooltip !== undefined ? { tooltip: fitText(value.tooltip, 256) } : {}),
     ...(value.icon !== undefined ? { icon: value.icon } : {}),
-    revision: value.revision, items: value.items.map(downlevelItem),
+    revision: value.revision, items: downlevelItems(value.items),
   };
 }
 

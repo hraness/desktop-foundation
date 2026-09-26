@@ -28,7 +28,7 @@ checked local cache. Users need no Cargo, Swift or Xcode. A source checkout
 has no release manifest until all six binary artifacts have been assembled.
 
 ```sh
-npm install https://github.com/hraness/desktop-foundation/releases/download/v0.7.0/hraness-desktop-foundation-0.7.0.tgz
+npm install https://github.com/hraness/desktop-foundation/releases/download/v0.8.0/hraness-desktop-foundation-0.8.0.tgz
 ```
 
 The package is published only as GitHub Release assets, not on npm. Check the
@@ -224,7 +224,7 @@ Pin by immutable tag:
 
 ```toml
 [dependencies]
-desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.7.0" }
+desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.8.0" }
 ```
 
 Implement `Host`, then run the event loop with the product's own

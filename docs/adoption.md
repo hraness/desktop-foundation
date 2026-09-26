@@ -163,3 +163,34 @@ mode available.
 Update the product README, installation docs and marketing with the behavior
 actually shipped. Claim migration and platform support only for validated
 product paths; retain explicit limitations for platform-specific providers.
+
+## Upgrade from 0.7 to 0.8
+
+0.8.0 is additive: a product that only changes its pin keeps working, and a
+v1 snapshot stays valid on the new runner.
+
+1. Change the pin. SDK: install
+   `releases/download/v0.8.0/hraness-desktop-foundation-0.8.0.tgz`. Rust: set
+   `tag = "v0.8.0"` and refresh `Cargo.lock`.
+2. Opt in to menu kit v2. Pass `mark` (for example
+   `{ symbol: 'mark.chat', letters: 'Tb' }`) instead of `title`, and build
+   items with `layout()` from `@hraness/desktop-foundation/menu-kit`. v2 items
+   drop `title` and `checked`: use `mark.letters` and `state: 'on' | 'off' |
+   'mixed'`. The SDK checks the runner's `--version` and down-levels to v1
+   when the runner is older. See [protocol v2](protocol-v2.md).
+3. Check every menu state in CI. Save one JSON snapshot per state and run
+   `companion lint-menu --strict fixtures/*.json` (add `--proper-noun <name>`
+   for product names), or call `assertMenuFixture(snapshot)` in a test.
+4. Use the shared words. `@hraness/desktop-foundation/permissions` has the
+   macOS notices and recovery copy, `/audience` decides whether a person or
+   an agent is reading, and `/cli-style` prints `✓ ✗ ⚠ →` lines that respect
+   `NO_COLOR` and pipes. The Rust mirror of these is not in 0.8.0.
+5. Rust products get `MenuNode::header`, `MenuNode::status`, symbols,
+   subtitles, badges and alternates on `MenuItem`, a `StatusMark` with a tone
+   and count, `service` for login items and a single instance, and
+   `notice` for the `--notice` dialog.
+6. Leave local signing off for now. `identity` and the runner's
+   `--assemble-app`, `--signing-identity` and `--launch` build and sign a
+   product-named app on the person's Mac, but nothing calls them by default.
+   Turn them on only after the clean-account check in
+   [product identity](identity.md#prompts-this-raises).

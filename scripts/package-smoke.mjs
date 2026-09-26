@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -94,6 +94,9 @@ try {
       'docs/architecture.md', 'docs/adoption.md', 'docs/protocol.md',
       'src/lib.rs', 'src/protocol.rs', 'src/bin/hraness-companion.rs', 'src/outputs.rs', 'src/prompt.rs',
       'sdk/src/protocol.ts', 'sdk/src/client.ts', 'sdk/src/commands.ts', 'sdk/src/prompt.ts',
+      'docs/protocol-v2.md', 'docs/permissions.md', 'docs/identity.md',
+      'src/protocol_v2.rs', 'src/symbols.rs', 'src/identity.rs', 'src/service.rs', 'src/notice.rs',
+      'dist/src/menu-kit.js', 'dist/src/permissions.js', 'dist/src/audience.js', 'dist/src/cli-style.js',
     ]) await access(join(root, file));
     const sdk = await import(${JSON.stringify(packageName)});
     assert.equal(import.meta.resolve(${JSON.stringify(packageName)}), pathToFileURL(join(root, 'dist/src/index.js')).href);
@@ -115,7 +118,44 @@ try {
     assert.equal(pkg.bin.companion, './dist/src/cli.js');
     const skill = await readFile(join(root, 'skills/companion/SKILL.md'), 'utf8');
     assert.match(skill, /^---\\nname: companion\\n/);
-    process.stdout.write(JSON.stringify({version: pkg.version, assets: manifest.assets.length})+'\\n');
+
+    // Protocol v2 from the installed subpaths: build a menu with the shared
+    // layout, validate it, down-level it for an older runner, and lint it.
+    const kit = await import(${JSON.stringify(packageName + '/menu-kit')});
+    const permissions = await import(${JSON.stringify(packageName + '/permissions')});
+    const audience = await import(${JSON.stringify(packageName + '/audience')});
+    const style = await import(${JSON.stringify(packageName + '/cli-style')});
+    for (const [module, names] of [
+      [kit, ['layout', 'lintMenu', 'assertMenuFixture', 'renderMenuTree', 'openAtLoginItem', 'degradedMenu', 'actionErrorItem']],
+      [permissions, ['prePrompt', 'renderPrePrompt', 'renderRecovery', 'permissionMenuItems', 'permissionErrorJson', 'LOCAL_SIGNING', 'MESSAGES_FDA']],
+      [audience, ['detectAudience']],
+      [style, ['createCliOutput', 'cliStyle', 'exitQuietlyOnBrokenPipe']],
+      [sdk, ['validateSnapshotV2', 'downlevelSnapshot', 'parseRunnerProtocols', 'runnerProtocols', 'layout', 'lintMenu', 'MenuActionError']],
+    ]) for (const name of names) assert.equal(typeof module[name], 'function', name);
+    const items = kit.layout({
+      name: 'Package Smoke',
+      status: { kind: 'status', symbol: 'status.running', label: 'Running', detail: '3 jobs today' },
+      primary: { kind: 'action', id: 'dashboard', label: 'Open dashboard', symbol: 'action.open', opens: 'browser' },
+      recent: [{ kind: 'action', id: 'recent.1', label: 'Weekly report', symbol: 'item.file', subtitle: '2 days ago', alternate: { id: 'recent.1.reveal', label: 'Show in Finder', symbol: 'action.folder' } }],
+      controls: [{ kind: 'action', id: 'pause', label: 'Pause replies', state: 'mixed' }],
+      openAtLogin: true,
+    });
+    const good = { version: 2, type: 'snapshot', appId: 'org.hraness.companion.package-smoke', name: 'Package Smoke', revision: 1,
+      mark: { symbol: 'mark.agent', letters: 'Ps', tone: 'attention', text: '2' }, tooltip: 'Package Smoke · 2 waiting', items };
+    sdk.validateSnapshotV2(good);
+    assert.deepEqual(kit.lintMenu(good, { strict: true }), [], 'layout() output must pass strict lint');
+    assert.match(kit.assertMenuFixture(good).tree, /Open dashboard/);
+    const legacy = sdk.downlevelSnapshot(good);
+    assert.equal(legacy.version, 1);
+    assert.equal(legacy.title, 'Ps');
+    sdk.validateSnapshot(legacy, new Set(['foundation.login']));
+    assert.ok(!JSON.stringify(legacy).includes('"state"'), 'down-levelled items carry no v2 fields');
+    const bad = { ...good, items: [{ kind: 'quit', label: 'Quit Package Smoke' }, { kind: 'action', id: 'a', label: 'Open Dashboard', role: 'primary' }, { kind: 'action', id: 'b', label: 'Run ~/bin/sync', role: 'primary' }] };
+    assert.ok(kit.lintMenu(bad, { strict: true }).length >= 2, 'lint must flag a bad menu');
+    assert.throws(() => kit.assertMenuFixture(bad));
+    assert.deepEqual(sdk.parseRunnerProtocols('hraness-companion '+pkg.version+' protocol/1,2'), [1, 2]);
+    assert.equal(audience.detectAudience({ env: { HRANESS_AUDIENCE: 'agent' } }), 'agent');
+    process.stdout.write(JSON.stringify({version: pkg.version, assets: manifest.assets.length, good, legacy, bad})+'\\n');
   `);
   const result = await execute(process.execPath, ['--import', guard, probe], { cwd: scratch, env, timeout: 10_000, maxBuffer: 1024 * 1024 });
   const installed = JSON.parse(result.stdout);
@@ -146,7 +186,50 @@ try {
   assert.equal(exitCode, doctor.diagnostics.some(item => item.severity === 'error') ? 1 : 0);
   assert.equal(await readFile(audit, 'utf8'), '', 'Doctor must not contact services, download artifacts or spawn helpers');
   assert.deepEqual(await readdir(home, { recursive: true }), before, 'Doctor must not create state, cache or login registration');
-  console.log(JSON.stringify({ package: packageName, version: installed.version, assets: installed.assets, packageInstall: 'passed', doctor: 'passed', artifact: 'missing', network: 'unused' }));
+  // `companion lint-menu` from the installed bin: a clean fixture passes
+  // strict mode, a bad one fails with findings, and JSON output parses.
+  const fixtures = join(scratch, 'fixtures');
+  await mkdir(fixtures);
+  for (const name of ['good', 'legacy', 'bad']) await writeFile(join(fixtures, `${name}.json`), JSON.stringify(installed[name]));
+  const lint = async (...args) => {
+    try { return { code: 0, ...(await execute(process.execPath, ['--import', guard, bin, 'lint-menu', ...args], { cwd: scratch, env, timeout: 10_000, maxBuffer: 1024 * 1024 })) }; }
+    catch (error) { if (typeof error.code !== 'number') throw error; return error; }
+  };
+  const lintGood = await lint('--strict', join(fixtures, 'good.json'));
+  assert.equal(lintGood.code, 0, `lint-menu must pass the layout() fixture: ${lintGood.stdout}${lintGood.stderr}`);
+  // Down-levelled text rows carry glyphs on purpose, so the rules (written
+  // for authored menus) flag them; the fixture must still be a valid v1 menu.
+  const lintLegacy = await lint('--json', join(fixtures, 'legacy.json'));
+  assert.equal(JSON.parse(lintLegacy.stdout).results[0].valid, true, `down-levelled fixture must validate: ${lintLegacy.stdout}`);
+  const lintBad = await lint('--strict', '--json', join(fixtures, 'bad.json'));
+  assert.equal(lintBad.code, 1, 'lint-menu --strict must fail a bad fixture');
+  assert.ok(JSON.stringify(JSON.parse(lintBad.stdout)).includes('bad.json'), 'lint-menu --json names the fixture');
+  assert.equal(await readFile(audit, 'utf8'), '', 'lint-menu must not contact services or spawn helpers');
+
+  // The packaged runner for this host accepts the SDK's v2 snapshot and its
+  // down-levelled v1 form. Required in CI, where the package job has every
+  // native artifact; a local run without artifacts reports it as skipped.
+  const hostTarget = { 'darwin-arm64': 'aarch64-apple-darwin', 'darwin-x64': 'x86_64-apple-darwin', 'linux-x64': 'x86_64-unknown-linux-gnu', 'linux-arm64': 'aarch64-unknown-linux-gnu', 'win32-x64': 'x86_64-pc-windows-msvc', 'win32-arm64': 'aarch64-pc-windows-msvc' }[`${process.platform}-${process.arch}`];
+  const runner = hostTarget && resolve('artifacts', `hraness-companion-${hostTarget}${process.platform === 'win32' ? '.exe' : ''}`);
+  let runnerResult = 'skipped';
+  if (runner && await access(runner).then(() => true, () => false)) {
+    if (process.platform !== 'win32') await execute('chmod', ['+x', runner]);
+    const version = await execute(runner, ['--version'], { env, timeout: 10_000 });
+    assert.equal(version.stdout.trim(), `hraness-companion ${installed.version} protocol/1,2`);
+    for (const name of ['good', 'legacy']) {
+      const probeRun = await new Promise((resolveRun, reject) => {
+        const child = execFile(runner, ['--check-protocol'], { env, timeout: 10_000 }, (error, stdout, stderr) => error ? reject(new Error(`${name}: ${error.message} ${stderr}`)) : resolveRun(stdout));
+        child.stdin.end(JSON.stringify(installed[name]) + '\n');
+      });
+      const events = probeRun.trim().split('\n').map(line => JSON.parse(line));
+      assert.equal(events[0].type, 'validated', `${name}: ${probeRun}`);
+      assert.equal(events[0].version, name === 'good' ? 2 : 1, `${name}: runner answers in the session version`);
+    }
+    runnerResult = `${hostTarget} accepts v2 and down-levelled v1`;
+  } else if (process.env.CI) {
+    throw new Error(`Package smoke needs the ${hostTarget} runner in artifacts/`);
+  }
+  console.log(JSON.stringify({ package: packageName, version: installed.version, assets: installed.assets, packageInstall: 'passed', doctor: 'passed', artifact: 'missing', network: 'unused', lintMenu: 'passed', protocolV2: 'validated and down-levelled', runner: runnerResult }));
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

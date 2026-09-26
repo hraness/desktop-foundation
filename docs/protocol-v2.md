@@ -1,7 +1,7 @@
 # Native runner protocol v2 (menu kit v2)
 
-Status: specification for desktop-foundation 0.8.0. Runners and SDKs up to
-0.7.x speak only [protocol v1](protocol.md). The TypeScript shapes live in
+Status: shipped in desktop-foundation 0.8.0. Runners and SDKs up to 0.7.x
+speak only [protocol v1](protocol.md). The TypeScript shapes live in
 [`sdk/src/protocol-v2.ts`](../sdk/src/protocol-v2.ts); the Rust wire schema in
 [`src/protocol_v2.rs`](../src/protocol_v2.rs) and the symbol table in
 [`src/symbols.rs`](../src/symbols.rs) mirror them.

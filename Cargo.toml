@@ -1,6 +1,6 @@
 [package]
 name = "desktop-foundation"
-version = "0.7.0"
+version = "0.8.0"
 description = "Menu bar and tray icons for Hraness CLI products on macOS, Windows, and Linux"
 edition = "2021"
 rust-version = "1.77.2"

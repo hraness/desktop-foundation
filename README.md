@@ -83,6 +83,16 @@ the menu bar needs in `loginEnv` (for example `['MYTOOL_API_TOKEN']`):
 login-started process fills in any that are unset. `uninstall` deletes the
 file. Values never go into the login item, argv, menus or logs.
 
+On macOS, a product that has built its local app (see
+[docs/identity.md](docs/identity.md)) passes
+`app: { name: 'My Tool', argvFile: join(stateDir, 'launch.json') }` to
+`handleCompanionCommand`. `install` then writes the same LaunchAgent as the
+Rust helper: it starts `My Tool.app --launch <argvFile>`, so Login Items and
+the notice name My Tool instead of `node` or `bun`. The product command goes
+in the owner-only `argvFile`, and the older `app.hraness.companion.<appId>`
+entry is removed in the same command. If the app isn't built, `install` stops
+with `app_missing` before showing the notice. Without `app`, nothing changes.
+
 Reads and actions receive cancellation signals. Product handlers preserve
 their permission checks and reconcile uncertain outcomes; the SDK never
 retries a mutation. The native renderer receives menu data and returns action

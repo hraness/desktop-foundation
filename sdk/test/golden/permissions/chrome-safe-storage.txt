@@ -1,0 +1,75 @@
+# chrome-safe-storage · requester: local app
+## cli pre-prompt, interactive
+🔐 macOS will ask to let security use "Chrome Safe Storage" from your keychain for Example.
+   Example uses it to read the Chrome sign-in you already have and never stores it. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let security use "Chrome Safe Storage" from your keychain for Example.
+   Example uses it to read the Chrome sign-in you already have and never stores it. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Chrome Safe Storage","message":"macOS will ask to let security use \"Chrome Safe Storage\" from your keychain for Example. Example uses it to read the Chrome sign-in you already have and never stores it. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't use "Chrome Safe Storage" from your keychain: the keychain request was denied.
+  Run it again and choose Always Allow when macOS asks.
+→ example doctor
+## dialog recovery denied
+{"title":"Example can't use \"Chrome Safe Storage\" from your keychain","lines":["Example can't use \"Chrome Safe Storage\" from your keychain: the keychain request was denied. Run it again and choose Always Allow when macOS asks."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't use \"Chrome Safe Storage\" from your keychain: the keychain request was denied.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## cli recovery unknown
+✗ Example couldn't use "Chrome Safe Storage" from your keychain. macOS may be blocking security.
+  Unlock your login keychain, then retry.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't use \"Chrome Safe Storage\" from your keychain","lines":["Example couldn't use \"Chrome Safe Storage\" from your keychain. macOS may be blocking security. Unlock your login keychain, then retry."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't use \"Chrome Safe Storage\" from your keychain. macOS may be blocking security.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## cli recovery missing
+✗ Example can't find "Chrome Safe Storage" in your keychain.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't use \"Chrome Safe Storage\" from your keychain","lines":["Example can't find \"Chrome Safe Storage\" in your keychain."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example can't find \"Chrome Safe Storage\" in your keychain.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs keychain access","detail":"To use \"Chrome Safe Storage\" from your keychain"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Keychain access is off","detail":"Choose Always Allow when macOS asks again"}
+
+# chrome-safe-storage · requester: terminal
+## cli pre-prompt, interactive
+🔐 macOS will ask to let security use "Chrome Safe Storage" from your keychain for Example.
+   Example uses it to read the Chrome sign-in you already have and never stores it. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let security use "Chrome Safe Storage" from your keychain for Example.
+   Example uses it to read the Chrome sign-in you already have and never stores it. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Chrome Safe Storage","message":"macOS will ask to let security use \"Chrome Safe Storage\" from your keychain for Example. Example uses it to read the Chrome sign-in you already have and never stores it. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't use "Chrome Safe Storage" from your keychain: the keychain request was denied.
+  Run it again and choose Always Allow when macOS asks.
+→ example doctor
+## dialog recovery denied
+{"title":"Example can't use \"Chrome Safe Storage\" from your keychain","lines":["Example can't use \"Chrome Safe Storage\" from your keychain: the keychain request was denied. Run it again and choose Always Allow when macOS asks."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't use \"Chrome Safe Storage\" from your keychain: the keychain request was denied.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## cli recovery unknown
+✗ Example couldn't use "Chrome Safe Storage" from your keychain. macOS may be blocking security.
+  Unlock your login keychain, then retry.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't use \"Chrome Safe Storage\" from your keychain","lines":["Example couldn't use \"Chrome Safe Storage\" from your keychain. macOS may be blocking security. Unlock your login keychain, then retry."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't use \"Chrome Safe Storage\" from your keychain. macOS may be blocking security.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## cli recovery missing
+✗ Example can't find "Chrome Safe Storage" in your keychain.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't use \"Chrome Safe Storage\" from your keychain","lines":["Example can't find \"Chrome Safe Storage\" in your keychain."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example can't find \"Chrome Safe Storage\" in your keychain.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs keychain access","detail":"To use \"Chrome Safe Storage\" from your keychain"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Keychain access is off","detail":"Choose Always Allow when macOS asks again"}

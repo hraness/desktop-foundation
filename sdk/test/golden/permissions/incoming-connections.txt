@@ -1,0 +1,81 @@
+# incoming-connections · requester: local app
+## cli pre-prompt, interactive
+🔐 macOS will ask to let vhalla accept incoming network connections for Example.
+   Choose Allow so room members can reach this Mac. Change this any time in System Settings › Network › Firewall.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let vhalla accept incoming network connections for Example.
+   Choose Allow so room members can reach this Mac. Change this any time in System Settings › Network › Firewall.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Firewall","message":"macOS will ask to let vhalla accept incoming network connections for Example. Choose Allow so room members can reach this Mac. Change this any time in System Settings › Network › Firewall.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't accept incoming network connections: macOS access is off for vhalla.
+  Turn on vhalla in System Settings › Network › Firewall.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Firewall is off for Example","lines":["Example can't accept incoming network connections: macOS access is off for vhalla. Turn on vhalla in System Settings › Network › Firewall."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't accept incoming network connections: macOS access is off for vhalla.","next":"example doctor","permission":{"kind":"incoming-connections","settingsUrl":"x-apple.systempreferences:com.apple.Network-Settings.extension"}}}
+## cli recovery unknown
+✗ Example couldn't accept incoming network connections. macOS may be blocking vhalla.
+  Check System Settings › Network › Firewall.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't accept incoming network connections","lines":["Example couldn't accept incoming network connections. macOS may be blocking vhalla. Check System Settings › Network › Firewall."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't accept incoming network connections. macOS may be blocking vhalla.","next":"example doctor","permission":{"kind":"incoming-connections","settingsUrl":"x-apple.systempreferences:com.apple.Network-Settings.extension"}}}
+## cli recovery missing
+✗ Example couldn't accept incoming network connections. macOS may be blocking vhalla.
+  Check System Settings › Network › Firewall.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't accept incoming network connections","lines":["Example couldn't accept incoming network connections. macOS may be blocking vhalla. Check System Settings › Network › Firewall."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't accept incoming network connections. macOS may be blocking vhalla.","next":"example doctor","permission":{"kind":"incoming-connections","settingsUrl":"x-apple.systempreferences:com.apple.Network-Settings.extension"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Firewall","detail":"To accept incoming network connections"}
+{"kind":"action","id":"foundation.settings.incoming-connections","label":"Open Firewall settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Firewall is off","detail":"Turn on vhalla to accept incoming network connections"}
+{"kind":"action","id":"foundation.settings.incoming-connections","label":"Open Firewall settings","symbol":"action.permission","opens":"settings"}
+
+# incoming-connections · requester: terminal
+## cli pre-prompt, interactive
+🔐 macOS will ask to let vhalla accept incoming network connections for Example.
+   Choose Allow so room members can reach this Mac. Change this any time in System Settings › Network › Firewall.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let vhalla accept incoming network connections for Example.
+   Choose Allow so room members can reach this Mac. Change this any time in System Settings › Network › Firewall.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Firewall","message":"macOS will ask to let vhalla accept incoming network connections for Example. Choose Allow so room members can reach this Mac. Change this any time in System Settings › Network › Firewall.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't accept incoming network connections: macOS access is off for vhalla.
+  Turn on vhalla in System Settings › Network › Firewall.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Firewall is off for Example","lines":["Example can't accept incoming network connections: macOS access is off for vhalla. Turn on vhalla in System Settings › Network › Firewall."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't accept incoming network connections: macOS access is off for vhalla.","next":"example doctor","permission":{"kind":"incoming-connections","settingsUrl":"x-apple.systempreferences:com.apple.Network-Settings.extension"}}}
+## cli recovery unknown
+✗ Example couldn't accept incoming network connections. macOS may be blocking vhalla.
+  Check System Settings › Network › Firewall.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't accept incoming network connections","lines":["Example couldn't accept incoming network connections. macOS may be blocking vhalla. Check System Settings › Network › Firewall."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't accept incoming network connections. macOS may be blocking vhalla.","next":"example doctor","permission":{"kind":"incoming-connections","settingsUrl":"x-apple.systempreferences:com.apple.Network-Settings.extension"}}}
+## cli recovery missing
+✗ Example couldn't accept incoming network connections. macOS may be blocking vhalla.
+  Check System Settings › Network › Firewall.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't accept incoming network connections","lines":["Example couldn't accept incoming network connections. macOS may be blocking vhalla. Check System Settings › Network › Firewall."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't accept incoming network connections. macOS may be blocking vhalla.","next":"example doctor","permission":{"kind":"incoming-connections","settingsUrl":"x-apple.systempreferences:com.apple.Network-Settings.extension"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Firewall","detail":"To accept incoming network connections"}
+{"kind":"action","id":"foundation.settings.incoming-connections","label":"Open Firewall settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Firewall is off","detail":"Turn on vhalla to accept incoming network connections"}
+{"kind":"action","id":"foundation.settings.incoming-connections","label":"Open Firewall settings","symbol":"action.permission","opens":"settings"}

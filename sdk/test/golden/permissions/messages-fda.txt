@@ -1,0 +1,81 @@
+# messages-fda · requester: local app
+## cli pre-prompt, interactive
+🔐 Example needs Full Disk Access to read your Messages.
+   macOS doesn't ask for this. Turn on Example in System Settings › Privacy & Security › Full Disk Access. Only the chats you pick are read.
+   Press Enter to open Settings · s to skip
+## cli pre-prompt, ascii
+NOTE Example needs Full Disk Access to read your Messages.
+   macOS doesn't ask for this. Turn on Example in System Settings › Privacy & Security › Full Disk Access. Only the chats you pick are read.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs Full Disk Access","message":"Example needs Full Disk Access to read your Messages. macOS doesn't ask for this. Turn on Example in System Settings › Privacy & Security › Full Disk Access. Only the chats you pick are read.","primary":"Open System Settings","secondary":"Not now","settings":"full-disk-access"}
+## cli recovery denied
+✗ Example can't read your Messages: macOS access is off for Example.
+  Turn on Example in System Settings › Privacy & Security › Full Disk Access.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Full Disk Access is off for Example","lines":["Example can't read your Messages: macOS access is off for Example. Turn on Example in System Settings › Privacy & Security › Full Disk Access."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't read your Messages: macOS access is off for Example.","next":"example doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}
+## cli recovery unknown
+✗ Example couldn't read your Messages. macOS may be blocking Example.
+  Check System Settings › Privacy & Security › Full Disk Access.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't read your Messages","lines":["Example couldn't read your Messages. macOS may be blocking Example. Check System Settings › Privacy & Security › Full Disk Access."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't read your Messages. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}
+## cli recovery missing
+✗ Example couldn't read your Messages. macOS may be blocking Example.
+  Check System Settings › Privacy & Security › Full Disk Access.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't read your Messages","lines":["Example couldn't read your Messages. macOS may be blocking Example. Check System Settings › Privacy & Security › Full Disk Access."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't read your Messages. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Full Disk Access","detail":"To read your Messages"}
+{"kind":"action","id":"foundation.settings.full-disk-access","label":"Open Full Disk Access settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Full Disk Access is off","detail":"Turn on Example to read your Messages"}
+{"kind":"action","id":"foundation.settings.full-disk-access","label":"Open Full Disk Access settings","symbol":"action.permission","opens":"settings"}
+
+# messages-fda · requester: terminal
+## cli pre-prompt, interactive
+🔐 Example needs Full Disk Access to read your Messages.
+   macOS doesn't ask for this. Turn on Terminal in System Settings › Privacy & Security › Full Disk Access. Only the chats you pick are read.
+   Press Enter to open Settings · s to skip
+## cli pre-prompt, ascii
+NOTE Example needs Full Disk Access to read your Messages.
+   macOS doesn't ask for this. Turn on Terminal in System Settings › Privacy & Security › Full Disk Access. Only the chats you pick are read.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs Full Disk Access","message":"Example needs Full Disk Access to read your Messages. macOS doesn't ask for this. Turn on Terminal in System Settings › Privacy & Security › Full Disk Access. Only the chats you pick are read.","primary":"Open System Settings","secondary":"Not now","settings":"full-disk-access"}
+## cli recovery denied
+✗ Example can't read your Messages: macOS access is off for Terminal.
+  Turn on Terminal in System Settings › Privacy & Security › Full Disk Access.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Full Disk Access is off for Example","lines":["Example can't read your Messages: macOS access is off for Terminal. Turn on Terminal in System Settings › Privacy & Security › Full Disk Access."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't read your Messages: macOS access is off for Terminal.","next":"example doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}
+## cli recovery unknown
+✗ Example couldn't read your Messages. macOS may be blocking Terminal.
+  Check System Settings › Privacy & Security › Full Disk Access.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't read your Messages","lines":["Example couldn't read your Messages. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Full Disk Access."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't read your Messages. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}
+## cli recovery missing
+✗ Example couldn't read your Messages. macOS may be blocking Terminal.
+  Check System Settings › Privacy & Security › Full Disk Access.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't read your Messages","lines":["Example couldn't read your Messages. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Full Disk Access."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't read your Messages. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Full Disk Access","detail":"To read your Messages"}
+{"kind":"action","id":"foundation.settings.full-disk-access","label":"Open Full Disk Access settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Full Disk Access is off","detail":"Turn on Terminal to read your Messages"}
+{"kind":"action","id":"foundation.settings.full-disk-access","label":"Open Full Disk Access settings","symbol":"action.permission","opens":"settings"}

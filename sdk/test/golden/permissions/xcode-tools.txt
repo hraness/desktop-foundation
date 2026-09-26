@@ -1,0 +1,71 @@
+# xcode-tools · requester: local app
+## cli pre-prompt, interactive
+🔐 Example needs Apple's command line tools to build a small helper. macOS will offer to install them (about 1 GB).
+   Nothing is installed unless you agree in that window. Or skip: Example runs without its native helper.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE Example needs Apple's command line tools to build a small helper. macOS will offer to install them (about 1 GB).
+   Nothing is installed unless you agree in that window. Or skip: Example runs without its native helper.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs Apple's command line tools","message":"Example needs Apple's command line tools to build a small helper. macOS will offer to install them (about 1 GB). Nothing is installed unless you agree in that window. Or skip: Example runs without its native helper.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example needs Apple's command line tools. Nothing was installed.
+→ xcode-select --install
+## dialog recovery denied
+{"title":"Example needs Apple's command line tools","lines":["Example needs Apple's command line tools. Nothing was installed."],"next":"xcode-select --install"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example needs Apple's command line tools. Nothing was installed.","next":"xcode-select --install","permission":{"kind":"developer-tools","settingsUrl":null}}}
+## cli recovery unknown
+✗ Example needs Apple's command line tools. Nothing was installed.
+→ xcode-select --install
+## dialog recovery unknown
+{"title":"Example needs Apple's command line tools","lines":["Example needs Apple's command line tools. Nothing was installed."],"next":"xcode-select --install"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example needs Apple's command line tools. Nothing was installed.","next":"xcode-select --install","permission":{"kind":"developer-tools","settingsUrl":null}}}
+## cli recovery missing
+✗ Example needs Apple's command line tools. Nothing was installed.
+→ xcode-select --install
+## dialog recovery missing
+{"title":"Example needs Apple's command line tools","lines":["Example needs Apple's command line tools. Nothing was installed."],"next":"xcode-select --install"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example needs Apple's command line tools. Nothing was installed.","next":"xcode-select --install","permission":{"kind":"developer-tools","settingsUrl":null}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Apple's command line tools","detail":"To build a small helper"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Apple's command line tools is off","detail":"Turn on Example to build a small helper"}
+
+# xcode-tools · requester: terminal
+## cli pre-prompt, interactive
+🔐 Example needs Apple's command line tools to build a small helper. macOS will offer to install them (about 1 GB).
+   Nothing is installed unless you agree in that window. Or skip: Example runs without its native helper.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE Example needs Apple's command line tools to build a small helper. macOS will offer to install them (about 1 GB).
+   Nothing is installed unless you agree in that window. Or skip: Example runs without its native helper.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs Apple's command line tools","message":"Example needs Apple's command line tools to build a small helper. macOS will offer to install them (about 1 GB). Nothing is installed unless you agree in that window. Or skip: Example runs without its native helper.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example needs Apple's command line tools. Nothing was installed.
+→ xcode-select --install
+## dialog recovery denied
+{"title":"Example needs Apple's command line tools","lines":["Example needs Apple's command line tools. Nothing was installed."],"next":"xcode-select --install"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example needs Apple's command line tools. Nothing was installed.","next":"xcode-select --install","permission":{"kind":"developer-tools","settingsUrl":null}}}
+## cli recovery unknown
+✗ Example needs Apple's command line tools. Nothing was installed.
+→ xcode-select --install
+## dialog recovery unknown
+{"title":"Example needs Apple's command line tools","lines":["Example needs Apple's command line tools. Nothing was installed."],"next":"xcode-select --install"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example needs Apple's command line tools. Nothing was installed.","next":"xcode-select --install","permission":{"kind":"developer-tools","settingsUrl":null}}}
+## cli recovery missing
+✗ Example needs Apple's command line tools. Nothing was installed.
+→ xcode-select --install
+## dialog recovery missing
+{"title":"Example needs Apple's command line tools","lines":["Example needs Apple's command line tools. Nothing was installed."],"next":"xcode-select --install"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example needs Apple's command line tools. Nothing was installed.","next":"xcode-select --install","permission":{"kind":"developer-tools","settingsUrl":null}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Apple's command line tools","detail":"To build a small helper"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Apple's command line tools is off","detail":"Turn on Terminal to build a small helper"}

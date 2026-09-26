@@ -87,6 +87,43 @@ carries an existing value for editing and `timeoutSeconds` bounds the wait.
 Values travel over the child's stdin/stdout only; storage stays with the
 product. See [the prompt contract](docs/protocol.md#credential-prompt-one-shot-mode).
 
+### Permission notices and CLI output
+
+`@hraness/desktop-foundation/permissions` tells people what macOS is about to
+ask before it asks, and explains a denial afterwards. It never triggers a
+prompt itself and has no native dependencies, so any CLI can use it:
+
+```js
+import { MESSAGES_FDA, prePrompt, permissionStatus, reportPermissionFailure } from '@hraness/desktop-foundation/permissions';
+
+const need = MESSAGES_FDA({ product: 'Textbutler', command: 'textbutler' });
+if (await permissionStatus('full-disk-access', 'Messages') !== 'granted') {
+  if (await prePrompt(need) === 'skip') process.exit(0);
+}
+// … on EPERM:
+await reportPermissionFailure(need, 'denied');
+```
+
+A person at a terminal sees:
+
+```text
+🔐 Textbutler needs Full Disk Access to read your Messages.
+   macOS doesn't ask for this. Turn on Terminal in System Settings › Privacy & Security › Full Disk Access. Only the chats you pick are read.
+   Press Enter to open Settings · s to skip
+```
+
+Presets cover login items, Chrome Safe Storage, Messages, Automation,
+Contacts, Local Network, the firewall, Apple's command line tools, screen
+recording and local signing. `permissionMenuItems` returns the matching menu
+rows, and `permissionErrorJson` the `--json` error. See
+[permission notices](docs/permissions.md).
+
+`detectAudience()` decides whether a person, an agent or nobody is reading
+(`HRANESS_AUDIENCE` wins, then exact agent markers such as `CLAUDECODE`, then
+a terminal on stderr). `createCliOutput()` prints results, `✗` errors with one
+`→` next step, `Next:` hints and a progress line with the shared symbols, and
+respects `NO_COLOR`, `TERM=dumb` and pipes.
+
 ## Existing Rust products
 
 A product supplies a [`Host`](src/lib.rs) implementation that renders a

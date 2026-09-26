@@ -6,7 +6,12 @@
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/hraness/desktop-foundation.git" },
   "engines": { "node": ">=22" },
-  "exports": { ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" } },
+  "exports": {
+    ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" },
+    "./permissions": { "types": "./dist/src/permissions.d.ts", "import": "./dist/src/permissions.js" },
+    "./audience": { "types": "./dist/src/audience.d.ts", "import": "./dist/src/audience.js" },
+    "./cli-style": { "types": "./dist/src/cli-style.d.ts", "import": "./dist/src/cli-style.js" }
+  },
   "bin": { "companion": "./dist/src/cli.js" },
   "files": ["dist/src", "src", "sdk/src/protocol.ts", "sdk/src/client.ts", "sdk/src/commands.ts", "sdk/src/prompt.ts", "release-manifest.json", "README.md", "docs", "skills", "LICENSE"],
   "scripts": {

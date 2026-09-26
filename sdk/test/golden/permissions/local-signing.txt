@@ -1,0 +1,75 @@
+# local-signing · requester: local app
+## cli pre-prompt, interactive
+🔐 macOS will ask to let codesign use your "Hraness Local Signing" key for Example.
+   Hraness signs its apps on this Mac with it so they keep their permissions after updates. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let codesign use your "Hraness Local Signing" key for Example.
+   Hraness signs its apps on this Mac with it so they keep their permissions after updates. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Hraness Local Signing","message":"macOS will ask to let codesign use your \"Hraness Local Signing\" key for Example. Hraness signs its apps on this Mac with it so they keep their permissions after updates. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't use your "Hraness Local Signing" key: the keychain request was denied.
+  Run it again and choose Always Allow when macOS asks.
+→ example doctor
+## dialog recovery denied
+{"title":"Example can't use your \"Hraness Local Signing\" key","lines":["Example can't use your \"Hraness Local Signing\" key: the keychain request was denied. Run it again and choose Always Allow when macOS asks."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't use your \"Hraness Local Signing\" key: the keychain request was denied.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## cli recovery unknown
+✗ Example couldn't use your "Hraness Local Signing" key. macOS may be blocking codesign.
+  Unlock your login keychain, then retry.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't use your \"Hraness Local Signing\" key","lines":["Example couldn't use your \"Hraness Local Signing\" key. macOS may be blocking codesign. Unlock your login keychain, then retry."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't use your \"Hraness Local Signing\" key. macOS may be blocking codesign.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## cli recovery missing
+✗ Example can't find "Hraness Local Signing" in your keychain.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't use your \"Hraness Local Signing\" key","lines":["Example can't find \"Hraness Local Signing\" in your keychain."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example can't find \"Hraness Local Signing\" in your keychain.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs keychain access","detail":"To use your \"Hraness Local Signing\" key"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Keychain access is off","detail":"Choose Always Allow when macOS asks again"}
+
+# local-signing · requester: terminal
+## cli pre-prompt, interactive
+🔐 macOS will ask to let codesign use your "Hraness Local Signing" key for Example.
+   Hraness signs its apps on this Mac with it so they keep their permissions after updates. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let codesign use your "Hraness Local Signing" key for Example.
+   Hraness signs its apps on this Mac with it so they keep their permissions after updates. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Hraness Local Signing","message":"macOS will ask to let codesign use your \"Hraness Local Signing\" key for Example. Hraness signs its apps on this Mac with it so they keep their permissions after updates. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't use your "Hraness Local Signing" key: the keychain request was denied.
+  Run it again and choose Always Allow when macOS asks.
+→ example doctor
+## dialog recovery denied
+{"title":"Example can't use your \"Hraness Local Signing\" key","lines":["Example can't use your \"Hraness Local Signing\" key: the keychain request was denied. Run it again and choose Always Allow when macOS asks."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't use your \"Hraness Local Signing\" key: the keychain request was denied.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## cli recovery unknown
+✗ Example couldn't use your "Hraness Local Signing" key. macOS may be blocking codesign.
+  Unlock your login keychain, then retry.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't use your \"Hraness Local Signing\" key","lines":["Example couldn't use your \"Hraness Local Signing\" key. macOS may be blocking codesign. Unlock your login keychain, then retry."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't use your \"Hraness Local Signing\" key. macOS may be blocking codesign.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## cli recovery missing
+✗ Example can't find "Hraness Local Signing" in your keychain.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't use your \"Hraness Local Signing\" key","lines":["Example can't find \"Hraness Local Signing\" in your keychain."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example can't find \"Hraness Local Signing\" in your keychain.","next":"example doctor","permission":{"kind":"keychain","settingsUrl":null}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs keychain access","detail":"To use your \"Hraness Local Signing\" key"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Keychain access is off","detail":"Choose Always Allow when macOS asks again"}

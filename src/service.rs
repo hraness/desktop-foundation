@@ -490,7 +490,8 @@ impl ServiceStatus {
         });
         let hint = match (self.login, self.running) {
             (LoginState::NotOurs, _) => Some(format!(
-                "Remove it in {SETTINGS_PATH}, then run {command} menubar install"
+                "Move ~/Library/LaunchAgents/app.hraness.{}.plist to the Trash, then run {command} menubar install",
+                item.app_id
             )),
             (LoginState::Unknown, _) => Some(format!("{command} doctor")),
             (LoginState::Outdated, _) => Some(format!("{command} menubar install")),
@@ -555,7 +556,7 @@ pub fn error_message(item: &LoginItem, error: ServiceError, glyphs: Glyphs) -> S
     let command = &item.command;
     match error.kind {
         ServiceErrorKind::NotOurs => format!(
-            "{fail} {name}'s login item was changed outside {command}, so it was left alone.\n  Remove it in {SETTINGS_PATH}, then try again.\n{next} {command} menubar install\n"
+            "{fail} {name}'s login item was changed outside {command}, so it was left alone.\n  Move ~/Library/LaunchAgents/app.hraness.{}.plist to the Trash, then try again.\n{next} {command} menubar install\n", item.app_id
         ),
         ServiceErrorKind::Unwritable => format!(
             "{fail} Couldn't write {name}'s login item. Check that your Library folder is writable.\n{next} {command} doctor\n"
@@ -741,7 +742,7 @@ mod tests {
         );
         assert_eq!(
             ServiceStatus { login: LoginState::NotOurs, running: Some(true) }.human(&spec, Glyphs::Ascii),
-            "OK AI Charts is in your menu bar\nWARN A login item for AI Charts was changed outside aicharts\n-> Remove it in System Settings › General › Login Items & Extensions, then run aicharts menubar install\n"
+            "OK AI Charts is in your menu bar\nWARN A login item for AI Charts was changed outside aicharts\n-> Move ~/Library/LaunchAgents/app.hraness.aicharts.plist to the Trash, then run aicharts menubar install\n"
         );
         assert_eq!(
             serde_json::to_string(&ServiceStatus {
@@ -779,7 +780,7 @@ mod tests {
         );
         assert_eq!(
             error_message(&spec, ServiceError::new(ServiceErrorKind::NotOurs), Glyphs::Unicode),
-            "✗ AI Charts's login item was changed outside aicharts, so it was left alone.\n  Remove it in System Settings › General › Login Items & Extensions, then try again.\n→ aicharts menubar install\n"
+            "✗ AI Charts's login item was changed outside aicharts, so it was left alone.\n  Move ~/Library/LaunchAgents/app.hraness.aicharts.plist to the Trash, then try again.\n→ aicharts menubar install\n"
         );
     }
 }

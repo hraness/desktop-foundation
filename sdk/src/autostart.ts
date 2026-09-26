@@ -85,6 +85,21 @@ function validatePlan(plan: AutostartPlan) {
   if (!/^[a-z][a-z0-9.-]{0,63}$/.test(plan.id) || plan.id.includes('..') || basename(plan.path) !== filename
       || newline < 0 || plan.contents.slice(0, newline + 1) !== header(plan.id, plan.platform, plan.contents.slice(newline + 1))) throw new CompanionError('unsafe_path', 'Autostart plan is not a valid framework-owned file.');
 }
+/**
+ * Whether this framework's login entry exists: `on` (exactly this plan),
+ * `outdated` (ours, but for an older command), `off`, or `conflict` (a file we
+ * did not write). Read-only; never changes anything.
+ */
+export async function autostartState(plan: AutostartPlan): Promise<'on' | 'outdated' | 'off' | 'conflict'> {
+  validatePlan(plan);
+  try {
+    const existing = await ownedContents(plan);
+    return existing === undefined ? 'off' : existing === plan.contents ? 'on' : 'outdated';
+  } catch (error) {
+    if (error instanceof CompanionError && error.code === 'autostart_conflict') return 'conflict';
+    throw error;
+  }
+}
 /** Explicit opt-in only. Activates at the next graphical login, not immediately. */
 export async function setAutostart(plan: AutostartPlan): Promise<{ path: string; changed: boolean; activation: 'next-login' }> {
   validatePlan(plan);

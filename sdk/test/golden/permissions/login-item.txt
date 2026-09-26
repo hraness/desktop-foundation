@@ -1,0 +1,79 @@
+# login-item · requester: local app
+## cli pre-prompt, interactive
+🔐 macOS will show a notice that Example can open at login.
+   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.
+## cli pre-prompt, ascii
+NOTE macOS will show a notice that Example can open at login.
+   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.
+## dialog
+null
+## cli recovery denied
+✗ Example can't open at login: macOS access is off for Example.
+  Turn on Example in System Settings › General › Login Items & Extensions.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Login Items & Extensions is off for Example","lines":["Example can't open at login: macOS access is off for Example. Turn on Example in System Settings › General › Login Items & Extensions."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't open at login: macOS access is off for Example.","next":"example doctor","permission":{"kind":"login-item","settingsUrl":"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}}
+## cli recovery unknown
+✗ Example couldn't open at login. macOS may be blocking Example.
+  Check System Settings › General › Login Items & Extensions.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't open at login","lines":["Example couldn't open at login. macOS may be blocking Example. Check System Settings › General › Login Items & Extensions."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't open at login. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"login-item","settingsUrl":"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}}
+## cli recovery missing
+✗ Example couldn't open at login. macOS may be blocking Example.
+  Check System Settings › General › Login Items & Extensions.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't open at login","lines":["Example couldn't open at login. macOS may be blocking Example. Check System Settings › General › Login Items & Extensions."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't open at login. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"login-item","settingsUrl":"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Login Items & Extensions","detail":"To open at login"}
+{"kind":"action","id":"foundation.settings.login-item","label":"Open Login Items & Extensions settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Login Items & Extensions is off","detail":"Turn on Example to open at login"}
+{"kind":"action","id":"foundation.settings.login-item","label":"Open Login Items & Extensions settings","symbol":"action.permission","opens":"settings"}
+
+# login-item · requester: terminal
+## cli pre-prompt, interactive
+🔐 macOS will show a notice that Example can open at login.
+   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.
+## cli pre-prompt, ascii
+NOTE macOS will show a notice that Example can open at login.
+   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.
+## dialog
+null
+## cli recovery denied
+✗ Example can't open at login: macOS access is off for Example.
+  Turn on Example in System Settings › General › Login Items & Extensions.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Login Items & Extensions is off for Example","lines":["Example can't open at login: macOS access is off for Example. Turn on Example in System Settings › General › Login Items & Extensions."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't open at login: macOS access is off for Example.","next":"example doctor","permission":{"kind":"login-item","settingsUrl":"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}}
+## cli recovery unknown
+✗ Example couldn't open at login. macOS may be blocking Example.
+  Check System Settings › General › Login Items & Extensions.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't open at login","lines":["Example couldn't open at login. macOS may be blocking Example. Check System Settings › General › Login Items & Extensions."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't open at login. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"login-item","settingsUrl":"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}}
+## cli recovery missing
+✗ Example couldn't open at login. macOS may be blocking Example.
+  Check System Settings › General › Login Items & Extensions.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't open at login","lines":["Example couldn't open at login. macOS may be blocking Example. Check System Settings › General › Login Items & Extensions."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't open at login. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"login-item","settingsUrl":"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Login Items & Extensions","detail":"To open at login"}
+{"kind":"action","id":"foundation.settings.login-item","label":"Open Login Items & Extensions settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Login Items & Extensions is off","detail":"Turn on Example to open at login"}
+{"kind":"action","id":"foundation.settings.login-item","label":"Open Login Items & Extensions settings","symbol":"action.permission","opens":"settings"}

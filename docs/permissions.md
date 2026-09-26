@@ -1,7 +1,8 @@
 # Permission notices and recovery
 
-Status: specification for desktop-foundation 0.8.0. The TypeScript kit ships
-in the SDK (`sdk/src/permissions.ts`, `sdk/src/audience.ts`); the Rust mirror
+Status: the TypeScript kit ships in desktop-foundation 0.8.0 as
+`@hraness/desktop-foundation/permissions` (`sdk/src/permissions.ts`, with
+`sdk/src/audience.ts` and `sdk/src/cli-style.ts`); the Rust mirror
 ships as the pure `hraness-cli-kit` crate in this repository, re-exported as
 `desktop_foundation::permissions`. Neither needs the native runner, so any CLI
 can use them.
@@ -126,6 +127,43 @@ export function permissionError(need: PermissionNeed, state: 'denied' | 'unknown
 `sdk/src/protocol-v2.ts`. `PermissionKind` is defined there too, because the
 wire uses it.
 
+The shipped kit also exports these helpers. Every function that resolves a
+default requester takes an optional last `env` argument, and `responsibleApp`
+takes an optional product name, because the local app's bundle ID alone does
+not carry the display name:
+
+```ts
+export function responsibleApp(env?: NodeJS.ProcessEnv, product?: string): string;
+export function requesterOf(need: PermissionNeed, env?: NodeJS.ProcessEnv): string;
+export function hasSettingsPane(kind: PermissionKind): kind is SettingsPermissionKind;
+export function isAllowedSettingsUrl(url: string): boolean;
+/** Plain text for a CLI notice (🔐 …) or recovery (✗ … → …), with the confirm or "press o" hint only when interactive. */
+export function formatNotice(notice: RenderedNotice, options: { kind: 'pre-prompt' | 'recovery'; interactive: boolean; style?: CliStyle }): string;
+/** The --notice dialog request for a need, or null for login items. */
+export function permissionNoticeRequest(need: PermissionNeed, env?: NodeJS.ProcessEnv): NoticeRequest | null;
+/** Prints the CLI recovery on stderr and opens Settings when the person presses o. */
+export function reportPermissionFailure(need: PermissionNeed, state: RecoveryState, options?: { audience?: Audience; io?: PermissionIO }): Promise<void>;
+/** The whole JSON error document from § JSON error shape. */
+export function permissionErrorJson(need: PermissionNeed, state: RecoveryState, env?: NodeJS.ProcessEnv): { ok: false; error: … };
+/** OSStatus or `/usr/bin/security` exit status → denied | unknown | missing. */
+export function classifyKeychainStatus(status: number): RecoveryState | undefined;
+export function defaultPermissionIO(): PermissionIO;
+```
+
+`RenderedNotice` from `renderRecovery` also carries `next`, the one step
+printed after `→`; its `confirm` is the "press o to open Settings" hint.
+
+Keychain rows differ from the menu table below because Keychain Access has no
+pane: "Needs keychain access" (detail "To {ask}") and, after a denial,
+"Keychain access is off" (detail "Choose Always Allow when macOS asks again").
+A keychain `missing` recovery reads `✗ {product} can't find "{target}" in your
+keychain.`
+
+`sdk/test/golden/permissions/*.txt` holds the rendered copy for every preset,
+surface and state, for a product as its own requester and before its local
+app exists. The Rust `hraness-cli-kit` tests read the same files. Regenerate
+them with `UPDATE_GOLDEN=1 npm run check:sdk` and review the diff.
+
 ### Requester defaults
 
 `requester` is the name in the macOS dialog. When the product omits it:
@@ -134,6 +172,7 @@ wire uses it.
 | --- | --- |
 | `keychain` | The executable that calls the keychain. The preset takes it as a parameter (`security` today; the signed helper later). |
 | `incoming-connections` | The listening executable's name. |
+| `login-item` | The product. Login Items lists the program the login item runs, never the terminal; `menubar install` passes that program's name until the local app exists. |
 | everything else | `responsibleApp(env)` |
 
 `responsibleApp(env)` returns the product name when `HRANESS_APP_BUNDLE_ID`

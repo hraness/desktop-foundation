@@ -1,0 +1,81 @@
+# automation · requester: local app
+## cli pre-prompt, interactive
+🔐 macOS will ask to let Example control Messages.
+   Example only sends replies in chats you turn on. Change this any time in System Settings › Privacy & Security › Automation.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let Example control Messages.
+   Example only sends replies in chats you turn on. Change this any time in System Settings › Privacy & Security › Automation.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Messages","message":"macOS will ask to let Example control Messages. Example only sends replies in chats you turn on. Change this any time in System Settings › Privacy & Security › Automation.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't control Messages: macOS access is off for Example.
+  Turn on Example in System Settings › Privacy & Security › Automation.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Automation is off for Example","lines":["Example can't control Messages: macOS access is off for Example. Turn on Example in System Settings › Privacy & Security › Automation."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't control Messages: macOS access is off for Example.","next":"example doctor","permission":{"kind":"automation","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"}}}
+## cli recovery unknown
+✗ Example couldn't control Messages. macOS may be blocking Example.
+  Check System Settings › Privacy & Security › Automation.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't control Messages","lines":["Example couldn't control Messages. macOS may be blocking Example. Check System Settings › Privacy & Security › Automation."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't control Messages. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"automation","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"}}}
+## cli recovery missing
+✗ Example couldn't control Messages. macOS may be blocking Example.
+  Check System Settings › Privacy & Security › Automation.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't control Messages","lines":["Example couldn't control Messages. macOS may be blocking Example. Check System Settings › Privacy & Security › Automation."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't control Messages. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"automation","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Automation","detail":"To control Messages"}
+{"kind":"action","id":"foundation.settings.automation","label":"Open Automation settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Automation is off","detail":"Turn on Example to control Messages"}
+{"kind":"action","id":"foundation.settings.automation","label":"Open Automation settings","symbol":"action.permission","opens":"settings"}
+
+# automation · requester: terminal
+## cli pre-prompt, interactive
+🔐 macOS will ask to let Terminal control Messages for Example.
+   Example only sends replies in chats you turn on. Change this any time in System Settings › Privacy & Security › Automation.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let Terminal control Messages for Example.
+   Example only sends replies in chats you turn on. Change this any time in System Settings › Privacy & Security › Automation.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Messages","message":"macOS will ask to let Terminal control Messages for Example. Example only sends replies in chats you turn on. Change this any time in System Settings › Privacy & Security › Automation.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't control Messages: macOS access is off for Terminal.
+  Turn on Terminal in System Settings › Privacy & Security › Automation.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Automation is off for Example","lines":["Example can't control Messages: macOS access is off for Terminal. Turn on Terminal in System Settings › Privacy & Security › Automation."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't control Messages: macOS access is off for Terminal.","next":"example doctor","permission":{"kind":"automation","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"}}}
+## cli recovery unknown
+✗ Example couldn't control Messages. macOS may be blocking Terminal.
+  Check System Settings › Privacy & Security › Automation.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't control Messages","lines":["Example couldn't control Messages. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Automation."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't control Messages. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"automation","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"}}}
+## cli recovery missing
+✗ Example couldn't control Messages. macOS may be blocking Terminal.
+  Check System Settings › Privacy & Security › Automation.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't control Messages","lines":["Example couldn't control Messages. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Automation."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't control Messages. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"automation","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Automation","detail":"To control Messages"}
+{"kind":"action","id":"foundation.settings.automation","label":"Open Automation settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Automation is off","detail":"Turn on Terminal to control Messages"}
+{"kind":"action","id":"foundation.settings.automation","label":"Open Automation settings","symbol":"action.permission","opens":"settings"}

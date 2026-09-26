@@ -1,0 +1,81 @@
+# local-network · requester: local app
+## cli pre-prompt, interactive
+🔐 macOS will ask to let Example find and connect to devices on your local network.
+   Room members on your network connect to this Mac. Change this any time in System Settings › Privacy & Security › Local Network.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let Example find and connect to devices on your local network.
+   Room members on your network connect to this Mac. Change this any time in System Settings › Privacy & Security › Local Network.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Local Network","message":"macOS will ask to let Example find and connect to devices on your local network. Room members on your network connect to this Mac. Change this any time in System Settings › Privacy & Security › Local Network.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't find and connect to devices on your local network: macOS access is off for Example.
+  Turn on Example in System Settings › Privacy & Security › Local Network.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Local Network is off for Example","lines":["Example can't find and connect to devices on your local network: macOS access is off for Example. Turn on Example in System Settings › Privacy & Security › Local Network."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't find and connect to devices on your local network: macOS access is off for Example.","next":"example doctor","permission":{"kind":"local-network","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"}}}
+## cli recovery unknown
+✗ Example couldn't find and connect to devices on your local network. macOS may be blocking Example.
+  Check System Settings › Privacy & Security › Local Network.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't find and connect to devices on your local network","lines":["Example couldn't find and connect to devices on your local network. macOS may be blocking Example. Check System Settings › Privacy & Security › Local Network."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't find and connect to devices on your local network. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"local-network","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"}}}
+## cli recovery missing
+✗ Example couldn't find and connect to devices on your local network. macOS may be blocking Example.
+  Check System Settings › Privacy & Security › Local Network.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't find and connect to devices on your local network","lines":["Example couldn't find and connect to devices on your local network. macOS may be blocking Example. Check System Settings › Privacy & Security › Local Network."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't find and connect to devices on your local network. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"local-network","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Local Network","detail":"To find and connect to devices on your local network"}
+{"kind":"action","id":"foundation.settings.local-network","label":"Open Local Network settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Local Network is off","detail":"Turn on Example to find and connect to devices on your local network"}
+{"kind":"action","id":"foundation.settings.local-network","label":"Open Local Network settings","symbol":"action.permission","opens":"settings"}
+
+# local-network · requester: terminal
+## cli pre-prompt, interactive
+🔐 macOS will ask to let Terminal find and connect to devices on your local network for Example.
+   Room members on your network connect to this Mac. Change this any time in System Settings › Privacy & Security › Local Network.
+   Press Enter to continue · s to skip
+## cli pre-prompt, ascii
+NOTE macOS will ask to let Terminal find and connect to devices on your local network for Example.
+   Room members on your network connect to this Mac. Change this any time in System Settings › Privacy & Security › Local Network.
+## dialog
+{"type":"notice-request","version":1,"title":"Example needs access to Local Network","message":"macOS will ask to let Terminal find and connect to devices on your local network for Example. Room members on your network connect to this Mac. Change this any time in System Settings › Privacy & Security › Local Network.","primary":"Continue","secondary":"Not now"}
+## cli recovery denied
+✗ Example can't find and connect to devices on your local network: macOS access is off for Terminal.
+  Turn on Terminal in System Settings › Privacy & Security › Local Network.
+→ example doctor · press o to open Settings
+## dialog recovery denied
+{"title":"Local Network is off for Example","lines":["Example can't find and connect to devices on your local network: macOS access is off for Terminal. Turn on Terminal in System Settings › Privacy & Security › Local Network."],"next":"example doctor"}
+## json denied
+{"ok":false,"error":{"code":"permission-denied","message":"Example can't find and connect to devices on your local network: macOS access is off for Terminal.","next":"example doctor","permission":{"kind":"local-network","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"}}}
+## cli recovery unknown
+✗ Example couldn't find and connect to devices on your local network. macOS may be blocking Terminal.
+  Check System Settings › Privacy & Security › Local Network.
+→ example doctor
+## dialog recovery unknown
+{"title":"Example can't find and connect to devices on your local network","lines":["Example couldn't find and connect to devices on your local network. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Local Network."],"next":"example doctor"}
+## json unknown
+{"ok":false,"error":{"code":"permission-unknown","message":"Example couldn't find and connect to devices on your local network. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"local-network","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"}}}
+## cli recovery missing
+✗ Example couldn't find and connect to devices on your local network. macOS may be blocking Terminal.
+  Check System Settings › Privacy & Security › Local Network.
+→ example doctor
+## dialog recovery missing
+{"title":"Example can't find and connect to devices on your local network","lines":["Example couldn't find and connect to devices on your local network. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Local Network."],"next":"example doctor"}
+## json missing
+{"ok":false,"error":{"code":"permission-missing","message":"Example couldn't find and connect to devices on your local network. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"local-network","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"}}}
+## menu not-determined
+{"kind":"status","symbol":"status.locked","label":"Needs Local Network","detail":"To find and connect to devices on your local network"}
+{"kind":"action","id":"foundation.settings.local-network","label":"Open Local Network settings","symbol":"action.permission","opens":"settings"}
+## menu denied
+{"kind":"status","symbol":"status.locked","label":"Local Network is off","detail":"Turn on Terminal to find and connect to devices on your local network"}
+{"kind":"action","id":"foundation.settings.local-network","label":"Open Local Network settings","symbol":"action.permission","opens":"settings"}

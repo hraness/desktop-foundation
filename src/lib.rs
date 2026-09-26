@@ -849,6 +849,9 @@ impl RefreshController {
         let interval = self.interval.max(Duration::from_secs(1));
         *owned_worker = Some(std::thread::spawn(move || {
             let mailbox = Arc::new(Mutex::new(PendingRender::default()));
+            // The shortened-menu warning is reported once per oversized run,
+            // not on every refresh.
+            let mut shortened = false;
             state.request();
             while let Some((generation, render_error)) = state.next(interval) {
                 if let Some(failure) = render_error {
@@ -866,18 +869,28 @@ impl RefreshController {
                 };
                 if context.is_cancelled() { continue; }
                 let Some(mut model) = model else { continue; };
-                if let Err(error) = model.validate() {
-                    host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
-                    // An oversized menu renders cut down with a visible
-                    // warning row instead of freezing on the last good one.
-                    match model.fit_to_budget().filter(|fitted| fitted.validate().is_ok()) {
-                        Some(fitted) if matches!(error, ModelError::TooManyNodes | ModelError::TooDeep) => {
-                            eprintln!(
-                                "desktop-foundation: the menu has more than {MAX_MENU_NODES} rows or {MAX_MENU_DEPTH} levels; showing a shortened menu"
-                            );
-                            model = fitted;
+                match model.validate() {
+                    Ok(()) => shortened = false,
+                    Err(error) => {
+                        // An oversized menu renders cut down with a visible
+                        // warning row instead of freezing on the last good one.
+                        let fitted = model.fit_to_budget().filter(|fitted| fitted.validate().is_ok());
+                        match fitted {
+                            Some(fitted) if matches!(error, ModelError::TooManyNodes | ModelError::TooDeep) => {
+                                if !shortened {
+                                    host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
+                                    eprintln!(
+                                        "desktop-foundation: the menu has more than {MAX_MENU_NODES} rows or {MAX_MENU_DEPTH} levels; showing a shortened menu"
+                                    );
+                                    shortened = true;
+                                }
+                                model = fitted;
+                            }
+                            _ => {
+                                host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
+                                continue;
+                            }
                         }
-                        _ => continue,
                     }
                 }
                 {

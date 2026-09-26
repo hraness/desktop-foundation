@@ -24,7 +24,7 @@ local-custody = { git = "https://github.com/hraness/local-custody", rev = "4fd65
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAlert", "NSApplication", "NSButton", "NSCell", "NSColor", "NSControl", "NSEvent", "NSFont", "NSImage", "NSImageView", "NSMenu", "NSMenuItem", "NSMenuItemBadge", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSStatusItem", "NSStatusBarButton", "NSTextField", "NSView", "NSWindow", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAlert", "NSApplication", "NSButton", "NSCell", "NSColor", "NSControl", "NSEvent", "NSFont", "NSGraphics", "NSImage", "NSImageView", "NSMenu", "NSMenuItem", "NSMenuItemBadge", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSStatusItem", "NSStatusBarButton", "NSTextField", "NSView", "NSWindow", "objc2-core-foundation"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSArray", "NSData", "NSGeometry", "NSObject", "NSProcessInfo", "NSString"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

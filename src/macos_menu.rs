@@ -13,7 +13,7 @@ use objc2::{msg_send, sel, AnyThread, ClassType, MainThreadMarker, MainThreadOnl
 use objc2_app_kit::{
     NSCellImagePosition, NSColor, NSControlStateValueMixed, NSEventModifierFlags, NSImage,
     NSImageSymbolConfiguration, NSImageView, NSMenu, NSMenuItem, NSMenuItemBadge, NSStatusItem,
-    NSView,
+    NSView, NSWindowOrderingMode,
 };
 use objc2_foundation::{NSArray, NSData, NSPoint, NSRect, NSSize, NSString};
 
@@ -255,7 +255,9 @@ pub(crate) fn apply_mark(
             let view = NSImageView::initWithFrame(NSImageView::alloc(mtm), frame);
             view.setImage(Some(&dot));
             view.setTag(DOT_TAG);
-            button.addSubview(&view);
+            // Below tray-icon's click target, so a click on the dot still
+            // opens the menu; the target view draws nothing.
+            button.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, None);
         }
     }
     // tray-icon sizes its click target to the button after each change it
@@ -322,7 +324,8 @@ pub fn native_menu_dump(nodes: &[crate::MenuNode]) -> Option<String> {
                 out.push_str("---\n");
                 continue;
             }
-            if item.isSectionHeader() {
+            let caps = capabilities();
+            if caps.section_header && item.isSectionHeader() {
                 out.push_str("[header] ");
             }
             if item.isAlternate() {
@@ -335,10 +338,10 @@ pub fn native_menu_dump(nodes: &[crate::MenuNode]) -> Option<String> {
                 out.push_str("[mixed] ");
             }
             out.push_str(&item.title().to_string());
-            if let Some(subtitle) = item.subtitle() {
+            if let Some(subtitle) = caps.subtitle.then(|| item.subtitle()).flatten() {
                 out.push_str(&format!(" | subtitle: {subtitle}"));
             }
-            if let Some(badge) = item.badge().and_then(|badge| badge.stringValue()) {
+            if let Some(badge) = caps.badge.then(|| item.badge()).flatten().and_then(|badge| badge.stringValue()) {
                 out.push_str(&format!(" | badge: {badge}"));
             }
             if let Some(tip) = item.toolTip() {

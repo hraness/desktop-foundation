@@ -58,6 +58,9 @@ test('the documented kind table matches the kit', () => {
 test('responsibleApp names the terminal, then the product inside its local app', () => {
   assert.equal(responsibleApp({ TERM_PROGRAM: 'Apple_Terminal' }), 'Terminal');
   assert.equal(responsibleApp({ __CFBundleIdentifier: 'com.googlecode.iterm2', TERM_PROGRAM: 'vscode' }), 'iTerm');
+  // VS Code forks set TERM_PROGRAM=vscode; an unknown bundle ID must not become "Visual Studio Code".
+  assert.equal(responsibleApp({ __CFBundleIdentifier: 'com.todesktop.230313mzl4w4u92', TERM_PROGRAM: 'vscode' }), 'your terminal app');
+  assert.equal(responsibleApp({ TERM_PROGRAM: 'vscode' }), 'Visual Studio Code');
   assert.equal(responsibleApp({ TERM_PROGRAM: 'ghostty' }), 'Ghostty');
   assert.equal(responsibleApp({ __CFBundleIdentifier: 'com.microsoft.VSCode' }), 'Visual Studio Code');
   assert.equal(responsibleApp({ ZED_TERM: 'true' }), 'Zed');
@@ -265,7 +268,8 @@ test('permissionStatus probes only where no prompt can appear', async () => {
   assert.equal(await permissionStatus('full-disk-access', 'Safari', io), 'granted');
   assert.equal(await permissionStatus('full-disk-access', '/Users/test/Library/Containers/com.apple.Safari/Data/x', io), 'unknown');
   assert.equal(await permissionStatus('full-disk-access', 'relative/path', io), 'unknown');
-  for (const path of ['/Users/test/Documents/a', '/Users/test/Desktop', '/Volumes/USB/x', '/Users/test/Library/Mobile Documents/x', '/Users/test/Library/Group Containers/x', '/Users/test/Library/CloudStorage/x']) {
+  for (const path of ['/Users/test/Documents/a', '/Users/test/Desktop', '/Volumes/USB/x', '/Users/test/Library/Mobile Documents/x', '/Users/test/Library/Group Containers/x', '/Users/test/Library/CloudStorage/x',
+    '/Users/test/Library/Application Support/AddressBook/Sources/x/AddressBook-v22.abcddb', '/Users/test/Library/Calendars/Calendar.sqlitedb', '/Users/test/Library/Reminders/x']) {
     assert.equal(await permissionStatus('full-disk-access', path, io), 'unknown', path);
   }
   assert.equal(await permissionStatus('full-disk-access', '/Users/test/Library/Mail', io), 'granted');

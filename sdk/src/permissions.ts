@@ -130,6 +130,9 @@ export function responsibleApp(env: NodeJS.ProcessEnv = process.env, product?: s
   const bundle = env.__CFBundleIdentifier ?? '';
   const byBundle = TERMINALS.find(([id]) => id === bundle);
   if (byBundle) return byBundle[2];
+  // VS Code forks (Cursor, Windsurf, VSCodium) also set TERM_PROGRAM=vscode,
+  // so trust TERM_PROGRAM only when no bundle ID says otherwise.
+  if (bundle !== '') return 'your terminal app';
   const program = env.TERM_PROGRAM ?? '';
   const byProgram = TERMINALS.find(([, name]) => name === program);
   if (byProgram) return byProgram[2];
@@ -369,12 +372,14 @@ export async function reportPermissionFailure(need: PermissionNeed, state: Recov
 /**
  * Only `~/Library` data outside other apps' containers and cloud folders is
  * guarded by Full Disk Access alone. Documents, Desktop, Downloads, iCloud
- * Drive, removable volumes and app containers each raise their own prompt.
+ * Drive, removable volumes, app containers, Contacts, Calendars and Reminders
+ * each raise their own prompt.
  */
 function isSilentProbePath(path: string, home: string): boolean {
   const library = join(home, 'Library') + '/';
   if (!path.startsWith(library)) return false;
-  return !/^(Containers|Group Containers|Mobile Documents|CloudStorage|Daemon Containers)(\/|$)/.test(path.slice(library.length));
+  // Contacts, Calendars and Reminders data raise their own prompts, not Full Disk Access.
+  return !/^(Containers|Group Containers|Mobile Documents|CloudStorage|Daemon Containers|Calendars|Reminders|Application Support\/(AddressBook|com\.apple\.(AddressBook|Calendar|reminders)))(\/|$)/i.test(path.slice(library.length));
 }
 
 const HOME_TARGETS: Readonly<Record<string, readonly string[]>> = {

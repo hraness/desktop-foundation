@@ -242,12 +242,17 @@ fixtures (first run, signed out, running, error, empty, maximum accounts).
 | `quit` | No `quit` item, the quit item is not the last top-level item, or its label is not `Quit {name}`. |
 | `header` | More than one top-level header, or a top-level header that is not `name`. |
 | `raw-text` | A label, subtitle, detail or tooltip contains a path (`/`, `~/`), URL, UUID, 8+ hex characters, a `--flag`, or a CLI invocation (a known command name followed by a subcommand). |
-| `sentence-case` | A label or header capitalizes a word after the first that is not in the proper-noun list: the product name, macOS, Messages, Chrome, Safari, Finder, System Settings, Keychain Access, every permission pane name in [permissions](permissions.md#permission-kinds) (such as Full Disk Access), and names the product passes in. All-capital words (ID, URL, PDF) and words with digits pass. |
+| `sentence-case` | A label or header capitalizes a word, other than the first word of a sentence, that is not in the proper-noun list: the product name, macOS, Messages, Chrome, Safari, Finder, System Settings, Keychain Access, every permission pane name in [permissions](permissions.md#permission-kinds) (such as Full Disk Access), and names the product passes in. All-capital words (ID, URL, PDF) and words with digits pass. |
 | `length` | A label longer than 48 scalar values (subtitles 80, tooltips 160). Put detail in `subtitle`. |
 | `glyph-in-label` | A label contains an emoji or a vocabulary fallback glyph, or ends with `↗`, `…` or `...`. Use `symbol` and `opens`. |
 | `mark-text` | `mark.text` is set while `tone` is `normal`, `paused` or `offline`. |
 | `shortcut-repeat` | Two items share a shortcut. |
 | `empty-submenu` | A submenu has no items. |
+
+Content rows (actions whose `symbol` is an `item.*` name) carry the person's
+own data, such as contact and file names, so `sentence-case` skips them. Every
+other rule still applies. Pass other names through `properNouns`
+(`--proper-noun` on the command line).
 
 `renderMenuTree(snapshot)` prints the stable text form used in fixtures and
 pull requests: two spaces per depth, the vocabulary fallback glyph first, then

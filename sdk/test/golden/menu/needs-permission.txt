@@ -1,0 +1,7 @@
+[mark.chat Tb]
+Textbutler
+🔒︎ Full Disk Access is off · Turn on Textbutler to read your Messages
+─────────
+Open Full Disk Access settings… (primary)
+─────────
+Quit Textbutler

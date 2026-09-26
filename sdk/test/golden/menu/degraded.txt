@@ -1,0 +1,9 @@
+[mark.chat Tb]
+Textbutler
+⚠︎ Can't reach Textbutler · Retrying…
+─────────
+♡ Help & support ↗ (primary)
+─────────
+Open at login · macOS shows a notice when you turn this on
+─────────
+Quit Textbutler

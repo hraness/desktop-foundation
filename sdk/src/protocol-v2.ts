@@ -311,6 +311,8 @@ export function validateSnapshotV2(value: SnapshotV2): ReadonlyMap<string, boole
             if (!alternate || typeof alternate !== 'object') throw new Error('invalid-alternate');
             try {
               exactFields(alternate, ['id', 'label', 'symbol']);
+              // Reserved actions never hide behind ⌥ (the Rust runner rejects them too).
+              if (typeof alternate.id === 'string' && alternate.id.startsWith('foundation.')) throw new Error('invalid-alternate');
               claim(alternate.id);
               text(alternate.label, 256);
               if (alternate.symbol !== undefined && !isSymbol(alternate.symbol, ['action.', 'item.'])) throw new Error('invalid-symbol');

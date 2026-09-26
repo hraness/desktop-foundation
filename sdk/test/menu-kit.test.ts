@@ -80,6 +80,7 @@ test('validateSnapshotV2 rejects what the v2 runner rejects', () => {
     ['invalid-role', value => { value.items[3].role = 'secondary'; }],
     ['invalid-opens', value => { value.items[3].opens = 'terminal'; }],
     ['invalid-alternate', value => { value.items[5].alternate.id = 'open'; }],
+    ['invalid-alternate', value => { value.items[5].alternate.id = 'foundation.login'; value.items[9].id = 'login.row'; }],
     ['invalid-action-id', value => { value.items[3].id = 'foundation.bogus'; }],
     ['invalid-label', value => { value.items[0].label = 'x'.repeat(49); }],
     ['invalid-label', value => { value.tooltip = 'x'.repeat(161); }],

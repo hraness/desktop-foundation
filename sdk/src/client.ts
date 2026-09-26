@@ -136,7 +136,8 @@ export async function runCompanion(options: CompanionOptions): Promise<Companion
   const binary = options.binary ?? (await ensureBinary({ manifest: options.manifest ?? await packagedManifest(), cacheDir: options.cacheDir })).path;
   const v2Product = options.mark !== undefined;
   let revision = 0, snapshotBusy = false, refreshBusy = false, refreshAgain = false, dispatchBusy = false, stopping = false, running = false;
-  let degraded = false;
+  // JSON of the degraded menu on screen, so a repeat failure keeps its actions live without resending.
+  let degradedShown: string | undefined;
   let actions: ReadonlyMap<string, boolean> = new Map();
   let lastItems: readonly (MenuItem | MenuItemV2)[] = [];
   let actionError: { message: string; detail?: string; until: number } | undefined;
@@ -278,22 +279,26 @@ export async function runCompanion(options: CompanionOptions): Promise<Companion
   }
   async function refreshOnce(): Promise<void> {
     let built: Built;
-    try { built = await model(); degraded = false; }
+    try { built = await model(); degradedShown = undefined; }
     catch (error) {
-      actions = new Map();
       if (stopping) return;
       const message = error instanceof Error ? error.message : '';
+      // A read that is still running keeps its lock and will send its own menu.
+      if (message === 'snapshot-busy') return;
+      actions = new Map();
       const code = message.startsWith('menu-too-large') ? 'menu-too-large' : 'snapshot-unavailable';
       diagnostic(code);
-      // Show that state is stale instead of leaving the last menu up. A read
-      // that is still running keeps its lock; the degraded menu reads nothing.
-      if (degraded || message === 'snapshot-busy') return;
-      try { built = await degradedFrame(code); degraded = true; }
+      // Show that state is stale instead of leaving the last menu up. The
+      // degraded menu reads nothing from the product.
+      try { built = await degradedFrame(code); }
       catch { return; }
+      const key = JSON.stringify(built.frame.items);
+      if (key === degradedShown) { actions = built.actions; return; }
+      degradedShown = key;
     }
     if (!stopping) {
       try { await send(built); }
-      catch { fail('runner-pipe-closed'); }
+      catch { degradedShown = undefined; fail('runner-pipe-closed'); }
     }
   }
   /** Coalesces pushes: a refresh requested during another one runs once more after it. */

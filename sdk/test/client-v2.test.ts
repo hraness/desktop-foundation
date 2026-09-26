@@ -11,7 +11,7 @@ import type { PermissionIO } from '../src/permissions.js';
 import type { MenuItemV2, SnapshotV2 } from '../src/protocol-v2.js';
 import type { Snapshot } from '../src/protocol.js';
 
-interface Script { protocols: string; actions?: Record<number, string> }
+interface Script { protocols: string; actions?: Record<number, string | string[]> }
 
 /**
  * A runner that answers `--version` with the given protocols, records every
@@ -35,8 +35,8 @@ function fakeRunner(script: Script, tracePath: string): string {
       seen++;
       const send = event => process.stdout.write(JSON.stringify({ version: value.version, ...event }) + '\\n');
       if (seen === 1) send({ type: 'ready', pid: process.pid, platform: process.platform });
-      const id = script.actions?.[seen];
-      if (id) send({ type: 'action', id, revision: value.revision });
+      const ids = [].concat(script.actions?.[seen] ?? []);
+      ids.forEach((id, index) => setTimeout(() => send({ type: 'action', id, revision: value.revision }), index * 300));
     });
     input.on('close', () => { clearInterval(alive); process.exit(0); });
   `;
@@ -166,6 +166,9 @@ test('a failing snapshot sends one degraded menu, then recovers', { timeout: 800
   await fixture.session.refresh();
   failing = false;
   await fixture.session.refresh();
+  // The runner records frames as it reads them, after our write returns.
+  await eventually(async () => (await fixture.snapshots()).length >= 3);
+  await delay(100);
   const [, degraded, recovered, extra] = await fixture.snapshots() as SnapshotV2[];
   assert.deepEqual(degraded!.items.slice(0, 2), [
     { kind: 'header', label: 'Client test' },
@@ -175,6 +178,34 @@ test('a failing snapshot sends one degraded menu, then recovers', { timeout: 800
   assert.deepEqual(labels(recovered), labels({ ...degraded!, items: menu() }));
   assert.equal(extra, undefined);
   assert.deepEqual(fixture.diagnostics, ['snapshot-unavailable', 'snapshot-unavailable']);
+});
+
+test('the degraded menu keeps working through repeat failures and clicks', { timeout: 8000 }, async t => {
+  const product: string[] = [];
+  let failing = false;
+  const fixture = await start(t, { protocols: '1,2', actions: { 2: ['help', 'help', 'help'] } }, {
+    snapshot: () => { if (failing) throw new Error('daemon down'); return menu(); },
+    degraded: () => ({ primary: { kind: 'action', id: 'help', label: 'Help & support', symbol: 'action.support', opens: 'browser' } }),
+    onAction: id => { product.push(id); },
+  });
+  await fixture.session.ready;
+  failing = true;
+  await fixture.session.refresh();
+  // Each click refreshes, fails again, and re-arms the same menu without resending it.
+  await eventually(() => product.length === 3);
+  assert.deepEqual(product, ['help', 'help', 'help']);
+  assert.equal((await fixture.snapshots()).length, 2);
+});
+
+test('an action error with blank or multi-line text still gives a valid menu', { timeout: 8000 }, async t => {
+  const fixture = await start(t, { protocols: '1,2', actions: { 1: 'pause', 2: 'open' } }, {
+    onAction: id => { throw id === 'pause' ? new MenuActionError('   ') : new MenuActionError('Line one\nline two', 'a\tb'); },
+  });
+  await fixture.session.ready;
+  await eventually(async () => (await fixture.snapshots()).length >= 3);
+  const [, second, third] = await fixture.snapshots() as SnapshotV2[];
+  assert.deepEqual(second!.items[2], { kind: 'status', symbol: 'status.attention', label: 'Something went wrong' });
+  assert.deepEqual(third!.items[2], { kind: 'status', symbol: 'status.attention', label: 'Line one line two', detail: 'a b' });
 });
 
 test('a menu over the node budget reports menu-too-large', { timeout: 8000 }, async t => {

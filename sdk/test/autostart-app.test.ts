@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { autostartState, planAutostart, removeAutostart, setAutostart, type AutostartOptions } from '../src/autostart.js';
 import { describeCompanionError } from '../src/commands.js';
 import { CompanionError } from '../src/errors.js';
@@ -18,7 +18,7 @@ function appOptions(home: string, overrides: Partial<AutostartOptions> = {}): Au
   return {
     id: 'textbutler', label: 'Textbutler', platform: 'darwin', home, env: {},
     executable: '/opt/tools/bun', args: ['/opt/textbutler/cli.js', 'menubar', '--foreground'],
-    app: { name: 'Textbutler', argvFile: join(home, 'state', 'launch.json') },
+    app: { name: 'Textbutler', argvFile: posix.join(home, 'state', 'launch.json') },
     ...overrides,
   };
 }

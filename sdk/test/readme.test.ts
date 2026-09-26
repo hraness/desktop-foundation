@@ -28,7 +28,7 @@ test('README install lines pin the current release', () => {
 });
 
 test('protocol sample prints the current version', () => {
-  assert.ok(protocol.includes(`hraness-companion ${version} protocol/1`));
+  assert.ok(protocol.includes(`hraness-companion ${version} protocol/1,2`));
 });
 
 test('README uses no em dashes', () => {

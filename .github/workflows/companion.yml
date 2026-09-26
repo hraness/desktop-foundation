@@ -196,6 +196,10 @@ jobs:
           pattern: native-*
           path: artifacts
           merge-multiple: true
+      # The package smoke runs the Linux runner, which links WebKitGTK and
+      # the tray libraries at load time. Runtime packages only, no -dev.
+      - name: Install runner runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
       - run: npm ci --ignore-scripts
       # The SDK tests already ran on this tree in the sdk job and on every
       # native leg; packaging only needs the compiled dist.

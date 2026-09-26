@@ -187,10 +187,12 @@ hraness-companion --signing-identity ensure   creates the identity when missing
 | Trusting the certificate | not done | Adding trust settings (`security add-trusted-cert`) opens an administrator password dialog and edits system trust policy. The design does not need it: `codesign` signs with an untrusted self-signed identity selected by hash, and `codesign --verify` checks the signature, not the anchor. If implementation shows `codesign` refuses the identity, stop and take the decision to the maintainer; never add trust automatically. |
 
 These prompts were reasoned from macOS keychain behavior and have not been
-observed on this design. Before 0.8.0 ships, run the flow once on a clean
-macOS user account and record what appears: identity creation, first signing,
-an upgrade re-sign, the Login Items entry (`sfltool dumpbtm`), and one
-privacy prompt through `--launch`.
+observed on this design. 0.8.0 ships the code, but nothing runs it unless a
+product calls it: the SDK and the default runner path never assemble an app
+or create an identity. Before a product turns local signing on for its users,
+run the flow once on a clean macOS user account and record what appears:
+identity creation, first signing, an upgrade re-sign, the Login Items entry
+(`sfltool dumpbtm`), and one privacy prompt through `--launch`.
 
 ### Security trade-off
 

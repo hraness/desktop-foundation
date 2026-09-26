@@ -2,10 +2,11 @@
 
 Status: the TypeScript kit ships in desktop-foundation 0.8.0 as
 `@hraness/desktop-foundation/permissions` (`sdk/src/permissions.ts`, with
-`sdk/src/audience.ts` and `sdk/src/cli-style.ts`); the Rust mirror
-ships as the pure `hraness-cli-kit` crate in this repository, re-exported as
-`desktop_foundation::permissions`. Neither needs the native runner, so any CLI
-can use them.
+`sdk/src/audience.ts` and `sdk/src/cli-style.ts`). It doesn't need the native
+runner, so any CLI can use it. The Rust mirror, a small `hraness-cli-kit`
+crate with the API [below](#rust-api-hraness-cli-kit), is designed but not in
+0.8.0; until it ships, Rust products copy the templates inline and mark them
+`TODO(df-cli-kit)`.
 
 The kit never triggers a macOS prompt by itself. It says what macOS is about
 to ask and why, probes state only where a probe cannot cause a prompt,
@@ -161,7 +162,7 @@ keychain.`
 
 `sdk/test/golden/permissions/*.txt` holds the rendered copy for every preset,
 surface and state, for a product as its own requester and before its local
-app exists. The Rust `hraness-cli-kit` tests read the same files. Regenerate
+app exists. The planned Rust `hraness-cli-kit` tests will read the same files. Regenerate
 them with `UPDATE_GOLDEN=1 npm run check:sdk` and review the diff.
 
 ### Requester defaults
@@ -465,6 +466,8 @@ With `--json` or an agent audience, a permission failure is:
 ```
 
 ## Rust API (`hraness-cli-kit`)
+
+Planned, not in 0.8.0.
 
 ```rust
 pub mod audience {

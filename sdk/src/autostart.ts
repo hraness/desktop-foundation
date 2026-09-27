@@ -37,6 +37,8 @@ export interface AutostartPlan {
 }
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 function prefix(platform: string) { return platform === 'darwin' ? '<!-- ' : platform === 'win32' ? "' " : '# '; }
+/** The largest argv file the app's `--launch` reads; it ignores a bigger one and starts nothing. */
+export const MAX_LAUNCH_BYTES = 64 * 1024;
 function header(id: string, platform: string, body: string) { return `${prefix(platform)}hraness-companion autostart ${id} sha256:${digest(body)}${platform === 'darwin' ? ' -->' : ''}\n`; }
 function xml(text: string) { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;'); }
 /** Windows CommandLineToArgvW quoting, then separately escaped as a VBScript literal. */
@@ -73,8 +75,9 @@ export function planAutostart(options: AutostartOptions): AutostartPlan {
     const { name, argvFile } = options.app;
     if (typeof name !== 'string' || !name || name.length > 128 || name.startsWith('.') || /[/:\x00-\x1f\x7f]/.test(name)) throw new CompanionError('unsafe_path', 'The app name must be a short display name without slashes.');
     if (typeof argvFile !== 'string' || !posix.isAbsolute(argvFile) || /[\x00-\x1f\x7f]/.test(argvFile) || argvFile.length > 1024) throw new CompanionError('unsafe_path', 'The app launch file must be an absolute path.');
-    // `--launch` reads at most 64 entries, the executable included.
-    if (args.length > 63) throw new CompanionError('unsafe_path', 'Autostart configuration is too large.');
+    // `--launch` reads at most 64 entries, the executable included, from a
+    // file of at most 64 KiB (src/identity.rs MAX_ARGV_FILE_BYTES).
+    if (args.length > 63 || Buffer.byteLength(JSON.stringify([options.executable, ...args])) > MAX_LAUNCH_BYTES) throw new CompanionError('unsafe_path', 'Autostart configuration is too large.');
     const label = `app.hraness.${options.id}`;
     const agents = posix.join(home, 'Library', 'LaunchAgents');
     const program = posix.join(home, 'Applications', 'Hraness', `${name}.app`, 'Contents', 'MacOS', name);
@@ -130,7 +133,7 @@ async function ownedLegacy(plan: AutostartPlan): Promise<string[]> {
 async function launchContents(path: string): Promise<string | undefined> {
   let info;
   try { info = await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-  if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024 || (info.mode & 0o077) !== 0) return;
+  if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_LAUNCH_BYTES || (info.mode & 0o077) !== 0) return;
   if (typeof process.getuid === 'function' && info.uid !== process.getuid()) return;
   return readFile(path, 'utf8');
 }
@@ -145,7 +148,8 @@ function validatePlan(plan: AutostartPlan) {
   if (!/^[a-z][a-z0-9.-]{0,63}$/.test(plan.id) || plan.id.includes('..') || basename(plan.path) !== filename
       || newline < 0 || plan.contents.slice(0, newline + 1) !== header(plan.id, plan.platform, plan.contents.slice(newline + 1))
       || (plan.legacy ?? []).some(path => dirname(path) !== dirname(plan.path) || basename(path) !== legacyName)
-      || (app && (plan.platform !== 'darwin' || !posix.isAbsolute(plan.launch!.path) || !Array.isArray(argv) || argv.length === 0 || argv.length > 64
+      || (app && (plan.platform !== 'darwin' || !posix.isAbsolute(plan.launch!.path) || Buffer.byteLength(plan.launch!.contents) > MAX_LAUNCH_BYTES
+        || !Array.isArray(argv) || argv.length === 0 || argv.length > 64
         || !argv.every(arg => typeof arg === 'string') || !posix.isAbsolute(argv[0] as string) || !posix.isAbsolute(plan.launch!.program)
         || !plan.contents.includes(`<array><string>${xml(plan.launch!.program)}</string><string>--launch</string><string>${xml(plan.launch!.path)}</string></array>`)))) throw new CompanionError('unsafe_path', 'Autostart plan is not a valid framework-owned file.');
 }

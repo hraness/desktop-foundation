@@ -89,9 +89,12 @@ On macOS, a product that has built its local app (see
 `handleCompanionCommand`. `install` then writes the same LaunchAgent as the
 Rust helper: it starts `My Tool.app --launch <argvFile>`, so Login Items and
 the notice name My Tool instead of `node` or `bun`. The product command goes
-in the owner-only `argvFile`, and the older `app.hraness.companion.<appId>`
-entry is removed in the same command. If the app isn't built, `install` stops
-with `app_missing` before showing the notice. Without `app`, nothing changes.
+in the owner-only `argvFile` (at most 64 entries and 64 KiB, or `install`
+refuses it), and the older `app.hraness.companion.<appId>` entry is removed in
+the same command. If the app isn't built, `install` stops with `app_missing`
+before showing the notice. Without `app`, nothing changes. The menu's "Open at
+login" row uses the same app, even when the product passes its own
+`loginItem` without one, so the row and `install` never add two items.
 
 Reads and actions receive cancellation signals. Product handlers preserve
 their permission checks and reconcile uncertain outcomes; the SDK never

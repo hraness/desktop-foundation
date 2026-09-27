@@ -91,6 +91,16 @@ export function describeCompanionError(error: unknown, name: string, command = '
   return { code, message, next };
 }
 
+/**
+ * The login item the menu's "Open at login" row manages: the product's own
+ * `loginItem` when it passes one, with the invocation's app filled in when
+ * the product left it out, so the row and `install` plan the same file.
+ */
+export function menuLoginItem(loginItem: CompanionOptions['loginItem'], invocation: Pick<CompanionInvocation, 'foreground' | 'app'>): NonNullable<CompanionOptions['loginItem']> {
+  const base = loginItem ?? { ...invocation.foreground };
+  return base.app || !invocation.app ? base : { ...base, app: invocation.app };
+}
+
 export async function handleCompanionCommand(options: CompanionOptions, invocation: CompanionInvocation): Promise<number> {
   const env = invocation.env ?? process.env;
   const command = invocation.command ?? 'menubar';
@@ -103,7 +113,9 @@ export async function handleCompanionCommand(options: CompanionOptions, invocati
 
   if (verb === '--foreground') {
     if (options.loginEnv?.length) await loadLoginEnvironment(options.stateDir, options.loginEnv);
-    return await serveCompanion({ ...options, loginItem: options.loginItem ?? { ...invocation.foreground, ...(invocation.app ? { app: invocation.app } : {}) } });
+    // The menu row must plan the same login item `install` writes, or turning
+    // it on from the menu adds a second item beside the app's.
+    return await serveCompanion({ ...options, loginItem: menuLoginItem(options.loginItem, invocation) });
   }
   if (verb === 'help' || verb === '--help' || verb === '-h' || args.includes('--help') || args.includes('-h')) {
     output.result(companionHelp(name, command).trimEnd());

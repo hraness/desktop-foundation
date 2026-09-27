@@ -180,7 +180,10 @@ impl Style {
 /// Human file size for progress lines: `1.8 MB`, `640 KB`.
 pub fn format_bytes(bytes: u64) -> String {
     if bytes >= 999_500 {
-        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+        // Tenths rounded half up, as JavaScript's toFixed(1) does here:
+        // 1_250_000 is "1.3 MB".
+        let tenths = bytes.saturating_add(50_000) / 100_000;
+        format!("{}.{} MB", tenths / 10, tenths % 10)
     } else if bytes >= 1_000 {
         format!("{} KB", (bytes as f64 / 1_000.0).round() as u64)
     } else {
@@ -229,12 +232,11 @@ pub fn write_stdout(text: &str) -> bool {
     }
 }
 
-/// Make a closed pipe end the process quietly with exit 0 instead of a
+/// Make a closed stdout end the process quietly with exit 0 instead of a
 /// `failed printing to stdout: Broken pipe` panic from `println!`. Call once
-/// at the top of `main`. Safe for every command, including servers and
-/// commands that drive child processes: Rust keeps SIGPIPE ignored, so their
-/// own writes still see `BrokenPipe` as an error they handle; only a panic
-/// that names a broken pipe exits early.
+/// at the top of `main`. Only that panic exits: a broken socket or child pipe
+/// elsewhere still panics or errors as before, so a server thread that loses
+/// a client is never mistaken for a closed stdout.
 pub fn exit_quietly_on_broken_pipe() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -244,11 +246,18 @@ pub fn exit_quietly_on_broken_pipe() {
             .map(String::as_str)
             .or_else(|| payload.downcast_ref::<&str>().copied())
             .unwrap_or("");
-        if message.contains("Broken pipe") || message.contains("os error 32") {
+        if is_stdout_broken_pipe_panic(message) {
             std::process::exit(0);
         }
         default(info);
     }));
+}
+
+/// True for the panic `print!`/`println!` raise when stdout's reader went
+/// away.
+fn is_stdout_broken_pipe_panic(message: &str) -> bool {
+    message.starts_with("failed printing to stdout")
+        && (message.contains("Broken pipe") || message.contains("os error 32"))
 }
 
 /// Restore the default SIGPIPE action, so a closed pipe stops the process at
@@ -640,6 +649,18 @@ mod tests {
         assert_eq!(check_summary(3, 0, 1), "1 problem.");
         assert_eq!(check_summary(3, 1, 2), "2 problems, 1 warning.");
         assert_eq!(format_bytes(1_800_000), "1.8 MB");
+        assert_eq!(format_bytes(1_250_000), "1.3 MB");
+        assert_eq!(format_bytes(999_500), "1.0 MB");
+        assert_eq!(format_bytes(12_340_000), "12.3 MB");
+        assert!(is_stdout_broken_pipe_panic(
+            "failed printing to stdout: Broken pipe (os error 32)"
+        ));
+        assert!(!is_stdout_broken_pipe_panic(
+            "socket write: Broken pipe (os error 32)"
+        ));
+        assert!(!is_stdout_broken_pipe_panic(
+            "failed printing to stdout: disk full"
+        ));
         assert_eq!(format_bytes(640_000), "640 KB");
         assert_eq!(format_bytes(12), "12 bytes");
     }

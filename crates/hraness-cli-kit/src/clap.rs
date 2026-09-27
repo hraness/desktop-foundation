@@ -157,11 +157,17 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
 pub fn closest(input: &str, candidates: &[(String, String)]) -> Option<String> {
     let lower = input.to_lowercase();
     if lower.chars().count() >= 3 {
-        let mut prefixed = candidates
+        // A name and its alias lead to one suggestion, so both matching the
+        // prefix is still one answer.
+        let mut prefixed: Vec<&String> = candidates
             .iter()
-            .filter(|(word, _)| word.starts_with(&lower));
-        if let (Some((_, only)), None) = (prefixed.next(), prefixed.next()) {
-            return Some(only.clone());
+            .filter(|(word, _)| word.starts_with(&lower))
+            .map(|(_, suggestion)| suggestion)
+            .collect();
+        prefixed.sort();
+        prefixed.dedup();
+        if let [only] = prefixed.as_slice() {
+            return Some((*only).clone());
         }
     }
     let limit = (lower.chars().count() / 3).max(1);
@@ -416,6 +422,19 @@ mod tests {
                     .action(clap::ArgAction::SetTrue),
             )
             .arg(Arg::new("state").long("state").short('s').global(true))
+    }
+
+    #[test]
+    fn a_name_and_its_alias_are_one_suggestion() {
+        let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+            list.iter()
+                .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+                .collect()
+        };
+        let candidates = pairs(&[("status", "status"), ("vault", "vault"), ("stat", "status")]);
+        assert_eq!(closest("sta", &candidates).as_deref(), Some("status"));
+        let two = pairs(&[("status", "status"), ("start", "start")]);
+        assert_eq!(closest("sta", &two), None);
     }
 
     #[test]

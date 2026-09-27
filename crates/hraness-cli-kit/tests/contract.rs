@@ -395,6 +395,16 @@ fn responsible_app_names_the_terminal_then_the_product() {
         "Terminal",
         "the bundle ID alone cannot name the app"
     );
+    assert_eq!(
+        name(app, Some("")),
+        "Terminal",
+        "an empty product name is unset"
+    );
+    // An empty requester falls back to the kind's default, like TS.
+    let env = env_of(&[]);
+    let reference = ProductRef::new("Thing", "thing").with_requester("");
+    let keychain = PermissionNeed::new(reference, PermissionKind::Keychain, "x", "y.");
+    assert_eq!(requester_of(&keychain, &env), "security");
 }
 
 #[test]
@@ -669,6 +679,8 @@ fn probes_only_where_no_prompt_can_appear() {
         "/Volumes/USB/x",
         "/Users/test/Library/Mobile Documents/x",
         "/Users/test/Library/Group Containers/x",
+        "/Users/test/Library/containers/x",
+        "/Users/test/Library/cloudstorage/x",
         "/Users/test/Library/CloudStorage/x",
         "/Users/test/Library/../Documents/x",
         "/Users/test/Library",
@@ -710,6 +722,13 @@ fn probes_only_where_no_prompt_can_appear() {
         *tools.ran.borrow(),
         [vec!["/usr/bin/xcode-select".to_owned(), "-p".to_owned()]]
     );
+    // A probe that cannot run reads not-determined, like the TS kit's 127.
+    let mut failed = Fake::new();
+    failed.status = None;
+    assert_eq!(
+        permission_status(PermissionKind::DeveloperTools, None, &failed),
+        PermissionState::NotDetermined
+    );
     let mut login = Fake::new();
     login.files = vec![("app.hraness.companion.sponge.plist".into(), FileAccess::Ok)];
     assert_eq!(
@@ -723,6 +742,20 @@ fn probes_only_where_no_prompt_can_appear() {
     assert_eq!(
         permission_status(PermissionKind::LoginItem, Some("../evil"), &login),
         PermissionState::Unknown
+    );
+    // A probe that errors says nothing, like a throw in the TS kit.
+    let mut unreadable = Fake::new();
+    unreadable.files = vec![("app.hraness.sponge.plist".into(), FileAccess::Unreadable)];
+    assert_eq!(
+        permission_status(PermissionKind::LoginItem, Some("sponge"), &unreadable),
+        PermissionState::Unknown
+    );
+    // Without HOME the real home stands in, like `homedir()` in the TS kit.
+    let mut homeless = Fake::new();
+    homeless.env.retain(|(key, _)| key != "HOME");
+    assert_eq!(
+        permission_status(PermissionKind::LoginItem, Some("sponge"), &homeless),
+        PermissionState::NotDetermined
     );
 }
 

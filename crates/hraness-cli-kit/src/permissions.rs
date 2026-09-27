@@ -10,7 +10,7 @@
 use crate::audience::{self, Audience};
 use crate::json;
 use crate::style::{CliError, Style, Symbol};
-use std::io::{IsTerminal as _, Write as _};
+use std::io::{IsTerminal as _, Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -420,7 +420,8 @@ const TERMINALS: [(&str, &str, &str); 7] = [
 /// product's local app (its launcher sets `HRANESS_APP_BUNDLE_ID`) that is
 /// the product; otherwise the terminal app that started the command.
 pub fn responsible_app(env: Env, product: Option<&str>) -> String {
-    if let Some(product) = product {
+    // An empty product name is unset, as a falsy `product` is in TS.
+    if let Some(product) = product.filter(|name| !name.is_empty()) {
         if env("HRANESS_APP_BUNDLE_ID").is_some_and(|value| !value.is_empty()) {
             return product.to_owned();
         }
@@ -441,7 +442,7 @@ pub fn responsible_app(env: Env, product: Option<&str>) -> String {
 
 /// The requester for a need: explicit, else the kind's default.
 pub fn requester_of(need: &PermissionNeed, env: Env) -> String {
-    if let Some(requester) = &need.product.requester {
+    if let Some(requester) = need.product.requester.as_ref().filter(|r| !r.is_empty()) {
         return requester.clone();
     }
     match need.kind {
@@ -902,22 +903,41 @@ pub trait PermissionIo {
         }
     }
     /// Runs a command with no input or output and returns its exit status.
+    /// `None` when it does not start or does not finish in five seconds,
+    /// like the TypeScript kit's `runQuietly` (which reports both as 127).
     fn run_status(&self, argv: &[&str]) -> Option<i32> {
         let (program, args) = argv.split_first()?;
-        std::process::Command::new(program)
+        let mut child = std::process::Command::new(program)
             .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status()
-            .ok()?
-            .code()
+            .spawn()
+            .ok()?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return status.code(),
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                Err(_) => return None,
+            }
+        }
     }
 }
 
 /// The real process: environment, terminal checks, stderr, and `open` on
-/// macOS. Keys are read as a line from stdin (Enter, `s` then Enter, `o` then
-/// Enter), because a std-only crate cannot switch the terminal to raw mode.
+/// macOS. On Unix a key is one keypress with no Enter: `stty` switches the
+/// terminal to single-key mode for the read and restores it after, and a
+/// timeout stops the reading `dd`, so nothing is left reading stdin. Ctrl-C
+/// during the read restores the terminal and exits 130. Elsewhere a key is a
+/// line (Enter, `s` then Enter, `o` then Enter).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProcessIo;
 
@@ -940,22 +960,26 @@ impl PermissionIo for ProcessIo {
         if !std::io::stdin().is_terminal() {
             return Ok(Key::Timeout);
         }
-        let (send, receive) = std::sync::mpsc::channel();
-        // A reader thread left waiting after a timeout ends with the process.
-        std::thread::spawn(move || {
-            let mut line = String::new();
-            let read = std::io::stdin().read_line(&mut line);
-            let _ = send.send(read.map(|count| (count, line)));
-        });
-        match receive.recv_timeout(timeout) {
-            Ok(Ok((0, _))) => Ok(Key::Skip),
-            Ok(Ok((_, line))) => Ok(match line.trim().to_ascii_lowercase().as_str() {
-                "" => Key::Enter,
-                "o" => Key::Open,
-                _ => Key::Skip,
-            }),
-            Ok(Err(error)) => Err(error),
-            Err(_) => Ok(Key::Timeout),
+        // One read at a time, like the TS kit's `interactiveKeyBusy`: a
+        // second caller times out instead of racing for the same keypress.
+        static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Ok(Key::Timeout);
+        }
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let _guard = Guard;
+        #[cfg(unix)]
+        {
+            read_one_key(timeout)
+        }
+        #[cfg(not(unix))]
+        {
+            read_key_line(timeout)
         }
     }
     fn open_url(&mut self, url: &str) -> std::io::Result<bool> {
@@ -963,6 +987,129 @@ impl PermissionIo for ProcessIo {
             return Ok(false);
         }
         Ok(self.run_status(&["/usr/bin/open", url]) == Some(0))
+    }
+}
+
+/// One keypress from the terminal on stdin, or `Timeout`. `stty` switches
+/// the terminal to single-key mode for the read and restores it after.
+/// Without `stty` (or `dd`) a line read still works — it just needs Enter.
+#[cfg(unix)]
+fn read_one_key(timeout: Duration) -> std::io::Result<Key> {
+    use std::process::{Command, Stdio};
+    let stty = |args: &[&str]| {
+        Command::new("/bin/stty")
+            .args(args)
+            .stdin(Stdio::inherit())
+            .stderr(Stdio::null())
+            .output()
+    };
+    let saved = stty(&["-g"])
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
+    let Some(saved) = saved else {
+        return read_key_line(timeout);
+    };
+    // No line buffering, no echo, and Ctrl-C arrives as a byte, so the
+    // terminal is always put back before the process ends.
+    let raw = stty(&["-icanon", "-echo", "-isig", "min", "1", "time", "0"])
+        .map(|out| out.status.success())
+        .unwrap_or(false);
+    if !raw {
+        return read_key_line(timeout);
+    }
+    let deadline = std::time::Instant::now() + timeout;
+    // `dd` reads one byte at a time so nothing is left holding stdin after a
+    // timeout. Unrecognized bytes are ignored, like the TS kit's key loop.
+    let read = (|| -> std::io::Result<Option<u8>> {
+        while std::time::Instant::now() < deadline {
+            let mut child = match Command::new("/bin/dd")
+                .args(["bs=1", "count=1"])
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(_) => return Ok(None),
+            };
+            let byte = loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => {
+                        let mut buf = Vec::new();
+                        if let Some(mut out) = child.stdout.take() {
+                            out.read_to_end(&mut buf)?;
+                        }
+                        break buf.first().copied();
+                    }
+                    Ok(None) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    Ok(None) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            match byte {
+                // The bytes that answer the prompt: Enter, o, s, Escape and
+                // Ctrl-C. Anything else does not answer; keep waiting.
+                Some(byte @ (b'\n' | b'\r' | b'o' | b'O' | b's' | b'S' | 0x1b | 0x03)) => {
+                    return Ok(Some(byte))
+                }
+                Some(_) => {}
+                // dd closed without a byte: stdin is gone.
+                None => return Ok(None),
+            }
+        }
+        Ok(None)
+    })();
+    let _ = stty(&[&saved]);
+    match read? {
+        Some(0x03) => std::process::exit(130),
+        Some(b'\n' | b'\r') => Ok(Key::Enter),
+        Some(b'o' | b'O') => Ok(Key::Open),
+        Some(_) => Ok(Key::Skip),
+        None => Ok(Key::Timeout),
+    }
+}
+
+/// One line from stdin, or `Timeout`. A read still waiting after a timeout
+/// is kept and answers the next call, so it never swallows a later line.
+fn read_key_line(timeout: Duration) -> std::io::Result<Key> {
+    use std::sync::mpsc::Receiver;
+    use std::sync::Mutex;
+    type Pending = Receiver<std::io::Result<(usize, String)>>;
+    static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
+    let mut pending = PENDING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let receive = match pending.take() {
+        Some(receive) => receive,
+        None => {
+            let (send, receive) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut line = String::new();
+                let read = std::io::stdin().read_line(&mut line);
+                let _ = send.send(read.map(|count| (count, line)));
+            });
+            receive
+        }
+    };
+    match receive.recv_timeout(timeout) {
+        Ok(Ok((0, _))) => Ok(Key::Skip),
+        Ok(Ok((_, line))) => Ok(match line.trim().to_ascii_lowercase().as_str() {
+            "" => Key::Enter,
+            "o" => Key::Open,
+            _ => Key::Skip,
+        }),
+        Ok(Err(error)) => Err(error),
+        Err(_) => {
+            *pending = Some(receive);
+            Ok(Key::Timeout)
+        }
     }
 }
 
@@ -1092,16 +1239,18 @@ fn is_silent_probe_path(path: &Path, home: &Path) -> bool {
     };
     match rest.components().next() {
         None => false,
-        Some(Component::Normal(first)) => !matches!(
-            first.to_str(),
-            Some(
-                "Containers"
-                    | "Group Containers"
-                    | "Mobile Documents"
-                    | "CloudStorage"
-                    | "Daemon Containers"
-            )
-        ),
+        // APFS names are case-insensitive: `containers` is `Containers`.
+        Some(Component::Normal(first)) => !first.to_str().is_some_and(|first| {
+            [
+                "Containers",
+                "Group Containers",
+                "Mobile Documents",
+                "CloudStorage",
+                "Daemon Containers",
+            ]
+            .iter()
+            .any(|name| first.eq_ignore_ascii_case(name))
+        }),
         Some(_) => false,
     }
 }
@@ -1122,6 +1271,15 @@ fn normalize(path: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
+/// The real home directory when `HOME` is missing or relative, like the
+/// TypeScript kit's `homedir()` fallback. `std::env::home_dir` is deprecated
+/// only between Rust 1.29 and 1.86; this crate's MSRV is older, so the allow
+/// stays until the MSRV passes 1.86.
+fn real_home() -> Option<PathBuf> {
+    #[allow(deprecated)]
+    std::env::home_dir().filter(|home| home.is_absolute())
+}
+
 /// Read-only probe that never causes a prompt; `Unknown` when no probe is
 /// safe. `FullDiskAccess` takes a target (`Messages`, `Safari` or an absolute
 /// path outside app containers), `LoginItem` takes the product's app ID, and
@@ -1135,7 +1293,8 @@ pub fn permission_status(
     let home = io
         .env("HOME")
         .map(PathBuf::from)
-        .filter(|home| home.is_absolute());
+        .filter(|home| home.is_absolute())
+        .or_else(real_home);
     match kind {
         PermissionKind::FullDiskAccess => {
             let (Some(home), Some(target)) = (home, target) else {
@@ -1161,8 +1320,9 @@ pub fn permission_status(
         }
         PermissionKind::DeveloperTools => match io.run_status(&["/usr/bin/xcode-select", "-p"]) {
             Some(0) => PermissionState::Granted,
-            Some(_) => PermissionState::NotDetermined,
-            None => PermissionState::Unknown,
+            // A run that could not happen reads as not-determined, like the
+            // TS kit's 127.
+            _ => PermissionState::NotDetermined,
         },
         PermissionKind::LoginItem => {
             let (Some(home), Some(id)) = (home, target) else {
@@ -1184,8 +1344,12 @@ pub fn permission_status(
                 let plist = home
                     .join("Library/LaunchAgents")
                     .join(format!("{label}.plist"));
-                if io.file_access(&plist) == FileAccess::Ok {
-                    return PermissionState::Granted;
+                match io.file_access(&plist) {
+                    FileAccess::Ok => return PermissionState::Granted,
+                    // A probe that errors says nothing, like a throw in the
+                    // TS kit's `probeFile`.
+                    FileAccess::Unreadable => return PermissionState::Unknown,
+                    _ => {}
                 }
             }
             PermissionState::NotDetermined

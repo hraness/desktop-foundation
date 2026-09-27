@@ -374,7 +374,8 @@ export async function reportPermissionFailure(need: PermissionNeed, state: Recov
 function isSilentProbePath(path: string, home: string): boolean {
   const library = join(home, 'Library') + '/';
   if (!path.startsWith(library)) return false;
-  return !/^(Containers|Group Containers|Mobile Documents|CloudStorage|Daemon Containers)(\/|$)/.test(path.slice(library.length));
+  // APFS names are case-insensitive: `containers` is `Containers`.
+  return !/^(Containers|Group Containers|Mobile Documents|CloudStorage|Daemon Containers)(\/|$)/i.test(path.slice(library.length));
 }
 
 const HOME_TARGETS: Readonly<Record<string, readonly string[]>> = {

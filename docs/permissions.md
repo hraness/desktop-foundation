@@ -585,6 +585,7 @@ pub mod clap {   // feature "clap"
     pub struct UsageOptions { pub cli: Option<String>, pub aliases: Vec<(String, String)>, pub audience: Option<Audience> }
     pub fn usage_error(error: &clap::Error, root: &clap::Command, args: &[String], options: &UsageOptions) -> Option<CliError>;
     pub fn exit_on_parse_error(error: clap::Error, root: &clap::Command, args: &[String], options: &UsageOptions) -> i32;
+    pub fn cap_help_width(command: clap::Command, width: usize) -> clap::Command;   // every level
     pub fn help_lines_over(command: &clap::Command, width: usize) -> Vec<(String, String)>;
     pub fn closest(input: &str, candidates: &[(String, String)]) -> Option<String>;
 }
@@ -606,3 +607,8 @@ visible subcommands and aliases (one edit per three letters, or a unique
 prefix); `UsageOptions::alias("status", "proxy status")` suggests a command
 that lives in a group. Help and version requests, and a group run without its
 subcommand, print to stdout and exit 0.
+
+Keep help within 100 columns: enable clap's `wrap_help` feature, parse with
+`cap_help_width(Cli::command(), 100)` (clap's own `max_term_width` covers one
+command, not its subcommands), and test with `help_lines_over` plus a run
+under `COLUMNS=200`.

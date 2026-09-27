@@ -66,26 +66,56 @@ pub fn wants_json(args: &[String]) -> bool {
 }
 
 /// The subcommand path the arguments name, as far as they name known
-/// subcommands: `["proxy", "serve"]`.
+/// subcommands: `["proxy", "serve"]`. An option's value (`--state <dir>`)
+/// is skipped, not read as a subcommand.
 pub fn command_path(root: &clap::Command, args: &[String]) -> Vec<String> {
     let mut path = Vec::new();
-    let mut current = root;
-    for arg in args.iter().skip(1) {
+    // The commands entered so far: an option may belong to any of them
+    // (global options live on the root).
+    let mut stack = vec![root];
+    let mut words = args.iter().skip(1);
+    while let Some(arg) = words.next() {
         if arg == "--" {
             break;
         }
-        if arg.starts_with('-') {
+        if let Some(flag) = arg.strip_prefix('-') {
+            if !arg.contains('=') && option_takes_value(&stack, flag) {
+                words.next();
+            }
             continue;
         }
+        let current = stack[stack.len() - 1];
         match current.find_subcommand(arg) {
             Some(sub) => {
                 path.push(sub.get_name().to_owned());
-                current = sub;
+                stack.push(sub);
             }
             None => break,
         }
     }
     path
+}
+
+/// True when `flag` (`-state` for `--state`, `s` for `-s`) names an option
+/// that takes its value from the next word.
+fn option_takes_value(stack: &[&clap::Command], flag: &str) -> bool {
+    let matches = |arg: &clap::Arg| match flag.strip_prefix('-') {
+        Some(long) => {
+            arg.get_long() == Some(long)
+                || arg
+                    .get_all_aliases()
+                    .is_some_and(|aliases| aliases.contains(&long))
+        }
+        // `-s` alone; `-svalue` carries its value.
+        None => {
+            flag.chars().count() == 1 && arg.get_short().map(String::from).as_deref() == Some(flag)
+        }
+    };
+    stack.iter().rev().any(|command| {
+        command
+            .get_arguments()
+            .any(|arg| matches(arg) && arg.get_action().takes_values())
+    })
 }
 
 fn find_path<'a>(root: &'a clap::Command, path: &[String]) -> &'a clap::Command {
@@ -262,14 +292,29 @@ pub fn usage_error(
                 .map(|arg| arg_name(&arg))
                 .unwrap_or_default();
             let valid = all(error.get(ContextKind::ValidValue));
-            let message = if value.is_empty() {
+            let mut message = if value.is_empty() {
                 format!("{arg} needs a value.")
             } else {
                 format!("\"{value}\" isn't a valid value for {arg}.")
             };
-            let detail =
-                (!valid.is_empty()).then(|| format!("Choose one of: {}.", valid.join(", ")));
-            (message, detail)
+            // One line: the contract allows the sentence and the next step only.
+            if !valid.is_empty() {
+                message.push_str(&format!(" Choose one of: {}.", valid.join(", ")));
+            }
+            (message, None)
+        }
+        ErrorKind::ValueValidation => {
+            let value = first(error.get(ContextKind::InvalidValue)).unwrap_or_default();
+            let arg = first(error.get(ContextKind::InvalidArg))
+                .map(|arg| arg_name(&arg))
+                .unwrap_or_default();
+            let why = std::error::Error::source(error)
+                .map(|source| format!(": {}", source.to_string().trim_end_matches('.')))
+                .unwrap_or_default();
+            (
+                format!("\"{value}\" isn't a valid value for {arg}{why}."),
+                None,
+            )
         }
         ErrorKind::InvalidUtf8 => ("Arguments must be valid UTF-8.".to_owned(), None),
         _ => (clap_sentence(error), None),
@@ -298,12 +343,28 @@ pub fn exit_on_parse_error(
     usage.report(wants_json(args), audience)
 }
 
+/// Cap help at `width` columns for `command` and every subcommand. clap
+/// applies `max_term_width` to one command only, so a root setting leaves
+/// subcommand help as wide as the terminal. Wrapping needs clap's
+/// `wrap_help` feature in the product.
+pub fn cap_help_width(command: clap::Command, width: usize) -> clap::Command {
+    command
+        .max_term_width(width)
+        .mut_subcommands(move |sub| cap_help_width(sub, width))
+}
+
 /// Help lines wider than `width` columns in `command` and every visible
-/// subcommand, as `(command path, line)`, for a test that keeps help
-/// readable in a narrow terminal.
+/// subcommand, as `(command path, line)`, when clap wraps help at `width`:
+/// the lines wrapping can't fix (usage lines, `override_help` text, or every
+/// long line when the product lacks clap's `wrap_help` feature). Pair it with
+/// [`cap_help_width`] and a golden run under `COLUMNS=200` for the cap.
 pub fn help_lines_over(command: &clap::Command, width: usize) -> Vec<(String, String)> {
     fn walk(command: &clap::Command, path: String, width: usize, out: &mut Vec<(String, String)>) {
-        let help = command.clone().render_long_help().to_string();
+        let help = command
+            .clone()
+            .term_width(width)
+            .render_long_help()
+            .to_string();
         for line in help.lines() {
             if line.chars().count() > width {
                 out.push((path.clone(), line.to_owned()));
@@ -354,6 +415,41 @@ mod tests {
                     .global(true)
                     .action(clap::ArgAction::SetTrue),
             )
+            .arg(Arg::new("state").long("state").short('s').global(true))
+    }
+
+    #[test]
+    fn option_values_are_not_read_as_commands() {
+        let path = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+            command_path(&cli(), &args)
+        };
+        assert_eq!(
+            path(&["demo", "--state", "proxy", "proxy", "serve"]),
+            ["proxy", "serve"]
+        );
+        assert_eq!(path(&["demo", "-s", "status", "proxy"]), ["proxy"]);
+        assert_eq!(
+            path(&["demo", "--state=x", "proxy", "--port", "80", "x"]),
+            ["proxy"]
+        );
+        assert_eq!(
+            path(&["demo", "--json", "proxy", "status"]),
+            ["proxy", "status"]
+        );
+        assert_eq!(
+            path(&["demo", "proxy", "--state", "serve", "status"]),
+            ["proxy", "status"]
+        );
+        let error = fail(
+            &["demo", "--state", "/tmp/x", "proxy", "stat"],
+            &UsageOptions::default(),
+        );
+        assert_eq!(
+            error.message,
+            "Unknown command \"stat\". Did you mean \"status\"?"
+        );
+        assert_eq!(error.next.as_deref(), Some("demo proxy --help"));
     }
 
     fn fail(args: &[&str], options: &UsageOptions) -> CliError {
@@ -437,8 +533,27 @@ mod tests {
             &["demo", "proxy", "serve", "--port", "9"],
             &UsageOptions::default(),
         );
-        assert_eq!(value.message, "\"9\" isn't a valid value for --port.");
-        assert_eq!(value.detail.as_deref(), Some("Choose one of: 80, 8260."));
+        assert_eq!(
+            value.message,
+            "\"9\" isn't a valid value for --port. Choose one of: 80, 8260."
+        );
+        assert_eq!(value.detail, None);
+        let ranged = Command::new("demo").arg(
+            Arg::new("percent")
+                .long("percent")
+                .value_parser(clap::value_parser!(u8).range(0..=60)),
+        );
+        let args: Vec<String> = ["demo", "--percent", "61"]
+            .iter()
+            .map(|arg| (*arg).to_owned())
+            .collect();
+        let error = ranged.clone().try_get_matches_from(&args).unwrap_err();
+        assert_eq!(
+            usage_error(&error, &ranged, &args, &UsageOptions::default())
+                .unwrap()
+                .message,
+            "\"61\" isn't a valid value for --percent: 61 is not in 0..=60."
+        );
         let extra = fail(&["demo", "status", "extra"], &UsageOptions::default());
         assert_eq!(extra.message, "Unexpected argument \"extra\".");
     }
@@ -482,5 +597,8 @@ mod tests {
         assert_eq!(over.len(), 2, "{over:?}");
         assert!(over.iter().any(|(path, _)| path == "wide sub"));
         assert!(help_lines_over(&cli(), 100).is_empty());
+        // The cap keeps the tree intact.
+        let capped = cap_help_width(wide, 100);
+        assert!(capped.find_subcommand("sub").is_some());
     }
 }

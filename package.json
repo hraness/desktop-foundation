@@ -1,6 +1,6 @@
 {
   "name": "@hraness/desktop-foundation",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Menu bar and tray companions that CLI tools launch themselves on macOS, Windows, and Linux, with no app bundle or installer.",
   "type": "module",
   "license": "MIT",

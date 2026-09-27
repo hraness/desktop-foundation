@@ -3,10 +3,10 @@
 Status: the TypeScript kit ships in desktop-foundation 0.8.0 as
 `@hraness/desktop-foundation/permissions` (`sdk/src/permissions.ts`, with
 `sdk/src/audience.ts` and `sdk/src/cli-style.ts`). It doesn't need the native
-runner, so any CLI can use it. The Rust mirror, a small `hraness-cli-kit`
-crate with the API [below](#rust-api-hraness-cli-kit), is designed but not in
-0.8.0; until it ships, Rust products copy the templates inline and mark them
-`TODO(df-cli-kit)`.
+runner, so any CLI can use it. The Rust mirror is the std-only
+`hraness-cli-kit` crate in `crates/hraness-cli-kit`, from 0.8.1, with the API
+[below](#rust-api-hraness-cli-kit). Its copy is byte for byte the same as the
+TypeScript kit's.
 
 The kit never triggers a macOS prompt by itself. It says what macOS is about
 to ask and why, probes state only where a probe cannot cause a prompt,
@@ -162,7 +162,8 @@ keychain.`
 
 `sdk/test/golden/permissions/*.txt` holds the rendered copy for every preset,
 surface and state, for a product as its own requester and before its local
-app exists. The planned Rust `hraness-cli-kit` tests will read the same files. Regenerate
+app exists. The Rust `hraness-cli-kit` tests read the same files, and also check
+this page's kind table, preset copy and JSON sample. Regenerate
 them with `UPDATE_GOLDEN=1 npm run check:sdk` and review the diff.
 
 ### Requester defaults
@@ -467,13 +468,27 @@ With `--json` or an agent audience, a permission failure is:
 
 ## Rust API (`hraness-cli-kit`)
 
-Planned, not in 0.8.0.
+From 0.8.1. The crate uses only `std`; the optional `clap` feature adds the
+usage-error hook for clap 4 CLIs. Pin it by tag like the rest of this
+repository:
+
+```toml
+hraness-cli-kit = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.8.1", features = ["clap"] }
+```
+
+`desktop_foundation::cli_kit`, `::audience` and `::permissions` re-export it
+for products that already depend on the menu bar crate. Every function that
+resolves a default requester takes `env: &dyn Fn(&str) -> Option<String>`
+(`audience::process_env` for the real environment), so tests never touch the
+process.
 
 ```rust
 pub mod audience {
     pub enum Audience { Human, Agent, Quiet }
+    pub const AGENT_MARKERS: [&str; 6];
     pub fn detect(env: &dyn Fn(&str) -> Option<String>, stderr_is_tty: bool) -> Audience;
     pub fn detect_current() -> Audience;
+    pub fn process_env(name: &str) -> Option<String>;
 }
 
 pub mod permissions {
@@ -486,45 +501,64 @@ pub mod permissions {
     pub enum RecoveryState { Denied, Unknown, Missing }
     pub enum PrePromptOutcome { Continue, Skip, UnattendedProceed, UnattendedStop }
     pub enum Surface { Cli, Menu, Dialog }
-
-    pub struct ProductRef<'a> { pub product: &'a str, pub command: &'a str, pub requester: Option<&'a str> }
-    pub struct PermissionNeed<'a> {
-        pub product: ProductRef<'a>, pub kind: PermissionKind, pub target: Option<&'a str>,
-        pub ask: &'a str, pub why: &'a str, pub next: Option<&'a str>, pub when_unattended: Option<Unattended>,
-    }
     pub enum Unattended { Proceed, Stop }
-    pub struct RenderedNotice { pub title: String, pub lines: Vec<String>, pub confirm: Option<String> }
+    pub enum NoticeKind { PrePrompt, Recovery }
+
+    pub struct ProductRef { pub product: String, pub command: String, pub requester: Option<String> }
+    pub struct PermissionNeed {
+        pub product: ProductRef, pub kind: PermissionKind, pub target: Option<String>,
+        pub ask: String, pub why: String, pub next: Option<String>, pub when_unattended: Option<Unattended>,
+    }
+    pub struct RenderedNotice { pub title: String, pub lines: Vec<String>, pub confirm: Option<String>, pub next: Option<String> }
+    pub struct NoticeRequest { pub title: String, pub message: String, pub primary: String,
+        pub secondary: Option<String>, pub settings: Option<PermissionKind> }   // .to_json()
+    pub enum PermissionMenuRow { Status { label, detail }, OpenSettings { id, label } }  // .to_json()
 
     pub trait PermissionIo {
         fn env(&self, key: &str) -> Option<String>;
         fn stdin_is_tty(&self) -> bool;
         fn stderr_is_tty(&self) -> bool;
-        fn write(&mut self, text: &str) -> std::io::Result<()>;
-        fn read_key(&mut self, timeout: std::time::Duration) -> std::io::Result<Key>;
+        fn write(&mut self, text: &str) -> std::io::Result<()>;            // stderr
+        fn read_key(&mut self, timeout: Duration) -> std::io::Result<Key>;
         fn open_url(&mut self, url: &str) -> std::io::Result<bool>;
+        fn file_access(&self, path: &Path) -> FileAccess { … }             // default: open for reading
+        fn run_status(&self, argv: &[&str]) -> Option<i32> { … }           // default: std::process
     }
     pub enum Key { Enter, Skip, Open, Timeout }
+    pub struct ProcessIo;   // the real process; reads a line for Enter, s or o
 
     impl PermissionKind {
+        pub const ALL: [PermissionKind; 14];
         pub fn as_str(self) -> &'static str;          // "full-disk-access"
+        pub fn parse(name: &str) -> Option<Self>;
         pub fn behavior(self) -> PromptBehavior;
         pub fn pane_name(self) -> Option<&'static str>;
         pub fn settings_path(self) -> Option<&'static str>;
         pub fn settings_url(self) -> Option<&'static str>;
+        pub fn has_settings_pane(self) -> bool;
     }
-    pub fn responsible_app(env: &dyn Fn(&str) -> Option<String>) -> String;
-    pub fn render_pre_prompt(need: &PermissionNeed, surface: Surface) -> RenderedNotice;
-    pub fn render_recovery(need: &PermissionNeed, state: RecoveryState, surface: Surface) -> RenderedNotice;
-    pub fn pre_prompt(need: &PermissionNeed, audience: Audience, io: &mut dyn PermissionIo) -> std::io::Result<PrePromptOutcome>;
-    pub fn permission_status(kind: PermissionKind, target: Option<&std::path::Path>) -> PermissionState;
-    pub fn open_settings(kind: PermissionKind, io: &mut dyn PermissionIo) -> std::io::Result<bool>;
+    pub fn is_allowed_settings_url(url: &str) -> bool;
+    pub fn responsible_app(env: Env, product: Option<&str>) -> String;
+    pub fn requester_of(need: &PermissionNeed, env: Env) -> String;
+    pub fn render_pre_prompt(need: &PermissionNeed, surface: Surface, env: Env) -> RenderedNotice;
+    pub fn render_recovery(need: &PermissionNeed, state: RecoveryState, surface: Surface, env: Env) -> RenderedNotice;
+    pub fn format_notice(notice: &RenderedNotice, kind: NoticeKind, interactive: bool, style: Style) -> String;
+    pub fn notice_request(need: &PermissionNeed, env: Env) -> Option<NoticeRequest>;
+    pub fn pre_prompt(need: &PermissionNeed, audience: Option<Audience>, io: &mut dyn PermissionIo) -> std::io::Result<PrePromptOutcome>;
+    pub fn report_permission_failure(need: &PermissionNeed, state: RecoveryState, audience: Option<Audience>, io: &mut dyn PermissionIo) -> std::io::Result<()>;
+    pub fn permission_status(kind: PermissionKind, target: Option<&str>, io: &dyn PermissionIo) -> PermissionState;
+    pub fn open_settings(kind: PermissionKind, io: &mut dyn PermissionIo) -> bool;
+    pub fn permission_menu_items(need: &PermissionNeed, state: PermissionState, env: Env) -> Vec<PermissionMenuRow>;
+    pub fn permission_error_json(need: &PermissionNeed, state: RecoveryState, env: Env) -> String;
+    pub fn permission_cli_error(need: &PermissionNeed, state: RecoveryState, env: Env) -> CliError;
+    pub fn classify_keychain_status(status: i32) -> Option<RecoveryState>;
 
     pub mod presets {
         pub fn login_item(r: ProductRef) -> PermissionNeed;
-        pub fn chrome_safe_storage(r: ProductRef, browser: &str, caller: &str) -> PermissionNeed;
-        pub fn messages_fda(r: ProductRef) -> PermissionNeed;
+        pub fn chrome_safe_storage(r: ProductRef, browser: Option<&str>, caller: &str, why: Option<&str>) -> PermissionNeed;
+        pub fn messages_fda(r: ProductRef, why: Option<&str>) -> PermissionNeed;
         pub fn automation(r: ProductRef, app: &str, why: &str) -> PermissionNeed;
-        pub fn contacts(r: ProductRef) -> PermissionNeed;
+        pub fn contacts(r: ProductRef, why: Option<&str>) -> PermissionNeed;
         pub fn local_network(r: ProductRef, why: &str) -> PermissionNeed;
         pub fn incoming_connections(r: ProductRef, listener: &str, why: &str) -> PermissionNeed;
         pub fn xcode_tools(r: ProductRef, skip_effect: &str) -> PermissionNeed;
@@ -532,7 +566,49 @@ pub mod permissions {
         pub fn local_signing(r: ProductRef) -> PermissionNeed;
     }
 }
+
+pub mod style {
+    pub enum Symbol { Ok, Fail, Warn, Next, On, Off, Skip, Progress, Notice }  // .glyph(), .ascii()
+    pub struct Style { pub color: bool, pub ascii: bool }   // detect(env, is_tty), stdout(), stderr(), symbol(), line()
+    pub struct CliError { pub code, pub message, pub detail, pub next, pub permission, pub exit_code }
+        // render_human(style), render_json(), report(json, audience) -> exit code
+    pub struct Output;       // result, detail, warn, next ("Next:" for people only), error
+    pub fn sentence(text: &str, keep: &[&str]) -> String;
+    pub fn check_summary(passed: usize, warnings: usize, failures: usize) -> String;
+    pub fn format_bytes(bytes: u64) -> String;
+    pub fn write_stdout(text: &str) -> bool;         // ignores a closed pipe
+    pub fn exit_quietly_on_broken_pipe();            // `| head -1` exits 0, not a panic
+    pub fn restore_default_sigpipe();                // read-only listings only
+}
+
+pub mod clap {   // feature "clap"
+    pub struct UsageOptions { pub cli: Option<String>, pub aliases: Vec<(String, String)>, pub audience: Option<Audience> }
+    pub fn usage_error(error: &clap::Error, root: &clap::Command, args: &[String], options: &UsageOptions) -> Option<CliError>;
+    pub fn exit_on_parse_error(error: clap::Error, root: &clap::Command, args: &[String], options: &UsageOptions) -> i32;
+    pub fn cap_help_width(command: clap::Command, width: usize) -> clap::Command;   // every level
+    pub fn help_lines_over(command: &clap::Command, width: usize) -> Vec<(String, String)>;
+    pub fn closest(input: &str, candidates: &[(String, String)]) -> Option<String>;
+}
 ```
 
 Rendered strings are byte-identical between TypeScript and Rust. Both suites
 check the same golden files for every preset, surface and state.
+
+The clap hook turns clap's multi-line usage errors into the contract's form:
+
+```text
+✗ Unknown command "stauts". Did you mean "status"?
+→ textbutler --help
+```
+
+with exit 2, or `{"ok":false,"error":{"code":"usage","message":…,"next":…}}`
+on stdout for `--json` and agents. Suggestions come from the command's
+visible subcommands and aliases (one edit per three letters, or a unique
+prefix); `UsageOptions::alias("status", "proxy status")` suggests a command
+that lives in a group. Help and version requests, and a group run without its
+subcommand, print to stdout and exit 0.
+
+Keep help within 100 columns: enable clap's `wrap_help` feature, parse with
+`cap_help_width(Cli::command(), 100)` (clap's own `max_term_width` covers one
+command, not its subcommands), and test with `help_lines_over` plus a run
+under `COLUMNS=200`.

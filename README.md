@@ -28,7 +28,7 @@ checked local cache. Users need no Cargo, Swift or Xcode. A source checkout
 has no release manifest until all six binary artifacts have been assembled.
 
 ```sh
-npm install https://github.com/hraness/desktop-foundation/releases/download/v0.8.0/hraness-desktop-foundation-0.8.0.tgz
+npm install https://github.com/hraness/desktop-foundation/releases/download/v0.8.1/hraness-desktop-foundation-0.8.1.tgz
 ```
 
 The package is published only as GitHub Release assets, not on npm. Check the
@@ -150,6 +150,23 @@ a terminal on stderr). `createCliOutput()` prints results, `✗` errors with one
 `→` next step, `Next:` hints and a progress line with the shared symbols, and
 respects `NO_COLOR`, `TERM=dumb` and pipes.
 
+Rust CLIs use the std-only `hraness-cli-kit` crate for the same audience
+rule, permission copy and output style. Its optional `clap` feature turns
+clap's usage errors into one line with a suggestion and the help to read,
+exit 2, or a JSON error on stdout for `--json` and agents:
+
+```rust
+use hraness_cli_kit::permissions::{self, presets, ProductRef, ProcessIo};
+
+let need = presets::messages_fda(ProductRef::new("Textbutler", "textbutler"), None);
+permissions::pre_prompt(&need, None, &mut ProcessIo)?;
+```
+
+```text
+✗ Unknown command "stauts". Did you mean "status"?
+→ textbutler --help
+```
+
 ### Menu kit v2: layout and lint
 
 `@hraness/desktop-foundation/menu-kit` builds menus in the shared layout and
@@ -227,7 +244,7 @@ Pin by immutable tag:
 
 ```toml
 [dependencies]
-desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.8.0" }
+desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.8.1" }
 ```
 
 Implement `Host`, then run the event loop with the product's own

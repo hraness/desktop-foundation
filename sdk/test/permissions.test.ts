@@ -265,7 +265,7 @@ test('permissionStatus probes only where no prompt can appear', async () => {
   assert.equal(await permissionStatus('full-disk-access', 'Safari', io), 'granted');
   assert.equal(await permissionStatus('full-disk-access', '/Users/test/Library/Containers/com.apple.Safari/Data/x', io), 'unknown');
   assert.equal(await permissionStatus('full-disk-access', 'relative/path', io), 'unknown');
-  for (const path of ['/Users/test/Documents/a', '/Users/test/Desktop', '/Volumes/USB/x', '/Users/test/Library/Mobile Documents/x', '/Users/test/Library/Group Containers/x', '/Users/test/Library/CloudStorage/x']) {
+  for (const path of ['/Users/test/Documents/a', '/Users/test/Desktop', '/Volumes/USB/x', '/Users/test/Library/Mobile Documents/x', '/Users/test/Library/Group Containers/x', '/Users/test/Library/CloudStorage/x', '/Users/test/Library/containers/x', '/Users/test/Library/cloudstorage/x']) {
     assert.equal(await permissionStatus('full-disk-access', path, io), 'unknown', path);
   }
   assert.equal(await permissionStatus('full-disk-access', '/Users/test/Library/Mail', io), 'granted');

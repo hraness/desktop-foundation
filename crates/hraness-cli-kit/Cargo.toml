@@ -1,0 +1,20 @@
+[package]
+name = "hraness-cli-kit"
+version = "0.8.1"
+description = "Shared words and rules for Hraness command-line tools: who is reading, macOS permission notices, and output style"
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+publish = false
+
+# std only by default. The optional `clap` feature adds the usage-error hook
+# for CLIs built on clap 4; it pulls in nothing else.
+[features]
+default = []
+clap = ["dep:clap"]
+
+[dependencies]
+clap = { version = "4.5", optional = true, default-features = false, features = ["std", "error-context", "suggestions", "help", "usage"] }
+
+[dev-dependencies]
+clap = { version = "4.5", default-features = false, features = ["std", "error-context", "suggestions", "help", "usage"] }

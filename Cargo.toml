@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "crates/hraness-cli-kit"]
+
 [package]
 name = "desktop-foundation"
 version = "0.8.0"
@@ -9,6 +12,7 @@ publish = false
 
 [dependencies]
 fs2 = "0.4.3"
+hraness-cli-kit = { version = "0.8.1", path = "crates/hraness-cli-kit" }
 libc = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
 serde = { version = "1.0", features = ["derive"] }

@@ -54,6 +54,28 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check:sdk
+  cli-kit:
+    # std only: no GTK or WebKit, so one Linux job covers it. The tests read
+    # the SDK golden files and docs/permissions.md, so a docs change runs it.
+    name: CLI kit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: cli-kit
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo fmt -p hraness-cli-kit --check
+      - run: cargo clippy -p hraness-cli-kit --locked --all-features --all-targets -- -D warnings
+      - run: cargo test -p hraness-cli-kit --locked --all-features
+      # The default build has no clap; make sure it stands alone.
+      - run: cargo test -p hraness-cli-kit --locked --lib
   native:
     name: Native (${{ matrix.target }})
     needs: changes
@@ -217,7 +239,7 @@ jobs:
   required:
     name: Required
     if: always()
-    needs: [changes, sdk, native, package]
+    needs: [changes, sdk, cli-kit, native, package]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -226,11 +248,13 @@ jobs:
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           SDK_RESULT: ${{ needs.sdk.result }}
+          CLI_KIT_RESULT: ${{ needs.cli-kit.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
         run: |
           test "$CHANGES_RESULT" = success
           test "$SDK_RESULT" = success
+          test "$CLI_KIT_RESULT" = success
           if [ "$DOCS_ONLY" = true ]; then
             # A docs-only pull request deliberately skips the native matrix.
             test "$NATIVE_RESULT" = skipped && test "$PACKAGE_RESULT" = skipped

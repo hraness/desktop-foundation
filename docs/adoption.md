@@ -189,7 +189,9 @@ may need small edits: `MenuNode` has new `Header` and `Status` variants and
 4. Use the shared words. `@hraness/desktop-foundation/permissions` has the
    macOS notices and recovery copy, `/audience` decides whether a person or
    an agent is reading, and `/cli-style` prints `✓ ✗ ⚠ →` lines that respect
-   `NO_COLOR` and pipes. The Rust mirror of these is not in 0.8.0.
+   `NO_COLOR` and pipes. Rust CLIs get the same words from the std-only
+   `hraness-cli-kit` crate (0.8.1 and later), including a clap hook for
+   one-line usage errors. See [permissions](permissions.md#rust-api-hraness-cli-kit).
 5. Rust products get `MenuNode::header`, `MenuNode::status`, symbols,
    subtitles, badges and alternates on `MenuItem`, a `StatusMark` with a tone
    and count, `service` for login items and a single instance, and

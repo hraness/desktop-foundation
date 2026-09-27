@@ -3,6 +3,7 @@
 - `src/lib.rs` contains the product-neutral foundation core: `MenuNode`/`MenuModel` data model (including per-item preview icons), `Host` trait, accessory activation, status-item lifecycle, menu construction, and the refresh loop. It is built on Tauri's maintained tray and activation APIs.
 - `src/outputs.rs` contains the reusable outputs-directory section: bounded newest-first listing, image thumbnails, and open/reveal dispatch for agent-dropped files.
 - `src/service.rs` owns login startup and liveness for Rust menu bars; `src/identity.rs` builds and signs the local macOS app and runs `--launch`; `src/notice.rs` is the one-shot notice dialog.
+- `crates/hraness-cli-kit` is the std-only Rust twin of the SDK's `audience`, `permissions` and `cli-style` modules (plus an optional clap usage-error hook). Its tests read `sdk/test/golden/permissions` and `docs/permissions.md`, so copy changes land in the doc, the TypeScript kit and the crate together.
 - `src/browser.rs` provides human-initiated, asynchronous HTTPS handoffs for existing Rust adapters; `sdk/src/browser.ts` owns the matching SDK launcher. Keep product URLs and support policy in the consumer.
 
 # Guidelines

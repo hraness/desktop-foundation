@@ -19,6 +19,11 @@ pub mod service;
 pub mod protocol;
 pub mod protocol_v2;
 pub mod symbols;
+/// The std-only CLI kit from `crates/hraness-cli-kit`: who is reading,
+/// macOS permission notices and recovery, and CLI output style. CLIs that
+/// don't need the menu bar depend on `hraness-cli-kit` directly.
+pub use hraness_cli_kit as cli_kit;
+pub use hraness_cli_kit::{audience, permissions};
 mod menu_plan;
 #[cfg(target_os = "macos")]
 mod macos_menu;

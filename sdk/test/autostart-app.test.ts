@@ -5,8 +5,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
-import { autostartState, planAutostart, removeAutostart, setAutostart, type AutostartOptions } from '../src/autostart.js';
-import { describeCompanionError } from '../src/commands.js';
+import { MAX_LAUNCH_BYTES, autostartState, planAutostart, removeAutostart, setAutostart, type AutostartOptions } from '../src/autostart.js';
+import { describeCompanionError, menuLoginItem } from '../src/commands.js';
 import { CompanionError } from '../src/errors.js';
 
 const scratch: string[] = [];
@@ -66,6 +66,36 @@ describe('login items that start the product app', () => {
     assert.throws(() => planAutostart(appOptions('/Users/u', { app: { name: 'Textbutler', argvFile: 'launch.json' } })), { code: 'unsafe_path' });
     assert.throws(() => planAutostart(appOptions('/Users/u', { args: Array.from({ length: 64 }, () => 'a') })), { code: 'unsafe_path' });
     assert.doesNotThrow(() => planAutostart(appOptions('/Users/u', { args: Array.from({ length: 63 }, () => 'a') })));
+  });
+
+  test('refuse a command larger than the app reads at login', () => {
+    // 10 arguments of 8 KB fit the old per-argument limit but not the
+    // 64 KiB argv file `--launch` reads (src/identity.rs MAX_ARGV_FILE_BYTES).
+    assert.throws(() => planAutostart(appOptions('/Users/u', { args: Array.from({ length: 10 }, () => 'a'.repeat(8000)) })), { code: 'unsafe_path' });
+    const fits = planAutostart(appOptions('/Users/u', { args: Array.from({ length: 7 }, () => 'a'.repeat(8000)) }));
+    assert.ok(Buffer.byteLength(fits.launch!.contents) <= MAX_LAUNCH_BYTES);
+    // Multibyte text counts in bytes, as the Rust reader does.
+    assert.throws(() => planAutostart(appOptions('/Users/u', { args: Array.from({ length: 8 }, () => 'é'.repeat(4500)) })), { code: 'unsafe_path' });
+    // Without the app the per-argument limits still apply.
+    assert.doesNotThrow(() => planAutostart({ ...appOptions('/Users/u', { args: Array.from({ length: 10 }, () => 'a'.repeat(8000)) }), app: undefined }));
+  });
+
+  test('the menu row plans the same login item as install', () => {
+    const app = { name: 'Textbutler', argvFile: '/Users/u/state/launch.json' };
+    const foreground = { executable: '/opt/tools/bun', args: ['/opt/textbutler/cli.js', 'menubar', '--foreground'] };
+    // A product's own loginItem without an app gets the invocation's app, so
+    // turning the row on never adds a second item beside the app's.
+    const merged = menuLoginItem({ ...foreground, env: { HOME: '/Users/u' } }, { foreground, app });
+    assert.deepEqual(merged, { ...foreground, env: { HOME: '/Users/u' }, app });
+    const row = planAutostart({ id: 'textbutler', label: 'Textbutler', platform: 'darwin', home: '/Users/u', ...merged, args: [...merged.args] });
+    const install = planAutostart({ id: 'textbutler', label: 'Textbutler', platform: 'darwin', home: '/Users/u', ...foreground, args: [...foreground.args], app });
+    assert.equal(row.path, install.path);
+    assert.equal(row.contents, install.contents);
+    // An app the product chose wins; no app anywhere stays the plain item.
+    const own = { name: 'Other', argvFile: '/Users/u/other.json' };
+    assert.equal(menuLoginItem({ ...foreground, app: own }, { foreground, app }).app, own);
+    assert.equal(menuLoginItem(undefined, { foreground }).app, undefined);
+    assert.deepEqual(menuLoginItem(undefined, { foreground, app }), { ...foreground, app });
   });
 
   test('replace the old login entry, write an owner-only launch file, and report drift', { skip: darwinOnly }, async () => {

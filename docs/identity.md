@@ -225,8 +225,10 @@ As built in 0.8.0 (`src/identity.rs`, runner commands in
   `identity-unavailable`; it never creates one. The product shows the notice,
   calls `--signing-identity ensure`, then retries, or falls back to ad-hoc.
 - `--launch` refuses to run outside a Hraness app (`launch-outside-app`) or
-  with an argv file that is not an owner-only JSON array whose first entry is
-  an absolute path (`invalid-launch-file`); a child that fails to start is
+  with an argv file that is not an owner-only JSON array of 1 to 64 strings,
+  at most 64 KiB, whose first entry is an absolute path
+  (`invalid-launch-file`). The SDK and `write_argv_file` refuse to write a
+  bigger one; a child that fails to start is
   `launch-failed`. It forwards SIGTERM, SIGINT and SIGHUP and exits with the
   child's code, or 128 plus its signal.
 - Rust products use `identity::login_item` with `service::plan` and

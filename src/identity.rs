@@ -970,6 +970,10 @@ pub fn write_argv_file(path: &Path, argv: &[String]) -> Result<(), AppError> {
     let parent = path.parent().ok_or(AppError::UnsafeDestination)?;
     real_dir(parent, false)?;
     let json = serde_json::to_vec(argv).map_err(|_| AppError::InvalidAppRequest)?;
+    // `read_argv_file` ignores a bigger file, and the app would start nothing.
+    if json.len() as u64 > MAX_ARGV_FILE_BYTES {
+        return Err(AppError::InvalidAppRequest);
+    }
     let temp = parent.join(format!(".launch-argv-{}.tmp", nonce()));
     write_file(&temp, &json, 0o600)?;
     fs::rename(&temp, path).map_err(|_| {
@@ -1459,6 +1463,16 @@ mod tests {
             write_argv_file(&argv, &["relative".into()]),
             Err(AppError::InvalidAppRequest)
         );
+        // Never write a file `read_argv_file` would ignore at login.
+        let mut big = vec!["/usr/bin/true".to_owned()];
+        big.extend(std::iter::repeat("a".repeat(8000)).take(10));
+        assert_eq!(
+            write_argv_file(&argv, &big),
+            Err(AppError::InvalidAppRequest)
+        );
+        big.truncate(8);
+        write_argv_file(&argv, &big).unwrap();
+        assert_eq!(read_argv_file(&argv), Some(big));
         let item = login_item(&env, "aicharts", "AI Charts", "aicharts", &argv);
         assert_eq!(
             item.program,

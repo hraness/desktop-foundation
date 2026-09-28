@@ -218,6 +218,8 @@ with product state. The session also:
 | [SwiftBar](https://github.com/swiftbar/SwiftBar) | A script's output should appear in the macOS menu bar, with no app to write. |
 | desktop-foundation | A CLI needs a menu bar or tray icon on macOS, Windows, and Linux without an app bundle, installer, or notarization. The SDK downloads and verifies one prebuilt companion; your CLI supplies the menu. |
 
+The companion is itself a Tauri 2 app that uses Tauri's `tray-icon` feature.
+This project builds and releases that app once, so each CLI does not have to.
 Checked on 2026-09-28.
 
 ## Existing Rust products

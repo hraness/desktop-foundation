@@ -209,6 +209,17 @@ with product state. The session also:
 - handles `foundation.login` ("Open at login") and
   `foundation.settings.<kind>` itself. The product never sees those actions.
 
+## Compared with Tauri, Electron, and tray libraries
+
+| Option | Choose it when |
+| --- | --- |
+| [Tauri](https://v2.tauri.app/learn/system-tray/), or Electron with [menubar](https://github.com/max-mapper/menubar) | The product needs app windows and you will ship a signed app bundle. |
+| [tray-icon](https://github.com/tauri-apps/tray-icon) (Rust) or [systray](https://github.com/getlantern/systray) (Go) | You want to build, sign, and distribute the tray binary yourself. |
+| [SwiftBar](https://github.com/swiftbar/SwiftBar) | A script's output should appear in the macOS menu bar, with no app to write. |
+| desktop-foundation | A CLI needs a menu bar or tray icon on macOS, Windows, and Linux without an app bundle, installer, or notarization. The SDK downloads and verifies one prebuilt companion; your CLI supplies the menu. |
+
+Checked on 2026-09-28.
+
 ## Existing Rust products
 
 A product supplies a [`Host`](src/lib.rs) implementation that renders a

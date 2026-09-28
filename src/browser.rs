@@ -219,7 +219,7 @@ mod tests {
             )),
             Err(BrowserError::InvalidUrl)
         );
-        let address = "https://account.hraness.com/support?product=hra&source=desktop#support";
+        let address = "https://account.hraness.com/support?product=hraness&source=desktop#support";
         assert_eq!(checked_https(address).unwrap(), address);
         assert_eq!(format!("{:?}", BrowserError::InvalidUrl), "InvalidUrl");
     }

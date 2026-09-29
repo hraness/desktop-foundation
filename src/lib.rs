@@ -27,6 +27,8 @@ pub use hraness_cli_kit as cli_kit;
 pub use hraness_cli_kit::{audience, permissions};
 #[cfg(target_os = "macos")]
 mod macos_menu;
+// The plan is computed and tested everywhere; only macOS applies it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod menu_plan;
 #[cfg(target_os = "macos")]
 #[doc(hidden)]

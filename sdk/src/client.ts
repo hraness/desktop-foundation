@@ -83,7 +83,10 @@ export interface CompanionOptions extends Omit<CompanionIdentity, 'title'> {
   /** Test hook for `foundation.settings.<kind>` actions. */
   permissionIO?: PermissionIO;
   refreshMs?: number;
+  /** Deadline for each snapshot, action, write and protocol probe (default 10 s). */
   timeoutMs?: number;
+  /** Deadline for the runner's ready event (defaults to `timeoutMs`). */
+  startupTimeoutMs?: number;
 }
 export interface CompanionSession {
   ready: Promise<'running' | 'already-running'>;
@@ -140,7 +143,8 @@ interface Built { frame: Frame; actions: ReadonlyMap<string, boolean> }
 export async function runCompanion(options: CompanionOptions): Promise<CompanionSession> {
   const timeout = options.timeoutMs ?? 10_000;
   const refreshMs = options.refreshMs ?? 10_000;
-  if (!Number.isFinite(timeout) || timeout < 100 || timeout > 120_000 || !Number.isFinite(refreshMs) || refreshMs < 100 || refreshMs > 3_600_000) throw new Error('invalid-companion-deadline');
+  const startupTimeout = options.startupTimeoutMs ?? timeout;
+  if (!Number.isFinite(timeout) || timeout < 100 || timeout > 120_000 || !Number.isFinite(startupTimeout) || startupTimeout < 100 || startupTimeout > 120_000 || !Number.isFinite(refreshMs) || refreshMs < 100 || refreshMs > 3_600_000) throw new Error('invalid-companion-deadline');
   if (options.binaryArgs && !options.binary) throw new Error('binary-arguments-require-explicit-binary');
   if (options.mark === undefined && typeof options.title !== 'string') throw new Error('invalid-title');
   const binary = options.binary ?? (await ensureBinary({ manifest: options.manifest ?? await packagedManifest(), cacheDir: options.cacheDir })).path;
@@ -267,7 +271,7 @@ export async function runCompanion(options: CompanionOptions): Promise<Companion
   void ready.catch(() => {});
   let closeResolve!: (status: number) => void;
   const closed = new Promise<number>(resolve => { closeResolve = resolve; });
-  const startup = setTimeout(() => fail('startup-timeout'), timeout);
+  const startup = setTimeout(() => fail('startup-timeout'), startupTimeout);
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;

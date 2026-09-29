@@ -203,8 +203,8 @@ pub struct ErrorBody {
 
 /// The `error.permission` member: a permission kind such as
 /// `full-disk-access`, and the System Settings pane that fixes it when the
-/// kind has one. Added in 1.1.0; readers that predate it never see it
-/// unless a product sets it.
+/// kind has one. Added in 1.1.0. A 1.0 reader rejects an envelope that
+/// carries it, so set it only toward 1.1 readers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ErrorPermission {
@@ -214,11 +214,22 @@ pub struct ErrorPermission {
 }
 
 impl ErrorPermission {
-    pub fn new(kind: impl Into<String>, settings_url: Option<impl Into<String>>) -> Self {
+    pub fn new(kind: impl Into<String>) -> Self {
         Self {
             kind: kind.into(),
-            settings_url: settings_url.map(Into::into),
+            settings_url: None,
         }
+    }
+
+    /// Sets the System Settings link. Anything outside
+    /// `x-apple.systempreferences:` is dropped, as the schema requires, so an
+    /// envelope never carries a link a client should not open. From
+    /// `hraness-cli-kit`, pass `PermissionErrorInfo::settings_url`, which is
+    /// always one of the known panes.
+    pub fn with_settings_url(mut self, url: impl Into<String>) -> Self {
+        let url = url.into();
+        self.settings_url = url.starts_with("x-apple.systempreferences:").then_some(url);
+        self
     }
 }
 
@@ -477,11 +488,8 @@ mod tests {
     fn permission_is_optional_and_additive() {
         let env: Envelope<()> = Envelope::error(
             ErrorBody::new(ErrorCode::PermissionDenied, "No access.").with_permission(
-                ErrorPermission::new(
-                    "full-disk-access",
-                    Some(
-                        "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
-                    ),
+                ErrorPermission::new("full-disk-access").with_settings_url(
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
                 ),
             ),
         );
@@ -490,7 +498,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<Envelope<()>>(&text).unwrap(), env);
         // No pane: settingsUrl is left out, and a null reads as none.
         let keychain = ErrorBody::new(ErrorCode::PermissionDenied, "No access.")
-            .with_permission(ErrorPermission::new("keychain", None::<String>));
+            .with_permission(ErrorPermission::new("keychain"));
         assert_eq!(
             serde_json::to_string(&keychain).unwrap(),
             r#"{"code":"permission-denied","message":"No access.","permission":{"kind":"keychain"}}"#
@@ -500,6 +508,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(null.permission.unwrap().settings_url, None);
+        // A link outside System Settings is dropped.
+        assert_eq!(
+            ErrorPermission::new("keychain")
+                .with_settings_url("https://example.com/")
+                .settings_url,
+            None
+        );
         // Without it, the 1.0.0 bytes are unchanged.
         assert!(
             !serde_json::to_string(&ErrorBody::new(ErrorCode::Usage, "m"))

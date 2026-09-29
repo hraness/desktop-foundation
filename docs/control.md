@@ -29,7 +29,11 @@ Every command that takes `--json` prints exactly one JSON object, on one line, o
 - Since 1.1.0, `error.permission` may name the macOS permission behind a
   failure, `{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:…"}`.
   `settingsUrl` is absent or null when the kind has no System Settings pane.
-  It is optional, so a 1.0 reader only sees it when a product sets it.
+  It is optional, and an envelope without it is byte-identical to 1.0. A
+  1.0 reader rejects an envelope that carries it, so set it only toward 1.1
+  readers. Build it with `errorPermission(kind, settingsUrl)` (TypeScript) or
+  `ErrorPermission::new(kind).with_settings_url(url)` (Rust). Both drop a
+  link outside System Settings.
 - The JSON Schema is `contract/envelope.schema.json`.
 
 ### Error codes and exit codes
@@ -97,7 +101,8 @@ person, an error is two lines on stderr, following `CLI_MENU_STYLE.md` D5:
 
 The first line is one sentence (plus the suggestion for a mistyped command);
 the second is the first `next` step meant for a person. `HRANESS_DEBUG=1` adds
-the code. Help starts with `Usage:`, and `<product> help <command>` is the
+the code. A script (the quiet audience) keeps the 1.0 contract: the error
+envelope on stdout, and `FAIL <code>: <message>` on stderr. Help starts with `Usage:`, and `<product> help <command>` is the
 same as `<command> --help` unless a product registers its own `help` verb.
 
 A `decide` verb called

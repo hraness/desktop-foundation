@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   commandsJson, defineRegistry, envelopeExitCode, HELP_SCHEMA, ERROR_CODES, errorEnvelope, EXIT, exitCodeFor, formatCommand, HranessError,
-  isErrorCode, lookupVerb, okEnvelope, parseArgs, runCli, validProductCode, validProductName, validSchemaId, validVerbSegment,
+  errorPermission, isErrorCode, lookupVerb, okEnvelope, parseArgs, runCli, validProductCode, validProductName, validSchemaId, validVerbSegment,
   type CliIO, type Envelope, type Verb,
 } from '../src/registry.js';
 import { ownerPaths } from '../src/control.js';
 import { AGENT_ENV_MARKERS, AGENT_PROCESS_NAMES } from '../src/human-gate.js';
+import { permissionError } from '../src/permissions.js';
 import { readContract, validate } from './contract-helpers.js';
 
 const AT = new Date('2026-09-28T00:00:00.000Z');
@@ -97,8 +98,21 @@ test('runCli: read verbs, text, commands and usage', async () => {
   r = io();
   assert.equal(await runCli(example(), ['nope', '--json'], r.value), 2);
   assert.equal((r.json() as any).error.next[0].command, 'example commands --json');
-  r = io();
+  // A script (quiet: no terminal, no agent) keeps the 1.0 contract: the error
+  // envelope on stdout, and the code at the start of the stderr line.
+  r = io({ audience: 'quiet' });
   assert.equal(await runCli(example(), ['nope'], r.value), 2);
+  assert.equal((r.json() as any).error.code, 'usage');
+  assert.deepEqual(validate(schema, r.json()), []);
+  assert.equal(r.err(), 'FAIL usage: Unknown command "nope".\n-> example --help\n');
+  r = io({ audience: 'quiet', gate: async () => ({ ok: false as const, code: 'human-required' as const, message: 'No terminal.' }) });
+  assert.equal(await runCli(example(), ['approvals', 'decide', 'a1', 'allow-once'], r.value), 3);
+  assert.equal((r.json() as any).error.code, 'human-required');
+  assert.match(r.err(), /^FAIL human-required: /);
+  // A person at a terminal reads only the two lines.
+  r = io({ audience: 'human' });
+  assert.equal(await runCli(example(), ['nope'], r.value), 2);
+  assert.equal(r.out(), '');
   assert.equal(r.err(), 'FAIL Unknown command "nope".\n-> example --help\n');
 });
 
@@ -114,6 +128,8 @@ test('runCli: text errors are one ✗ sentence and one → step, with "Did you m
     [['zzzzzz'], '✗ Unknown command "zzzzzz".\n→ example --help\n'],
     [['status', '--frce'], '✗ Unknown option "--frce" for "example status", so nothing ran.\n→ example status --help\n'],
     [['control', 'stop'], '✗ No owner.\n→ example control stop --help\n'],
+    [['status', '--Bad'], '✗ Unknown option "--Bad", so nothing ran.\n→ example status --help\n'],
+    [['status', '-x'], '✗ Unknown option "-x" for "example status", so nothing ran.\n→ example status --help\n'],
   ];
   for (const [argv, want] of cases) {
     const r = io({ audience: 'human', env: UTF8 });
@@ -157,6 +173,42 @@ test('runCli: an agent gets the JSON envelope without --json', async () => {
   const r = io({ audience: 'human', env: UTF8 });
   assert.equal(await runCli(example(), ['status'], r.value), 0);
   assert.equal(r.out(), 'owner running\n');
+});
+
+test('help help is the root help, and a suggestion never repeats the input', async () => {
+  const root = io({ audience: 'human', env: UTF8 });
+  await runCli(example(), ['--help'], root.value);
+  const r = io({ audience: 'human', env: UTF8 });
+  assert.equal(await runCli(example(), ['help', 'help'], r.value), 0);
+  assert.equal(r.out(), root.out());
+  assert.equal(r.err(), '');
+  const typo = io({ audience: 'human', env: UTF8 });
+  assert.equal(await runCli(example(), ['help', 'help', 'x'], typo.value), 2);
+  assert.doesNotMatch(typo.err(), /Did you mean "help"/);
+});
+
+test('a single-dash option never runs the verb; a bare - or a negative number is a word', async () => {
+  const ran: string[] = [];
+  const r = io({ audience: 'human', env: UTF8 });
+  assert.equal(await runCli(example(ran), ['status', '-x'], r.value), 2);
+  assert.deepEqual(ran, []);
+  for (const argv of [['status', '--', '-x'], ['status', '-'], ['status', '-5']]) {
+    const ok = io({ audience: 'human', env: UTF8 });
+    await runCli(example(ran), argv, ok.value);
+    assert.doesNotMatch(ok.err(), /Unknown option/, argv.join(' '));
+  }
+});
+
+test('errorPermission keeps only System Settings links', () => {
+  const pane = 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles';
+  assert.deepEqual(errorPermission('full-disk-access', pane), { kind: 'full-disk-access', settingsUrl: pane });
+  assert.deepEqual(errorPermission('keychain', null), { kind: 'keychain' });
+  assert.deepEqual(errorPermission('keychain', 'https://example.com/'), { kind: 'keychain' });
+  assert.deepEqual(new HranessError('permission-denied', 'm', undefined, [], { kind: 'keychain', settingsUrl: 'file:///etc' }).toBody().permission, { kind: 'keychain' });
+  const info = permissionError({ product: 'Example', command: 'example', kind: 'full-disk-access', ask: 'read your Messages', why: 'It answers chats.' } as any, 'denied', {});
+  const body = new HranessError('permission-denied', info.message, undefined, [], errorPermission(info.kind, info.settingsUrl)).toBody();
+  assert.deepEqual(validate(schema, errorEnvelope(body)), []);
+  assert.equal(body.permission?.settingsUrl, info.settingsUrl);
 });
 
 test('help and error text: sentence-case Usage, `help <cmd>`, and no "gate"', async () => {

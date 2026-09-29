@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
-import { actionFor, box, chooseMode, clean, fit, renderSnapshot, runTui, table, type View } from '../src/tui.js';
+import { actionFor, box, chooseMode, clean, columns, fit, renderSnapshot, runTui, table, type View } from '../src/tui.js';
 import { errorEnvelope, okEnvelope } from '../src/registry.js';
 import { goldenPath } from './contract-helpers.js';
 
@@ -70,4 +70,28 @@ test('keys', () => {
   assert.equal(actionFor('r'), 'reload');
   for (const key of ['q', '\x1b', '\x03']) assert.equal(actionFor(key), 'quit');
   assert.equal(actionFor('x'), 'none');
+});
+
+test('columns match the Rust kit (ratatui) for every case in contract/text-width.json', async () => {
+  const { cases } = JSON.parse(await readFile(new URL('../../contract/text-width.json', import.meta.url), 'utf8')) as { cases: { text: string; columns: number }[] };
+  assert.ok(cases.length > 20);
+  for (const c of cases) assert.equal(columns(c.text), c.columns, JSON.stringify(c.text));
+});
+
+test('box, table and snapshots measure terminal columns, not code points', () => {
+  // Menubar labels carry U+FE0E and emoji; the right border must line up on every line.
+  const lines = box('Watch', ['⚠︎ Auto-screening is off', 'plain line', '📄 paper', '👨‍👩‍👧 family'], 30);
+  for (const line of lines) assert.equal(columns(line), 30, line);
+  assert.equal(lines[1], `│⚠︎ Auto-screening is off${' '.repeat(28 - 23)}│`);
+  assert.equal(lines[3], `│📄 paper${' '.repeat(28 - 8)}│`);
+  // A wide cluster that would cross the edge is left out, as ratatui does.
+  assert.equal(fit('ab📄', 3), 'ab ');
+  assert.equal(fit('日本語', 5), '日本 ');
+  assert.equal(fit('école', 3), 'éco');
+  const rows = table(['ID', 'Label'], [['📄', 'paper with a long label that runs past the edge'], ['⚠︎', 'warn']], 38);
+  for (const row of rows) assert.ok(columns(row) <= 38, row);
+  const view: View<null> = { id: 's', title: 'S', render: (_s, width) => box('📄 Papers', table(['K', 'V'], [['⏸︎', 'Pause watching'], ['🇵🇷', 'flag']], width - 2), width) };
+  for (const width of [40, 80, 120]) {
+    for (const line of renderSnapshot([view], null, width).split('\n')) assert.ok(columns(line) <= width, line);
+  }
 });

@@ -5,6 +5,9 @@
 
 import { stripVTControlCharacters } from 'node:util';
 import { envelopeExitCode, EXIT, type Envelope } from './registry.js';
+import { clusters, columns } from './text-width.js';
+
+export { columns } from './text-width.js';
 
 export type Mode = 'interactive' | 'snapshot' | 'json';
 export const DEFAULT_SNAPSHOT_WIDTH = 80;
@@ -13,7 +16,7 @@ export interface View<S> {
   /** A stable id such as `status`. */
   id: string;
   title: string;
-  /** Lines no wider than `width` columns. Use `box` and `table` to build them. */
+  /** Lines no wider than `width` terminal columns (see `columns`). Use `box` and `table` to build them. */
   render(state: S, width: number): string[];
 }
 
@@ -26,29 +29,40 @@ export function chooseMode(json: boolean, snapshot: boolean, stdoutIsTerminal: b
 export function clean(text: string): string {
   return stripVTControlCharacters(String(text)).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
 }
-/** Cuts or pads `text` to exactly `width` columns (one column per code point). */
+/**
+ * Cuts or pads `text` to exactly `width` terminal columns, measured per
+ * grapheme cluster the way the Rust kit's ratatui buffer measures them:
+ * zero-width clusters take no cell, and a wide cluster that would cross the
+ * edge is left out rather than split.
+ */
 export function fit(text: string, width: number): string {
-  const chars = [...clean(text)];
-  return chars.length >= width ? chars.slice(0, Math.max(0, width)).join('') : chars.join('') + ' '.repeat(width - chars.length);
+  const room = Math.max(0, width);
+  let out = '', used = 0;
+  for (const cluster of clusters(clean(text))) {
+    if (cluster.width === 0) continue;
+    if (used + cluster.width > room) break;
+    out += cluster.text; used += cluster.width;
+  }
+  return out + ' '.repeat(room - used);
 }
 /** A titled box `width` columns wide around `lines`. */
 export function box(title: string, lines: readonly string[], width: number): string[] {
   const inner = Math.max(0, width - 2);
-  const label = inner >= 4 ? fit(` ${clean(title)} `, Math.min(inner, [...clean(title)].length + 2)) : '';
+  const label = inner >= 4 ? fit(` ${clean(title)} `, Math.min(inner, columns(clean(title)) + 2)) : '';
   return [
-    `┌${label}${'─'.repeat(inner - [...label].length)}┐`,
+    `┌${label}${'─'.repeat(inner - columns(label))}┐`,
     ...lines.map(line => `│${fit(line, inner)}│`),
     `└${'─'.repeat(inner)}┘`,
   ];
 }
 /** Columns sized to their widest cell, with the last column taking the rest. */
 export function table(headers: readonly string[], rows: readonly (readonly string[])[], width: number): string[] {
-  const widths = headers.map((header, i) => Math.max(...[header, ...rows.map(row => row[i] ?? '')].map(cell => [...clean(cell)].length)));
+  const widths = headers.map((header, i) => Math.max(...[header, ...rows.map(row => row[i] ?? '')].map(cell => columns(clean(cell)))));
   const line = (cells: readonly string[]) => {
     let out = '';
     cells.forEach((cell, i) => {
       const last = i === cells.length - 1;
-      const room = width - [...out].length;
+      const room = width - columns(out);
       if (room <= 0) return;
       out += last ? fit(cell, room) : fit(cell, Math.min(room, widths[i] + 2));
     });

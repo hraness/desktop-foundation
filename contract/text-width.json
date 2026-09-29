@@ -1,0 +1,109 @@
+{
+  "_note": "Columns each string takes in a ratatui buffer (the Rust kit), which the TypeScript kit's columns() must match. Widths are written by the hraness-control-kit test text_width_corpus_matches_contract with UPDATE_GOLDEN=1.",
+  "cases": [
+    {
+      "columns": 10,
+      "text": "plain line"
+    },
+    {
+      "columns": 23,
+      "text": "⚠︎ Auto-screening is off"
+    },
+    {
+      "columns": 16,
+      "text": "⏸︎ Pause watching"
+    },
+    {
+      "columns": 8,
+      "text": "▶︎ Resume"
+    },
+    {
+      "columns": 8,
+      "text": "📄 paper"
+    },
+    {
+      "columns": 10,
+      "text": "⚠️ warning"
+    },
+    {
+      "columns": 11,
+      "text": "☺︎ text face"
+    },
+    {
+      "columns": 9,
+      "text": "👨‍👩‍👧 family"
+    },
+    {
+      "columns": 9,
+      "text": "👍🏽 thumbs"
+    },
+    {
+      "columns": 7,
+      "text": "🇵🇷 flag"
+    },
+    {
+      "columns": 4,
+      "text": "🇵🇷🇺🇸"
+    },
+    {
+      "columns": 10,
+      "text": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 england"
+    },
+    {
+      "columns": 9,
+      "text": "1️⃣ keycap"
+    },
+    {
+      "columns": 14,
+      "text": "日本語テキスト"
+    },
+    {
+      "columns": 4,
+      "text": "ｶﾞｷﾞ"
+    },
+    {
+      "columns": 5,
+      "text": "école"
+    },
+    {
+      "columns": 10,
+      "text": "naïve café"
+    },
+    {
+      "columns": 5,
+      "text": "Ω≈ç√∫"
+    },
+    {
+      "columns": 5,
+      "text": "مرحبا"
+    },
+    {
+      "columns": 6,
+      "text": "한국어"
+    },
+    {
+      "columns": 9,
+      "text": "zero​width"
+    },
+    {
+      "columns": 15,
+      "text": "✓ done ✗ failed"
+    },
+    {
+      "columns": 13,
+      "text": "→ next ← back"
+    },
+    {
+      "columns": 10,
+      "text": "━━ rule ━━"
+    },
+    {
+      "columns": 10,
+      "text": "🧑‍💻 at work"
+    },
+    {
+      "columns": 10,
+      "text": "⏳ waiting"
+    }
+  ]
+}

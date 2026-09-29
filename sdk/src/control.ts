@@ -56,19 +56,29 @@ export function ownerPaths(product: string, env: NodeJS.ProcessEnv = process.env
 }
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+// TZ=UTC: `ps -o lstart=` prints local time, so an owner started under one
+// time zone would otherwise look dead to a checker running under another.
 function run(program: string, args: string[]): Promise<string | undefined> {
-  return new Promise(resolve => execFile(program, args, { env: { ...process.env, LC_ALL: 'C' }, timeout: 5000 }, (error, stdout) => {
+  return new Promise(resolve => execFile(program, args, { env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' }, timeout: 5000 }, (error, stdout) => {
     resolve(error || !stdout.trim() ? undefined : stdout);
   }));
+}
+/**
+ * The part of `sysctl -n kern.boottime` that names the boot: `sec=…,usec=…`.
+ * The date text after it is local time and changes with TZ, so it is dropped.
+ */
+export function bootTimeKey(raw: string): string {
+  const match = /sec\s*=\s*(\d+)\s*,\s*usec\s*=\s*(\d+)/.exec(raw);
+  return match ? `sec=${match[1]},usec=${match[2]}` : raw.trim();
 }
 /** A digest of this boot. Same value the Rust kit writes. */
 export async function bootId(): Promise<string | undefined> {
   const raw = process.platform === 'linux'
-    ? await readFile('/proc/sys/kernel/random/boot_id', 'utf8').catch(() => undefined)
-    : await run('sysctl', ['-n', 'kern.boottime']);
-  return raw === undefined ? undefined : sha256(`boot:${raw.trim()}`);
+    ? (await readFile('/proc/sys/kernel/random/boot_id', 'utf8').catch(() => undefined))?.trim()
+    : await run('sysctl', ['-n', 'kern.boottime']).then(text => text === undefined ? undefined : bootTimeKey(text));
+  return raw === undefined ? undefined : sha256(`boot:${raw}`);
 }
-/** A digest of when `pid` started, so a reused pid does not match. */
+/** A digest of when `pid` started, so a reused pid does not match. Independent of the caller's TZ. */
 export async function processStartId(pid: number): Promise<string | undefined> {
   let raw: string | undefined;
   if (process.platform === 'linux') {

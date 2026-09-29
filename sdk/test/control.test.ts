@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
-  adminRequest, agentRequest, bootId, CONTROL_PROTOCOL, controlStatus, ensureOwner, ownerPaths, ownerPathsIn,
+  adminRequest, agentRequest, bootId, bootTimeKey, CONTROL_PROTOCOL, controlStatus, ensureOwner, ownerPaths, ownerPathsIn,
   processStartId, readOwnerFile, serveControl, type OwnerInfo, type OwnerPaths,
 } from '../src/control.js';
 import { HranessError } from '../src/registry.js';
@@ -206,4 +206,25 @@ test('ensureOwner starts one owner, reuses it, and kills only its own child when
     const exits = spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' });
     await assert.rejects(ensureOwner(paths, () => exits, 300), (e: HranessError) => e.code === 'owner-unavailable');
   } finally { await adminRequest(paths, { op: 'control.stop' }).catch(() => {}); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('boot and start identity do not depend on the caller\'s time zone', async () => {
+  assert.equal(bootTimeKey('{ sec = 1790535348, usec = 479171 } Sun Sep 27 14:55:48 2026\n'), 'sec=1790535348,usec=479171');
+  assert.equal(bootTimeKey('{ sec = 1790535348, usec = 479171 } Sun Sep 27 18:55:48 2026\n'), 'sec=1790535348,usec=479171');
+  assert.notEqual(bootTimeKey('{ sec = 1790535349, usec = 479171 } Sun Sep 27 14:55:49 2026'), 'sec=1790535348,usec=479171');
+  // A checker under another TZ (Kolkata is UTC+5:30 all year) sees the same identity for this live process.
+  const url = new URL('../src/control.js', import.meta.url).href;
+  const script = `const m = await import(${JSON.stringify(url)}); console.log(JSON.stringify([await m.bootId(), await m.processStartId(${process.pid})]));`;
+  const seen = async (tz: string) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TZ: tz }, stdio: ['ignore', 'pipe', 'inherit'] });
+    let out = '';
+    child.stdout.on('data', chunk => { out += chunk; });
+    await new Promise(resolve => child.on('close', resolve));
+    return JSON.parse(out) as [string, string];
+  };
+  const mine = [await bootId(), await processStartId(process.pid)];
+  assert.ok(mine[0] && mine[1]);
+  assert.deepEqual(await seen('UTC'), mine);
+  assert.deepEqual(await seen('Asia/Kolkata'), mine);
+  assert.deepEqual(await seen('America/Puerto_Rico'), mine);
 });

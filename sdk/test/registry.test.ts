@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  commandsJson, defineRegistry, envelopeExitCode, ERROR_CODES, errorEnvelope, EXIT, exitCodeFor, formatCommand, HranessError,
+  commandsJson, defineRegistry, envelopeExitCode, HELP_SCHEMA, ERROR_CODES, errorEnvelope, EXIT, exitCodeFor, formatCommand, HranessError,
   isErrorCode, lookupVerb, okEnvelope, parseArgs, runCli, validProductCode, validProductName, validSchemaId, validVerbSegment,
   type CliIO, type Envelope, type Verb,
 } from '../src/registry.js';
@@ -17,6 +17,7 @@ function example(ran: string[] = []) {
     { path: ['status'], opClass: 'read', schema: 'example.status/1', summary: 'One-screen health', input: () => ({}), run: async () => { ran.push('status'); return { owner: 'running' }; }, text: o => `owner ${o.owner}` },
     {
       path: ['approvals', 'decide'], opClass: 'decide', schema: 'example.approval/1', summary: 'Allow or deny a waiting request',
+      flags: ['confirm'],
       input: a => { if (a.positionals.length !== 2) throw new HranessError('usage', 'Name a request and a decision.'); return { id: a.positionals[0], decision: a.positionals[1] }; },
       gate: { tier: 'T1T2', describe: i => ({ title: `Allow ${i.id}?`, digest: '3f2a' }) },
       run: async i => { ran.push(`decide ${i.id}`); return { id: i.id, decision: i.decision }; },
@@ -240,4 +241,74 @@ test('raw verbs own stdout and their exit status', async () => {
   assert.equal(await runCli(broken, ['tui', '--json'], r.value), 1);
   assert.equal((r.json() as any).error.code, 'internal');
   assert.throws(() => defineRegistry('example', [{ ...tui, output: 'weird' as any }]), /output mode/);
+});
+
+test('runCli: --help prints help, exits 0 and never runs the verb', async () => {
+  let runs = 0;
+  let prompted = 0;
+  const stop: Verb<unknown, { stopping: boolean }> = {
+    path: ['control', 'stop'], opClass: 'operate', schema: 'example.stop/1', summary: 'Stop the owner',
+    input: () => ({}), run: async () => { runs++; return { stopping: true }; },
+  };
+  const decide: Verb<any, any> = {
+    path: ['approvals', 'decide'], opClass: 'decide', schema: 'example.approval/1', summary: 'Allow or deny a waiting request',
+    usage: '<id> <allow-once|deny>', valueFlags: ['digest'], flags: ['dry-run'],
+    input: a => a, run: async () => { runs++; return {}; },
+    gate: { tier: 'T1T2', describe: () => ({ title: 't', digest: 'd' }) },
+  };
+  const reg = defineRegistry('example', [stop, decide]);
+  const gate = async () => { prompted++; return { ok: true as const, proof: { tier: 'T1T2' as const, digest: 'd', confirmedAt: AT.toISOString() } }; };
+  for (const argv of [['control', 'stop', '--help'], ['control', 'stop', '-h'], ['--help', 'control', 'stop'], ['control', '--help', 'stop']]) {
+    const r = io({ gate });
+    assert.equal(await runCli(reg, argv, r.value), 0, argv.join(' '));
+    assert.match(r.out(), /^usage: example control stop \[options\]\n\nStop the owner\nClass: operate\./);
+  }
+  let r = io({ gate });
+  assert.equal(await runCli(reg, ['approvals', 'decide', 'a1', 'allow-once', '--digest', 'd', '--help'], r.value), 0);
+  assert.match(r.out(), /usage: example approvals decide <id> <allow-once\|deny> \[options\]/);
+  assert.match(r.out(), /--digest <value>\n  --dry-run\n/);
+  assert.match(r.out(), /gate T1T2/);
+  r = io({ gate });
+  assert.equal(await runCli(reg, ['control', 'stop', '--help', '--json'], r.value), 0);
+  assert.equal((r.json() as any).schema, HELP_SCHEMA);
+  assert.deepEqual((r.json() as any).data.verbs.map((v: any) => v.path.join(' ')), ['control stop']);
+  // A group and the top level list their verbs.
+  r = io({ gate });
+  assert.equal(await runCli(reg, ['--help'], r.value), 0);
+  assert.match(r.out(), /example control stop {2}\[operate\]/);
+  assert.match(r.out(), /example approvals decide {2}\[decide T1T2\]/);
+  r = io({ gate });
+  assert.equal(await runCli(reg, ['approvals', '-h'], r.value), 0);
+  assert.doesNotMatch(r.out(), /control stop/);
+  r = io({ gate });
+  assert.equal(await runCli(reg, ['nope', '--help'], r.value), 2);
+  assert.equal(runs, 0);
+  assert.equal(prompted, 0);
+  // After `--`, --help is an ordinary positional.
+  r = io({ gate });
+  assert.equal(await runCli(reg, ['control', 'stop', '--json', '--', '--help'], r.value), 0);
+  assert.equal(runs, 1);
+});
+
+test('runCli: undeclared flags are usage errors and never run the verb', async () => {
+  let runs = 0;
+  const stop: Verb<unknown, { stopping: boolean }> = {
+    path: ['control', 'stop'], opClass: 'operate', schema: 'example.stop/1', summary: 'Stop the owner', flags: ['force'], valueFlags: ['wait'],
+    input: () => ({}), run: async () => { runs++; return { stopping: true }; },
+  };
+  const reg = defineRegistry('example', [stop]);
+  for (const argv of [['control', 'stop', '--frce', '--json'], ['control', 'stop', '--hlep', '--json'], ['control', 'stop', '--force=yes', '--json']]) {
+    const r = io();
+    assert.equal(await runCli(reg, argv, r.value), 2, argv.join(' '));
+    assert.equal((r.json() as any).error.code, 'usage');
+  }
+  const r = io();
+  assert.equal(await runCli(reg, ['control', 'stop', '--frce', '--json'], r.value), 2);
+  assert.equal((r.json() as any).error.next[0].command, 'example control stop --help');
+  assert.equal(runs, 0);
+  assert.equal(await runCli(reg, ['control', 'stop', '--force', '--wait', '5', '--json'], io().value), 0);
+  assert.equal(runs, 1);
+  assert.throws(() => defineRegistry('example', [{ ...stop, flags: ['help'] }]), /invalid flag/);
+  assert.throws(() => defineRegistry('example', [{ ...stop, flags: ['wait'] }]), /invalid flag/);
+  assert.throws(() => defineRegistry('example', [{ ...stop, valueFlags: ['help'] }]), /invalid value flag/);
 });

@@ -380,4 +380,31 @@ mod tests {
         );
         assert_eq!(action_for(k(KeyCode::Char('x'))), Action::None);
     }
+    /// The columns a string takes in a ratatui buffer. The TypeScript kit's
+    /// `columns()` must give the same number for every case in
+    /// contract/text-width.json.
+    #[test]
+    fn text_width_corpus_matches_contract() {
+        let path = format!(
+            "{}/../../contract/text-width.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let mut doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let update = std::env::var_os("UPDATE_GOLDEN").is_some();
+        let cases = doc["cases"].as_array_mut().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases.iter_mut() {
+            let text = case["text"].as_str().unwrap().to_owned();
+            let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 400, 1));
+            let (x, _) = buf.set_stringn(0, 0, &text, usize::MAX, ratatui::style::Style::default());
+            if update {
+                case["columns"] = serde_json::json!(x);
+            }
+            assert_eq!(case["columns"].as_u64(), Some(u64::from(x)), "{text:?}");
+        }
+        if update {
+            std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap() + "\n").unwrap();
+        }
+    }
 }

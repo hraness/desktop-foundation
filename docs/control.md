@@ -67,6 +67,15 @@ Flags that take a value (`--digest <d>`, `--width N`) are named in the verb's
 `next` command handed to a person keeps every positional and flag, in the
 `--flag=value` form, so it reads back to the same input.
 
+Flags that take no value (`--snapshot`, `--force`) are named in `flags`. A
+verb accepts only its `valueFlags`, its `flags`, `--json` and `--help`; any
+other flag, such as a typo, is a usage error (exit 2) and the verb does not
+run. `--help` or `-h` prints the verb's usage, summary, class and options and
+exits 0 without running it or asking for a gate; before a full verb it lists
+the verbs under the words given. With `--json` it prints a `hraness.help/1`
+envelope holding the same descriptors as `commands --json`. The Rust side gets
+the same behaviour from clap.
+
 A verb with `output: 'raw'`, such as `tui` or `control serve`, owns stdout
 and returns its exit status as a number; `runCli` prints no envelope for it.
 
@@ -97,6 +106,10 @@ on macOS and `$XDG_STATE_HOME/<product>` (default `~/.local/state/<product>`).
 
 `bootId` and `processStartId` are SHA-256 digests of the boot identifier and
 the process start time, so a reused pid is never mistaken for the owner.
+Both are independent of time zone: on macOS the boot identifier is the
+`sec`/`usec` pair of `kern.boottime`, and the start time is read with
+`TZ=UTC`, so an owner started from a login item and a check from a shell
+with another `TZ` agree.
 A second owner gets `control-already-running` (exit 5). A socket left by an
 owner that is gone is removed only after the new owner holds the claim, and
 only when the path is a socket that no longer accepts connections; a socket

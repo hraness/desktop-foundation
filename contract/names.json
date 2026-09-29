@@ -1,0 +1,32 @@
+{
+  "schema": "hraness.names/1",
+  "rule": "Both kits use these limits. A name one side accepts, the other side accepts too.",
+  "productName": { "pattern": "^[a-z][a-z0-9-]{0,31}$", "maxLength": 32 },
+  "verbSegment": { "pattern": "^[a-z][a-z0-9-]{0,31}$", "maxLength": 32 },
+  "schemaId": {
+    "pattern": "^[a-z][a-z0-9-]{0,31}(\\.[a-z0-9][a-z0-9-]{0,31})+/[0-9]{1,9}$",
+    "rule": "A first segment like a product name, one or more further segments that may start with a digit, and a numeric version."
+  },
+  "productCode": {
+    "pattern": "^[a-z][a-z0-9-]{0,31}\\.[a-z0-9][a-z0-9.-]{0,63}$",
+    "rule": "The product name, a dot, and a tail of at most 64 characters."
+  },
+  "cases": {
+    "productName": {
+      "valid": ["example", "a", "ghostget", "desktop-foundation", "abcdefghijklmnopqrstuvwxyz012345"],
+      "invalid": ["", "Example", "1example", "-x", "ex_ample", "abcdefghijklmnopqrstuvwxyz0123456"]
+    },
+    "verbSegment": {
+      "valid": ["status", "decide", "allow-once", "a1", "abcdefghijklmnopqrstuvwxyz012345"],
+      "invalid": ["", "Status", "1st", "-x", "a_b", "abcdefghijklmnopqrstuvwxyz0123456"]
+    },
+    "schemaId": {
+      "valid": ["example.status/1", "hraness.commands/1", "example.2fa/1", "example.a.b-c/12"],
+      "invalid": ["status/1", "example.status", "example.status/x", "Example.status/1", "example.-x/1", "example..x/1", "example.status/1234567890", "example.abcdefghijklmnopqrstuvwxyz0123456/1"]
+    },
+    "productCode": {
+      "valid": ["example.policy-locked", "example.2fa", "example.a.b", "example.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+      "invalid": ["example", "example.", "example.-x", "Example.x", "example.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+    }
+  }
+}

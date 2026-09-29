@@ -38,6 +38,9 @@ test('runTui: --json prints the same envelope status --json prints, snapshots pr
   let io = sink();
   assert.equal(await runTui({ load: async () => envelope, views: [statusView, helpView], mode: 'json', io }), 0);
   assert.deepEqual(JSON.parse(io.out()), envelope);
+  // Byte for byte what `status --json` prints: one compact line.
+  assert.equal(io.out(), `${JSON.stringify(envelope)}\n`);
+  assert.equal(io.out().split('\n').length, 2);
   io = sink();
   assert.equal(await runTui({ load: async () => envelope, views: [statusView, helpView], mode: 'snapshot', width: 40, io }), 0);
   assert.equal(io.out(), renderSnapshot([statusView, helpView], state, 40));

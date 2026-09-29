@@ -7,6 +7,8 @@ pub const ENVELOPE_SCHEMA: &str = include_str!("../../../contract/envelope.schem
 pub const ERROR_CODES: &str = include_str!("../../../contract/error-codes.json");
 /// `contract/op-classes.json`.
 pub const OP_CLASSES: &str = include_str!("../../../contract/op-classes.json");
+/// `contract/names.json`: product names, verb words, schema ids and product codes.
+pub const NAMES: &str = include_str!("../../../contract/names.json");
 /// `contract/agent-markers.json`.
 pub const AGENT_MARKERS: &str = include_str!("../../../contract/agent-markers.json");
 /// `contract/helper-argv.v0.8.1.json`.

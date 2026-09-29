@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  commandsJson, defineRegistry, envelopeExitCode, ERROR_CODES, errorEnvelope, EXIT, exitCodeFor, HranessError,
-  isErrorCode, lookupVerb, okEnvelope, parseArgs, runCli, type CliIO, type Envelope, type Verb,
+  commandsJson, defineRegistry, envelopeExitCode, ERROR_CODES, errorEnvelope, EXIT, exitCodeFor, formatCommand, HranessError,
+  isErrorCode, lookupVerb, okEnvelope, parseArgs, runCli, validProductCode, validProductName, validSchemaId, validVerbSegment,
+  type CliIO, type Envelope, type Verb,
 } from '../src/registry.js';
+import { ownerPaths } from '../src/control.js';
 import { AGENT_ENV_MARKERS, AGENT_PROCESS_NAMES } from '../src/human-gate.js';
 import { readContract, validate } from './contract-helpers.js';
 
@@ -120,7 +122,7 @@ test('runCli: a gated verb with --json from an agent answers human-required (exi
     const envelope = r.json() as any;
     assert.deepEqual(validate(schema, envelope), []);
     assert.equal(envelope.error.code, 'human-required');
-    assert.equal(envelope.error.next[0].command, 'example approvals decide a1 allow-once');
+    assert.equal(envelope.error.next[0].command, 'example approvals decide a1 allow-once --confirm');
     assert.equal(envelope.error.next[0].audience, 'human');
   }
   assert.equal(prompted, 0);
@@ -149,4 +151,93 @@ test('runCli: T3 answers unsupported-platform', async () => {
   const r = io({ audience: 'human' });
   assert.equal(await runCli(reg, ['allow', '--json'], r.value), 1);
   assert.equal((r.json() as any).error.code, 'unsupported-platform');
+});
+
+test('names follow contract/names.json, the same limits the Rust kit uses', () => {
+  const names = readContract('names.json');
+  const checks: Record<string, (v: string) => boolean> = { productName: validProductName, verbSegment: validVerbSegment, schemaId: validSchemaId, productCode: validProductCode };
+  for (const [kind, check] of Object.entries(checks)) {
+    const pattern = new RegExp(names[kind].pattern);
+    for (const v of names.cases[kind].valid) { assert.equal(check(v), true, `${kind} ${v}`); assert.equal(pattern.test(v), true, `${kind} pattern ${v}`); }
+    for (const v of names.cases[kind].invalid) { assert.equal(check(v), false, `${kind} ${v}`); assert.equal(pattern.test(v), false, `${kind} pattern ${v}`); }
+  }
+  const envelopeSchema = readContract('envelope.schema.json');
+  for (const v of names.cases.schemaId.valid) assert.deepEqual(validate(envelopeSchema, { ok: true, schema: v, generatedAt: AT.toISOString(), data: {} }), [], v);
+  for (const v of names.cases.productCode.valid) assert.equal(isErrorCode(v, v.split('.')[0]), true, v);
+  const long = 'a'.repeat(33);
+  assert.throws(() => defineRegistry(long, []), /Invalid product/);
+  assert.throws(() => ownerPaths(long, {}), /Invalid product/);
+  assert.throws(() => defineRegistry('example', [{ path: [long], opClass: 'read', schema: 'example.a/1', summary: 's', input: () => ({}), run: async () => ({}) }]), /Invalid verb path/);
+  assert.throws(() => defineRegistry('example', [{ path: ['a'], opClass: 'read', schema: 'example', summary: 's', input: () => ({}), run: async () => ({}) }]), /invalid schema/);
+  assert.doesNotThrow(() => defineRegistry('example', [{ path: ['a'], opClass: 'read', schema: 'example.2fa/1', summary: 's', input: () => ({}), run: async () => ({}) }]));
+});
+
+function decideRegistry(ran: string[]) {
+  const decide: Verb<{ id: string; digest: string; decision: string }, unknown> = {
+    path: ['approvals', 'decide'], opClass: 'decide', schema: 'example.approval/1', summary: 'Allow or deny a waiting request',
+    valueFlags: ['digest'],
+    input: a => {
+      if (a.positionals.length !== 2 || typeof a.flags.digest !== 'string') throw new HranessError('usage', 'Name a request, --digest and a decision.');
+      return { id: a.positionals[0], digest: a.flags.digest, decision: a.positionals[1] };
+    },
+    gate: { tier: 'T1T2', describe: i => ({ title: `Allow ${i.id}?`, digest: i.digest }) },
+    operateWhen: { summary: 'deny', test: i => i.decision === 'deny' },
+    run: async i => { ran.push(`${i.decision} ${i.id} ${i.digest}`); return i; },
+  };
+  return defineRegistry('example', [decide]);
+}
+
+test('operateWhen: an agent may deny on the decide path; allowing still needs a person', async () => {
+  const ran: string[] = [];
+  let r = io({ audience: 'agent' });
+  assert.equal(await runCli(decideRegistry(ran), ['approvals', 'decide', 'a1', '--digest', 'abc', 'deny', '--json'], r.value), 0);
+  assert.deepEqual(ran, ['deny a1 abc']);
+  r = io({ audience: 'agent' });
+  assert.equal(await runCli(decideRegistry(ran), ['approvals', 'decide', 'a1', '--digest=abc', 'allow-once', '--json'], r.value), 3);
+  assert.equal(r.json().ok, false);
+  assert.deepEqual(ran, ['deny a1 abc']);
+  const listed = (commandsJson(decideRegistry([]), AT) as any).data.verbs[0];
+  assert.equal(listed.opClass, 'decide');
+  assert.equal(listed.operateWhen, 'deny');
+  const base = { path: ['x'], schema: 'example.x/1', summary: 's', input: () => ({}), run: async () => ({}) };
+  assert.throws(() => defineRegistry('example', [{ ...base, opClass: 'decide-legacy', operateWhen: { summary: 'deny', test: () => true } }]), /operateWhen/);
+  assert.throws(() => defineRegistry('example', [{ ...base, opClass: 'operate', gate: { tier: 'T1T2', describe: () => ({ title: '', digest: '' }) } }]), /cannot have a gate/);
+});
+
+test('value flags: --flag value parses, and the human next command keeps every flag', async () => {
+  assert.deepEqual(parseArgs(['approvals', 'decide', 'a1', '--digest', 'abc', 'deny'], ['digest']), { positionals: ['approvals', 'decide', 'a1', 'deny'], flags: { digest: 'abc' } });
+  assert.deepEqual(parseArgs(['tui', '--width', '40'], ['width']), { positionals: ['tui'], flags: { width: '40' } });
+  assert.throws(() => parseArgs(['a', '--digest'], ['digest']), /needs a value/);
+  assert.throws(() => parseArgs(['a', '--digest', '--json'], ['digest']), /needs a value/);
+  const r = io({ audience: 'agent' });
+  assert.equal(await runCli(decideRegistry([]), ['approvals', 'decide', 'a1', '--digest', 'abc', 'allow-once', '--json'], r.value), 3);
+  const command = (r.json() as any).error.next[0].command;
+  assert.equal(command, 'example approvals decide a1 allow-once --digest=abc');
+  // The command reads back to the same input.
+  const words = command.split(' ').slice(1);
+  assert.deepEqual(parseArgs(words, ['digest']), { positionals: ['approvals', 'decide', 'a1', 'allow-once'], flags: { digest: 'abc' } });
+  assert.equal(formatCommand('example', ['x'], { positionals: ['--odd'], flags: { a: 'b c' } }), "example x '--a=b c' -- --odd");
+  // A usage error from the value parse is an envelope, not a throw.
+  const bad = io({ audience: 'agent' });
+  assert.equal(await runCli(decideRegistry([]), ['approvals', 'decide', 'a1', 'deny', '--json', '--digest'], bad.value), 2);
+  assert.equal((bad.json() as any).error.code, 'usage');
+});
+
+test('raw verbs own stdout and their exit status', async () => {
+  const tui: Verb<unknown, number> = {
+    path: ['tui'], opClass: 'read', schema: 'example.status/1', summary: 'Terminal view', output: 'raw', valueFlags: ['width'],
+    input: a => a,
+    run: async (a: any) => { out.push(`snapshot ${a.flags.width ?? 80}`); return 4; },
+  };
+  const out: string[] = [];
+  const reg = defineRegistry('example', [tui]);
+  let r = io();
+  assert.equal(await runCli(reg, ['tui', '--width', '40', '--json'], r.value), 4);
+  assert.equal(r.out(), '');
+  assert.deepEqual(out, ['snapshot 40']);
+  const broken = defineRegistry('example', [{ ...tui, run: async () => 'nope' as any }]);
+  r = io();
+  assert.equal(await runCli(broken, ['tui', '--json'], r.value), 1);
+  assert.equal((r.json() as any).error.code, 'internal');
+  assert.throws(() => defineRegistry('example', [{ ...tui, output: 'weird' as any }]), /output mode/);
 });

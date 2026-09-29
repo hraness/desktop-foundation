@@ -90,7 +90,7 @@ export function actionFor(key: string): Action {
 export async function runTui<S>(opts: RunTuiOptions<S>): Promise<number> {
   const io = opts.io ?? { stdout: process.stdout, stdin: process.stdin };
   let loaded = await opts.load();
-  if (opts.mode === 'json') { io.stdout.write(`${JSON.stringify(loaded, null, 2)}\n`); return envelopeExitCode(loaded); }
+  if (opts.mode === 'json') { io.stdout.write(`${JSON.stringify(loaded)}\n`); return envelopeExitCode(loaded); }
   const text = (envelope: Envelope<S>, width: number, only?: View<S>) => envelope.ok
     ? renderSnapshot(only ? [only] : opts.views, envelope.data, width)
     : `${envelope.error.code}: ${clean(envelope.error.message)}\n`;

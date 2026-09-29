@@ -158,6 +158,12 @@ export async function requireHuman(opts: RequireHumanOptions): Promise<GateResul
 export interface Challenge { id: string; verb: string; digest: string; expiresAtMs: number; mac: string }
 export type RedeemResult = { ok: true } | { ok: false; code: 'gate-failed' | 'gate-expired' | 'digest-mismatch'; message: string };
 
+const isChallenge = (c: unknown): c is Challenge => {
+  if (typeof c !== 'object' || c === null) return false;
+  const { id, verb, digest, expiresAtMs, mac } = c as Record<string, unknown>;
+  return typeof id === 'string' && typeof verb === 'string' && typeof digest === 'string' && typeof mac === 'string' && Number.isSafeInteger(expiresAtMs);
+};
+
 /** Issues and redeems challenges with a per-process key. */
 export class ChallengeIssuer {
   readonly #key = randomBytes(32);
@@ -171,7 +177,10 @@ export class ChallengeIssuer {
     return { id, verb: opts.verb, digest: opts.digest, expiresAtMs, mac: this.#mac(id, opts.verb, opts.digest, expiresAtMs) };
   }
   redeem(c: Challenge, verb: string, digest: string, nowMs = Date.now()): RedeemResult {
-    if (typeof c?.mac !== 'string' || !sameText(this.#mac(c.id, c.verb, c.digest, c.expiresAtMs), c.mac)) return { ok: false, code: 'gate-failed', message: 'The challenge is not valid.' };
+    // A challenge usually arrives as parsed JSON. Check every field's type
+    // before the MAC: `${[id]}` === id, so an id wrapped in an array would
+    // pass the MAC and miss the single-use set below.
+    if (!isChallenge(c) || !sameText(this.#mac(c.id, c.verb, c.digest, c.expiresAtMs), c.mac)) return { ok: false, code: 'gate-failed', message: 'The challenge is not valid.' };
     if (c.verb !== verb || c.digest !== digest) return { ok: false, code: 'digest-mismatch', message: 'The challenge is for a different decision.' };
     if (nowMs > c.expiresAtMs) return { ok: false, code: 'gate-expired', message: 'The challenge expired.' };
     for (const [id, expires] of this.#used) if (expires < nowMs) this.#used.delete(id);

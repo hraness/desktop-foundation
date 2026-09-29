@@ -71,6 +71,17 @@ test('challenges are single-use, bound to the verb and digest, unforgeable and e
   assert.equal((issuer.redeem(c, 'approvals decide', '3f2a', c.expiresAtMs + 1) as any).code, 'gate-expired');
   assert.deepEqual(issuer.redeem(c, 'approvals decide', '3f2a'), { ok: true });
   assert.equal((issuer.redeem(c, 'approvals decide', '3f2a') as any).code, 'gate-failed');
+  // A redeemed challenge stays spent when its fields come back in another JSON shape.
+  const wire = JSON.parse(JSON.stringify(c));
+  for (const shaped of [{ ...wire, id: [c.id] }, { ...wire, id: [[c.id]] }, { ...wire, verb: [c.verb] }, { ...wire, digest: [c.digest] },
+    { ...wire, mac: [c.mac] }, { ...wire, expiresAtMs: String(c.expiresAtMs) }, { ...wire, expiresAtMs: [c.expiresAtMs] }, null, 'x']) {
+    assert.equal((issuer.redeem(shaped as any, 'approvals decide', '3f2a') as any).code, 'gate-failed', JSON.stringify(shaped));
+  }
+  // Wrong types are rejected before the single-use check, so a fresh challenge sent with an array id is not spent by it.
+  const fresh = issuer.issue({ verb: 'approvals decide', digest: '3f2a' });
+  assert.equal((issuer.redeem({ ...fresh, id: [fresh.id] } as any, 'approvals decide', '3f2a') as any).code, 'gate-failed');
+  assert.deepEqual(issuer.redeem(JSON.parse(JSON.stringify(fresh)), 'approvals decide', '3f2a'), { ok: true });
+  assert.equal((issuer.redeem(JSON.parse(JSON.stringify(fresh)), 'approvals decide', '3f2a') as any).code, 'gate-failed');
   const d = ownerChallenge({ verb: 'v', digest: 'd' });
   assert.deepEqual(redeemChallenge(d, 'v', 'd'), { ok: true });
   assert.equal(redeemChallenge(d, 'v', 'd').ok, false);

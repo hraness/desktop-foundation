@@ -11,6 +11,8 @@ export type NextAudience = 'agent' | 'human';
 
 export const ERROR_SCHEMA = 'hraness.error/1';
 export const COMMANDS_SCHEMA = 'hraness.commands/1';
+/** `--help --json`: the same verb descriptors, for the verbs the help covers. */
+export const HELP_SCHEMA = 'hraness.help/1';
 export const EXIT = { ok: 0, failure: 1, usage: 2, humanRequired: 3, ownerUnavailable: 4, conflict: 5 } as const;
 
 /** Shared codes and their exit statuses (contract/error-codes.json). */
@@ -100,6 +102,14 @@ export interface Verb<I = unknown, O = unknown> {
   summary: string;
   /** Flags that take the next argument as their value, so `--digest abc` works like `--digest=abc`. */
   valueFlags?: readonly string[];
+  /**
+   * Flags that take no value, such as `--snapshot`. Only these, the
+   * `valueFlags`, `--json` and `--help` are accepted; any other flag is a
+   * usage error, so a typo never runs the verb.
+   */
+  flags?: readonly string[];
+  /** Positional arguments for `--help`, such as `<id> <allow-once|deny>`. */
+  usage?: string;
   /** Parses arguments; throw `HranessError('usage', ...)` on bad input. */
   input: (argv: ParsedArgs) => I;
   run: (input: I, ctx: VerbContext) => Promise<O>;
@@ -141,7 +151,8 @@ export function defineRegistry(product: string, verbs: Verb<any, any>[]): Regist
     if ((verb.opClass === 'read' || verb.opClass === 'operate') && verb.gate) throw new Error(`${verb.opClass === 'read' ? 'Read' : 'Operate'} verb ${name} cannot have a gate.`);
     if (verb.gate && !['T1T2', 'T3'].includes(verb.gate.tier)) throw new Error(`Verb ${name} has an unknown gate tier.`);
     if (verb.operateWhen && (!verb.gate || typeof verb.operateWhen.test !== 'function' || !verb.operateWhen.summary)) throw new Error(`Verb ${name} has operateWhen without a gate, a test or a summary.`);
-    if (verb.valueFlags?.some(flag => !FLAG.test(flag) || flag === 'json')) throw new Error(`Verb ${name} has an invalid value flag.`);
+    if (verb.valueFlags?.some(flag => !FLAG.test(flag) || RESERVED_FLAGS.has(flag))) throw new Error(`Verb ${name} has an invalid value flag.`);
+    if (verb.flags?.some(flag => !FLAG.test(flag) || RESERVED_FLAGS.has(flag) || verb.valueFlags?.includes(flag))) throw new Error(`Verb ${name} has an invalid flag.`);
     if (verb.output !== undefined && verb.output !== 'envelope' && verb.output !== 'raw') throw new Error(`Verb ${name} has an unknown output mode.`);
     if (seen.has(name)) throw new Error(`Verb ${name} is registered twice.`);
     seen.add(name);
@@ -160,6 +171,36 @@ export function commandsJson(reg: Registry, at?: Date): Envelope<{ product: stri
 }
 
 const FLAG = /^[a-z][a-z0-9-]*$/;
+/** Every verb takes these; a verb cannot declare them. */
+const RESERVED_FLAGS = new Set(['json', 'help']);
+/** Splits `--help` and `-h` (before any `--`) out of `argv`. */
+function takeHelp(argv: readonly string[]): { help: boolean; rest: string[] } {
+  const end = argv.indexOf('--');
+  const rest = argv.filter((arg, i) => (end >= 0 && i >= end) || (arg !== '--help' && arg !== '-h'));
+  return { help: rest.length !== argv.length, rest };
+}
+function verbLine(product: string, v: Verb<any, any>): string {
+  return `${product} ${v.path.join(' ')}  [${v.opClass}${v.gate ? ` ${v.gate.tier}` : ''}]  ${v.summary}`;
+}
+/** Help for one verb: usage line, summary, class and every flag it accepts. */
+export function verbHelp(reg: Registry, verb: Verb<any, any>): string {
+  const flags = [
+    ...(verb.valueFlags ?? []).map(f => `  --${f} <value>`),
+    ...(verb.flags ?? []).map(f => `  --${f}`),
+    '  --json          Print one JSON envelope',
+    '  -h, --help      Print this help',
+  ];
+  const gate = verb.gate ? ` Needs a person at a terminal (gate ${verb.gate.tier})${verb.operateWhen ? `, except: ${verb.operateWhen.summary}` : ''}.` : '';
+  return [
+    `usage: ${reg.product} ${verb.path.join(' ')}${verb.usage ? ` ${verb.usage}` : ''} [options]`,
+    '',
+    `${verb.summary}`,
+    `Class: ${verb.opClass}.${gate}`,
+    '',
+    'Options:',
+    ...flags,
+  ].join('\n');
+}
 /**
  * Splits `args` into positionals and flags. A flag named in `valueFlags`
  * takes the next argument as its value when written without `=`; a
@@ -219,12 +260,14 @@ function shellWord(word: string): string {
 
 /**
  * Runs one command line and returns its exit status. `commands` lists the
- * verbs. `--json` prints one envelope. A gated verb run with `--json` by an
+ * verbs. `--help` (or `-h`) prints help and never runs a verb; a flag the
+ * verb did not declare is a usage error. `--json` prints one envelope. A gated verb run with `--json` by an
  * agent (or with no one at the terminal) answers `human-required` (exit 3)
  * and never prompts; `HRANESS_AUDIENCE` and `--confirm` never satisfy a
  * gate. Otherwise the gate asks at `/dev/tty`.
  */
-export async function runCli(reg: Registry, argv: readonly string[], io: CliIO): Promise<number> {
+export async function runCli(reg: Registry, fullArgv: readonly string[], io: CliIO): Promise<number> {
+  const { help, rest: argv } = takeHelp(fullArgv);
   const env = io.env ?? process.env;
   const audience = io.audience ?? detectAudience({ env });
   let parsed: ParsedArgs;
@@ -248,7 +291,17 @@ export async function runCli(reg: Registry, argv: readonly string[], io: CliIO):
   catch (error) { return fail(error); }
   json = parsed.flags.json === true;
   let words = parsed.positionals;
-  if (words[0] === 'commands') return emit(commandsJson(reg), reg.verbs.map(v => `${reg.product} ${v.path.join(' ')}  [${v.opClass}${v.gate ? ` ${v.gate.tier}` : ''}]  ${v.summary}`).join('\n'));
+  if (words[0] === 'commands') return emit(commandsJson(reg), reg.verbs.map(v => verbLine(reg.product, v)).join('\n'));
+  // --help never runs a verb. It answers for the verb named, or lists the
+  // verbs under the words given (all of them at the top level).
+  if (help) {
+    const found = lookupVerb(reg, words);
+    if (found) return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: [describeVerb(found)] }), verbHelp(reg, found));
+    const under = reg.verbs.filter(v => words.every((w, i) => v.path[i] === w));
+    if (!under.length) return fail(new HranessError('usage', `Unknown command: ${words.join(' ')}.`, undefined, [{ command: `${reg.product} commands --json`, why: 'List every verb', audience: 'agent' }]));
+    return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: under.map(describeVerb) }),
+      [`usage: ${reg.product} ${words.length ? `${words.join(' ')} ` : ''}<command> [options]`, '', ...under.map(v => `  ${verbLine(reg.product, v)}`), '', `Run \`${reg.product} <command> --help\` for one command.`].join('\n'));
+  }
   const verb = lookupVerb(reg, words);
   if (!verb) return fail(new HranessError('usage', words.length ? `Unknown command: ${words.join(' ')}.` : 'Name a command.', undefined, [{ command: `${reg.product} commands --json`, why: 'List every verb', audience: 'agent' }]));
   try { parsed = parseArgs(argv, verb.valueFlags ?? []); }
@@ -256,6 +309,10 @@ export async function runCli(reg: Registry, argv: readonly string[], io: CliIO):
   json = parsed.flags.json === true;
   words = parsed.positionals;
   if (lookupVerb(reg, words) !== verb) return fail(new HranessError('usage', `Put options after \`${reg.product} ${verb.path.join(' ')}\`.`));
+  const accepted = new Set(['json', ...(verb.valueFlags ?? []), ...(verb.flags ?? [])]);
+  const unknown = Object.keys(parsed.flags).find(name => !accepted.has(name));
+  if (unknown) return fail(new HranessError('usage', `Unknown option --${unknown} for \`${reg.product} ${verb.path.join(' ')}\`. Nothing ran.`, undefined, [{ command: `${reg.product} ${verb.path.join(' ')} --help`, why: 'List its options', audience: 'human' }]));
+  if (verb.flags?.some(name => typeof parsed.flags[name] === 'string')) return fail(new HranessError('usage', `--${verb.flags.find(name => typeof parsed.flags[name] === 'string')} takes no value.`));
   const flags = { ...parsed.flags };
   delete flags.json;
   const args: ParsedArgs = { positionals: words.slice(verb.path.length), flags };

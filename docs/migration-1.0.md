@@ -16,30 +16,32 @@ Your product should already have, on 0.9:
 3. A call to `retireLegacyLoginItem` so the old menu bar login item no
    longer starts at login.
 
-Then check that nothing imports what 1.0 removed:
+Then look for the common uses of what 1.0 removed:
 
 ```sh
-git grep -nE "desktop-foundation/menu-kit|handleCompanionCommand|runCompanion|startCompanion|stopCompanion|companionStatus|serveCompanion|MenuModel|desktop_foundation::(run|Host|MenuModel|MenuNode|MenuItem|browser|outputs|protocol|symbols|QUIT_ACTION_ID)|permission_menu_items|PermissionMenuRow|Surface::Menu" -- ':!*.lock'
+git grep -nE "desktop-foundation/menu-kit|Companion|Snapshot|RunnerProtocols|parseRunnerEvent|assertAppId|openBrowser|permissionMenuItems|menuLoginItem|lintMenu|desktop_foundation::|permission_menu_items|PermissionMenuRow|Surface::Menu" -- ':!*.lock'
 ```
 
-The command should print nothing.
+Review each hit against the table below. The grep is a first pass, not
+proof: after bumping the pin, `tsc` and `cargo build` report every removed
+name that is still in use.
 
 ## What was removed
 
 | Removed | Use instead |
 |---|---|
-| The tray: `hraness-companion` with no arguments or `--state-dir` (the alias also refuses `--foreground`, which product CLIs passed to their menu bar command) | `<product> tui` for a person, `<product> status --json` for a script |
+| The tray: `hraness-companion --state-dir <dir>`. The alias also refuses the argv around it: no arguments and malformed `--state-dir` or `--check-protocol` argv (0.x answered those with `invalid-arguments`), and `--foreground` (the flag product CLIs passed to their menu bar command) | `<product> tui` for a person, `<product> status --json` for a script |
 | `hraness-companion --check-protocol` and the menu snapshot protocol (v1 and v2 frames, `docs/protocol-v2.md`) | Nothing; there is no menu to check |
-| `./menu-kit` (`layout`, `lintMenu`, `assertMenuFixture`, `renderMenuTree`, `openAtLoginItem`, `degradedMenu`, `actionErrorItem`, `MenuActionError`) | `./tui` views and `status --json`. build-governance 0.5 drops the menu fixture check |
+| `./menu-kit` and the same names at the package root (`layout`, `lintMenu`, `assertMenuFixture`, `renderMenuTree`, `openAtLoginItem`, `degradedMenu`, `actionErrorItem`, `MenuActionError`) | `./tui` views and `status --json`. build-governance 0.5 drops the menu fixture check |
 | The `companion` CLI (`companion doctor`, `companion lint-menu`) | `<product> doctor` and `resolveHelper` for the helper |
 | Root exports for the companion lifecycle: `runCompanion`, `startCompanion`, `stopCompanion`, `companionStatus`, `handleCompanionCommand`, `describeCompanionError`, `serveCompanion`, `companionHelp`, `menuLoginItem`, `CompanionOptions` and related types and helpers | `./control` (`ensureOwner`, `controlStatus`, `adminRequest`) and `./login` |
-| Root exports for menu snapshots: `validateSnapshot`, `validateSnapshotV2`, `downlevelSnapshot`, `parseRunnerProtocols`, `runnerProtocols`, `parseRunnerEvent`, `assertAppId`, `PROTOCOL_VERSION`, `ACTION_ERROR_MS` and the `MenuModel`, `MenuItem`, `Snapshot` and `TrayIcon` types (`MAX_FRAME_BYTES` stays, for the notice and prompt frames) | Nothing |
+| Root exports for menu snapshots: `validateSnapshot`, `validateSnapshotV2`, `downlevelSnapshot`, `parseRunnerProtocols`, `runnerProtocols`, `parseRunnerEvent`, `assertAppId`, `PROTOCOL_VERSION`, `ACTION_ERROR_MS` and the `MenuModel`, `MenuItem`, `Snapshot` and `TrayIcon` types, and related helpers, constants and `*V2` and `Runner*` types (`MAX_FRAME_BYTES` stays, for the notice and prompt frames) | Nothing |
 | `openBrowser` and the Rust `browser` module | The product's own launcher, or print the URL |
 | `permissionMenuItems` (TypeScript), `permission_menu_items` and `PermissionMenuRow` (Rust), and the menu surface in permission copy (`Surface::Menu` in Rust) | `renderPrePrompt`, `renderRecovery` and `permissionErrorJson` |
 | The Rust crate's `MenuModel`, `MenuNode`, `Host`, `run`, `outputs` and symbol table, and the Tauri, WebKitGTK and AppIndicator dependencies | `hraness-control-kit` with the `tui` feature |
 
 Still exported, unchanged: `packagedManifest`, `parseReleaseManifest`,
-`installBinary`, `inspectBinary`, `userPaths`, `diagnosePlatform`, the
+`ensureBinary`, `inspectBinary`, `userPaths`, `diagnosePlatform`, the
 prompt calls, the notice and permission-kind types, `./permissions`,
 `./audience`, `./cli-style` and every 0.9 subpath. The Rust crate
 re-exports `identity`, `notice`, `prompt`, `service`, `audience` and

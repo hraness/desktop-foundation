@@ -35,5 +35,5 @@ mod process_identity;
 #[cfg(feature = "tui")]
 pub mod tui;
 
-pub use envelope::{Audience, Envelope, ErrorBody, ErrorCode, NextStep};
+pub use envelope::{Audience, Envelope, ErrorBody, ErrorCode, ErrorPermission, NextStep};
 pub use registry::{GateTier, OpClass, Registry, Verb};

@@ -1,6 +1,6 @@
 [package]
 name = "hraness-control-kit"
-version = "1.0.0"
+version = "1.1.0"
 description = "Headless control for Hraness products: JSON envelope and exit codes, verb registry, owner process with Unix control sockets, human gate and TUI views"
 edition = "2021"
 # std File::try_lock for the supervisor lock.

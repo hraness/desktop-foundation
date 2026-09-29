@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-foundation"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "hraness-cli-kit",
  "hraness-local-app",
@@ -900,14 +900,14 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hraness-cli-kit"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "clap",
 ]
 
 [[package]]
 name = "hraness-control-kit"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "hraness-local-app"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "fs2",
  "glib",

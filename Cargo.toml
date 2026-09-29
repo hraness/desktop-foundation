@@ -3,7 +3,7 @@ members = [".", "crates/hraness-cli-kit", "crates/hraness-local-app", "crates/hr
 
 [package]
 name = "desktop-foundation"
-version = "1.0.0"
+version = "1.1.0"
 description = "The one-shot helper (hraness-helper, with its hraness-companion alias) and control kit for Hraness CLI products on macOS, Windows, and Linux"
 edition = "2021"
 rust-version = "1.77.2"
@@ -11,8 +11,8 @@ license = "MIT"
 publish = false
 
 [dependencies]
-hraness-cli-kit = { version = "1.0.0", path = "crates/hraness-cli-kit" }
-hraness-local-app = { version = "1.0.0", path = "crates/hraness-local-app" }
+hraness-cli-kit = { version = "1.1.0", path = "crates/hraness-cli-kit" }
+hraness-local-app = { version = "1.1.0", path = "crates/hraness-local-app" }
 
 # The one-shot helper. Since 1.0 there is no tray and no Tauri.
 [[bin]]

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.0 - 2026-09-29
+
+Command-line errors and help from `./registry` now follow `CLI_MENU_STYLE.md`, agents get JSON without asking for it, and an error can name the macOS permission behind it. Exit codes, schema ids, error codes, the envelope shape and the order of `next` are unchanged. Some message text did change, and every change is listed below.
+
+### Changes
+
+- A person at a terminal sees a text error as two lines on stderr: `✗` and one sentence, then `→` and the one command to run next (`FAIL` and `->` without UTF-8). A mistyped command adds `Did you mean "status"?`, and `HRANESS_DEBUG=1` adds the error code.
+- Help starts with `Usage:`. It says in plain words when a person has to decide, instead of the `[decide T1T2]` tags. `<product> help <command>` works like `<command> --help`, and `help help` prints the root help. User-facing text no longer says "gate".
+- When `detectAudience` reports an agent, `runCli` prints the JSON envelope even without `--json`. Raw verbs still see only the `--json` the caller passed.
+- A single-dash option such as `-x`, before or after the command, is a usage error (exit 2), and the command does not run. In 1.0 it reached the verb as a word. After `--`, and for a bare `-` or `-5`, it is still a word.
+- `error.permission` is new and optional: `{ kind, settingsUrl }`, the macOS permission behind the failure and the System Settings pane that fixes it.
+  - It is in `contract/envelope.schema.json`, the TypeScript `ErrorBody` and `HranessError`, and the Rust `ErrorBody`.
+  - New helpers: `errorPermission(kind, settingsUrl)` in TypeScript, and `ErrorPermission::new(kind).with_settings_url(url)` with `ErrorBody::with_permission` in Rust. Both drop a link outside System Settings; TypeScript also keeps only the known panes, and Rust checks the `x-apple.systempreferences:` prefix.
+  - `permissionErrorJson` keeps its 1.0 shape.
+- **Scripts (the quiet audience: no terminal, no agent)** get what 1.0 gave them. A failure still prints the error envelope on stdout. The stderr line carries `code: message` after a plain `FAIL `, in ASCII whatever the locale: `FAIL usage: Unknown command "x".` then `-> example --help`. A grep anchored at the line start (`^human-required:`) must allow for the `FAIL ` prefix. The 1.0 `  next:` lines are gone.
+- **`--json` output** has the same shape, with these message changes:
+  - An unknown command reads `Unknown command "x".` instead of `Unknown command: x.`, adds `Did you mean …?` when there is a close match, and has two `next` steps (agent first, as before, then `<product> --help` for a person).
+  - `Name a command after "approvals".` is new for a group name typed with no command after it.
+  - Unknown options read `Unknown option "--x" for "example status", so nothing ran.`, and a malformed one reads `Unknown option "--Bad", so nothing ran.`
+  - `Put options after "example status".` uses quotes instead of backticks.
+  - Messages that ended with "… . Nothing changed." now end with ", so nothing changed." This covers `human-required`, `gate-failed`, `gate-expired` and T3 `unsupported-platform`, in TypeScript and Rust. The T3 message now reads `Deciding with your macOS login is not supported yet, so nothing changed.`
+  - An undeclared code reads `The command answered an undeclared code …` instead of `The verb answered …`.
+  - Match on `error.code`, never on message text.
+- **`commands` text output** is a `Usage:` line and a `Commands` list without class tags. It is no longer one bare line per verb. Scripts should read `commands --json`.
+- **1.0 readers reject `error.permission`**. The 1.0 schema's `error` has `additionalProperties: false`, and the 1.0 Rust `ErrorBody` denies unknown fields. An envelope without it is byte-identical to 1.0. Set it only when every reader is on 1.1.
+- **Rust `ErrorBody` has a new public field**, `permission`. Code that builds `ErrorBody` with a struct literal, or destructures it without `..`, must add the field or use `ErrorBody::new`. No Hraness repository does either.
+
 ## 1.0.0 - 2026-09-29
 
 The menu bar is gone. Products run through the owner process, `status --json`, `tui` and the verbs that 0.9 added; `hraness-helper` handles the few things a terminal cannot. Every product already moved off the tray, and each pins an exact release, so nothing changes until a product bumps. See `docs/migration-1.0.md`.

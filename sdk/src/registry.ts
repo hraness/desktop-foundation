@@ -4,6 +4,8 @@
 
 import { detectAudience, type Audience } from './audience.js';
 import { requireHuman, type GateProof } from './human-gate.js';
+import { closest, cliLine, cliStyle } from './cli-style.js';
+import { isAllowedSettingsUrl } from './permissions.js';
 
 export type OpClass = 'read' | 'operate' | 'decide' | 'decide-legacy';
 export type GateTier = 'T1T2' | 'T3';
@@ -39,7 +41,22 @@ export const validSchemaId = (schema: string) => SCHEMA_ID.test(schema);
 export const validProductCode = (code: string) => PRODUCT_CODE.test(code);
 
 export interface NextStep { command: string; why: string; audience: NextAudience }
-export interface ErrorBody { code: ErrorCode; message: string; detail?: string; next?: NextStep[] }
+/**
+ * A macOS permission behind the failure: its kind (`full-disk-access`,
+ * `keychain`, ...) and, when it has one, the System Settings pane to open.
+ * Added in 1.1.0; readers that do not know it can ignore it.
+ */
+export interface ErrorPermission { kind: string; settingsUrl?: string | null }
+/**
+ * The `error.permission` member. A settings link that is not one of the known
+ * System Settings panes is dropped, so an envelope never carries a link a
+ * client should not open. `permissionError()` from `./permissions` gives both
+ * fields: `errorPermission(info.kind, info.settingsUrl)`.
+ */
+export function errorPermission(kind: string, settingsUrl?: string | null): ErrorPermission {
+  return settingsUrl && isAllowedSettingsUrl(settingsUrl) ? { kind, settingsUrl } : { kind };
+}
+export interface ErrorBody { code: ErrorCode; message: string; detail?: string; next?: NextStep[]; permission?: ErrorPermission }
 export type Envelope<T> =
   | { ok: true; schema: string; generatedAt: string; data: T; next?: NextStep[] }
   | { ok: false; schema: typeof ERROR_SCHEMA; generatedAt: string; error: ErrorBody };
@@ -54,12 +71,15 @@ export function exitCodeFor(code: ErrorCode): number {
 
 /** An error a verb throws to answer with a specific code. */
 export class HranessError extends Error {
-  constructor(readonly code: ErrorCode, message: string, readonly detail?: string, readonly next: NextStep[] = []) {
+  constructor(readonly code: ErrorCode, message: string, readonly detail?: string, readonly next: NextStep[] = [], readonly permission?: ErrorPermission) {
     super(message);
     this.name = 'HranessError';
   }
   toBody(): ErrorBody {
-    return { code: this.code, message: this.message, ...(this.detail ? { detail: this.detail } : {}), ...(this.next.length ? { next: this.next } : {}) };
+    return {
+      code: this.code, message: this.message, ...(this.detail ? { detail: this.detail } : {}), ...(this.next.length ? { next: this.next } : {}),
+      ...(this.permission ? { permission: errorPermission(this.permission.kind, this.permission.settingsUrl) } : {}),
+    };
   }
 }
 
@@ -81,8 +101,10 @@ export interface ParsedArgs {
 }
 export interface CliIO {
   stdout: { write(text: string): unknown };
-  stderr: { write(text: string): unknown };
+  /** `isTTY` turns on color for the `✗` and `→` symbols. */
+  stderr: { write(text: string): unknown; isTTY?: boolean };
   env?: NodeJS.ProcessEnv;
+  /** Defaults to `detectAudience`. An agent gets the JSON envelope with or without `--json`. */
   audience?: Audience;
   /** Replaces the /dev/tty gate in tests. */
   gate?: typeof requireHuman;
@@ -179,26 +201,51 @@ function takeHelp(argv: readonly string[]): { help: boolean; rest: string[] } {
   const rest = argv.filter((arg, i) => (end >= 0 && i >= end) || (arg !== '--help' && arg !== '-h'));
   return { help: rest.length !== argv.length, rest };
 }
-function verbLine(product: string, v: Verb<any, any>): string {
-  return `${product} ${v.path.join(' ')}  [${v.opClass}${v.gate ? ` ${v.gate.tier}` : ''}]  ${v.summary}`;
+function verbLines(product: string, verbs: readonly Verb<any, any>[]): string[] {
+  const names = verbs.map(v => `${product} ${v.path.join(' ')}`);
+  const width = Math.max(0, ...names.map(n => n.length));
+  return verbs.map((v, i) => `  ${names[i].padEnd(width)}  ${v.summary}`);
 }
-/** Help for one verb: usage line, summary, class and every flag it accepts. */
+/** What a verb's class means for the person reading its help, in plain words. */
+function personLine(verb: Verb<any, any>): string | undefined {
+  if (!verb.gate) return undefined;
+  if (verb.gate.tier === 'T3') return 'A person decides this with their macOS login, which is not supported yet.';
+  return `A person decides this at their own terminal${verb.operateWhen ? `, except for ${verb.operateWhen.summary}` : ''}.`;
+}
+/** Help for one verb: `Usage:` line, summary, who decides, and every flag it accepts. */
 export function verbHelp(reg: Registry, verb: Verb<any, any>): string {
-  const flags = [
-    ...(verb.valueFlags ?? []).map(f => `  --${f} <value>`),
-    ...(verb.flags ?? []).map(f => `  --${f}`),
-    '  --json          Print one JSON envelope',
-    '  -h, --help      Print this help',
+  const flags: [string, string][] = [
+    ...(verb.valueFlags ?? []).map((f): [string, string] => [`--${f} <value>`, '']),
+    ...(verb.flags ?? []).map((f): [string, string] => [`--${f}`, '']),
+    ['--json', 'Print machine-readable output'],
+    ['-h, --help', 'Print this help'],
   ];
-  const gate = verb.gate ? ` Needs a person at a terminal (gate ${verb.gate.tier})${verb.operateWhen ? `, except: ${verb.operateWhen.summary}` : ''}.` : '';
+  const width = Math.max(...flags.map(([f]) => f.length));
+  const person = personLine(verb);
   return [
-    `usage: ${reg.product} ${verb.path.join(' ')}${verb.usage ? ` ${verb.usage}` : ''} [options]`,
+    `Usage: ${reg.product} ${verb.path.join(' ')}${verb.usage ? ` ${verb.usage}` : ''} [options]`,
     '',
-    `${verb.summary}`,
-    `Class: ${verb.opClass}.${gate}`,
+    verb.summary,
+    ...(person ? [person] : []),
     '',
-    'Options:',
-    ...flags,
+    'Options',
+    ...flags.map(([f, why]) => (why ? `  ${f.padEnd(width)}  ${why}` : `  ${f}`)),
+  ].join('\n');
+}
+/** Help for a group of verbs, or every verb at the top level. */
+function groupHelp(reg: Registry, words: readonly string[], under: readonly Verb<any, any>[]): string {
+  const prefix = words.length ? `${words.join(' ')} ` : '';
+  return [
+    `Usage: ${reg.product} ${prefix}<command> [options]`,
+    '',
+    'Commands',
+    ...verbLines(reg.product, under),
+    '',
+    'Options',
+    '  --json      Print machine-readable output',
+    '  -h, --help  Print help',
+    '',
+    `Run \`${reg.product} help ${prefix}<command>\` for one command.`,
   ].join('\n');
 }
 /**
@@ -220,7 +267,7 @@ export function parseArgs(args: readonly string[], valueFlags: Iterable<string> 
     }
     const eq = arg.indexOf('=');
     const name = arg.slice(2, eq < 0 ? undefined : eq);
-    if (!FLAG.test(name)) throw new HranessError('usage', `Unknown option ${arg}.`);
+    if (!FLAG.test(name)) throw new HranessError('usage', `Unknown option "${arg}", so nothing ran.`);
     if (eq >= 0) { flags[name] = arg.slice(eq + 1); continue; }
     if (!takesValue.has(name)) { flags[name] = true; continue; }
     const value = args[i + 1];
@@ -238,6 +285,23 @@ export function formatCommand(product: string, path: readonly string[], args: Pa
   return words.map(shellWord).join(' ');
 }
 
+/**
+ * The first single-dash option before `--`, such as `-x`, skipping the values
+ * of value flags. `-h` never reaches here and a bare `-` or `-5` is a word.
+ */
+function shortOption(args: readonly string[], valueFlags: readonly string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--') return undefined;
+    if (arg.startsWith('--')) {
+      if (!arg.includes('=') && valueFlags.includes(arg.slice(2))) i++;
+      continue;
+    }
+    if (/^-[A-Za-z]/.test(arg)) return arg;
+  }
+  return undefined;
+}
+
 /** The verb with the longest path that prefixes `words`. */
 export function lookupVerb(reg: Registry, words: readonly string[]): Verb<any, any> | undefined {
   return reg.verbs
@@ -249,7 +313,7 @@ export function lookupVerb(reg: Registry, words: readonly string[]): Verb<any, a
 export function humanRequired(reg: Registry, verb: Verb<any, any>, command: string): ErrorBody {
   return {
     code: 'human-required',
-    message: `\`${reg.product} ${verb.path.join(' ')}\` is a decision for a person. Nothing changed.`,
+    message: `\`${reg.product} ${verb.path.join(' ')}\` is a decision for a person, so nothing changed.`,
     next: [{ command, why: 'Run this in your own terminal to decide.', audience: 'human' }],
   };
 }
@@ -259,70 +323,147 @@ function shellWord(word: string): string {
 }
 
 /**
+ * The unknown-command error for `words`: names the first unknown word,
+ * suggests the closest command at that level, and points at the help for
+ * the level it reached.
+ */
+function unknownCommand(reg: Registry, words: readonly string[]): HranessError {
+  let known = 0;
+  while (known < words.length && reg.verbs.some(v => v.path.length > known && words.slice(0, known + 1).every((w, i) => v.path[i] === w))) known++;
+  const prefix = words.slice(0, known);
+  const help = [reg.product, ...prefix, '--help'].join(' ');
+  // The agent step stays first, as in 1.0.0; text output picks the human one.
+  const next: NextStep[] = [
+    { command: `${reg.product} commands --json`, why: 'List every verb', audience: 'agent' },
+    { command: help, why: 'List the commands', audience: 'human' },
+  ];
+  if (!words.length) return new HranessError('usage', 'Name a command.', undefined, next);
+  if (known === words.length) return new HranessError('usage', `Name a command after "${prefix.join(' ')}".`, undefined, next);
+  const typed = words.slice(0, known + 1).join(' ');
+  const seen = new Set<string>();
+  const candidates: [string, string][] = [];
+  for (const v of reg.verbs) {
+    if (v.path.length <= known || !prefix.every((w, i) => v.path[i] === w)) continue;
+    const word = v.path[known];
+    if (!seen.has(word)) { seen.add(word); candidates.push([word, [...prefix, word].join(' ')]); }
+  }
+  if (!known) candidates.push(['commands', 'commands'], ['help', 'help']);
+  const found = closest(words[known], candidates);
+  const suggestion = found === words[known] ? undefined : found;
+  return new HranessError('usage', `Unknown command "${typed}".${suggestion ? ` Did you mean "${suggestion}"?` : ''}`, undefined, next);
+}
+
+/**
+ * Text errors follow the Hraness CLI style: `✗` and one sentence, then `→`
+ * and one next command (the first step meant for a person, else the first
+ * step, else `fallback`). `HRANESS_DEBUG=1` adds the code and detail.
+ * `options.code` puts the code before the message, for the quiet audience.
+ */
+export function renderTextError(error: ErrorBody, fallback: string, stream: { isTTY?: boolean } = {}, env: NodeJS.ProcessEnv = process.env, options: { code?: boolean } = {}): string {
+  const style = cliStyle(stream, env);
+  const next = (error.next ?? []).find(n => n.audience === 'human') ?? error.next?.[0];
+  // `code: message`, as 1.0 printed it, for scripts that match on the code.
+  const message = options.code ? `${error.code}: ${error.message}` : error.message;
+  const lines = [cliLine('fail', message, style), cliLine('next', next?.command ?? fallback, style)];
+  if (env.HRANESS_DEBUG === '1') lines.push(`  code: ${error.code}`, ...(error.detail ? [`  detail: ${error.detail}`] : []));
+  return `${lines.join('\n')}\n`;
+}
+
+/**
  * Runs one command line and returns its exit status. `commands` lists the
- * verbs. `--help` (or `-h`) prints help and never runs a verb; a flag the
- * verb did not declare is a usage error. `--json` prints one envelope. A gated verb run with `--json` by an
- * agent (or with no one at the terminal) answers `human-required` (exit 3)
- * and never prompts; `HRANESS_AUDIENCE` and `--confirm` never satisfy a
- * gate. Otherwise the gate asks at `/dev/tty`.
+ * verbs. `--help`, `-h` and `help <command>` print help and never run a
+ * verb; a flag the verb did not declare is a usage error. `--json`, or an
+ * agent audience, prints one envelope; otherwise errors are two lines on
+ * stderr. A verb that needs a person, run with `--json` or by an agent (or
+ * with no one at the terminal), answers `human-required` (exit 3) and never
+ * prompts; `HRANESS_AUDIENCE` and `--confirm` never stand in for the
+ * person. Otherwise the person answers at `/dev/tty`.
  */
 export async function runCli(reg: Registry, fullArgv: readonly string[], io: CliIO): Promise<number> {
-  const { help, rest: argv } = takeHelp(fullArgv);
+  let { help, rest: argv } = takeHelp(fullArgv);
   const env = io.env ?? process.env;
-  const audience = io.audience ?? detectAudience({ env });
+  const audience = io.audience ?? detectAudience({ env, stderrIsTTY: io.stderr.isTTY });
+  // An agent reads JSON whether or not it asked for it.
+  const agent = audience === 'agent';
   let parsed: ParsedArgs;
-  let json = argv.includes('--json');
+  let explicitJson = argv.slice(0, argv.indexOf('--') < 0 ? undefined : argv.indexOf('--')).includes('--json');
+  let json = explicitJson || agent;
+  let fallback = `${reg.product} --help`;
   const emit = (envelope: Envelope<unknown>, text?: string): number => {
-    if (json || text === undefined) io.stdout.write(`${JSON.stringify(envelope)}\n`);
-    else if (envelope.ok) io.stdout.write(text.endsWith('\n') ? text : `${text}\n`);
-    if (!envelope.ok && !json) {
-      const { error } = envelope;
-      io.stderr.write(`${error.code}: ${error.message}\n${(error.next ?? []).map(n => `  next: ${n.command}  (${n.why})\n`).join('')}`);
-    }
+    // A person reads two lines on stderr. A script (the quiet audience) also
+    // gets the error envelope on stdout and the code on stderr, as in 1.0.
+    const quiet = audience === 'quiet';
+    if (json || (envelope.ok && text === undefined) || (!envelope.ok && quiet)) io.stdout.write(`${JSON.stringify(envelope)}\n`);
+    else if (envelope.ok) io.stdout.write(text!.endsWith('\n') ? text! : `${text}\n`);
+    if (!envelope.ok && !json) io.stderr.write(renderTextError(envelope.error, fallback, io.stderr, quiet ? { ...env, HRANESS_ASCII: '1', NO_COLOR: '1' } : env, { code: quiet }));
     return envelopeExitCode(envelope);
   };
   const fail = (error: unknown): number => {
     const body: ErrorBody = error instanceof HranessError ? error.toBody() : { code: 'internal', message: 'An unexpected failure.', detail: error instanceof Error ? error.message : String(error) };
-    if (!isErrorCode(body.code, reg.product)) return emit(errorEnvelope({ code: 'internal', message: `The verb answered an undeclared code ${body.code}.` }));
+    if (!isErrorCode(body.code, reg.product)) return emit(errorEnvelope({ code: 'internal', message: `The command answered an undeclared code ${body.code}.` }));
     return emit(errorEnvelope(body));
   };
   // Find the verb from a plain parse, then parse again with its value flags.
   try { parsed = parseArgs(argv); }
-  catch (error) { return fail(error); }
-  json = parsed.flags.json === true;
+  catch (error) {
+    const guess = lookupVerb(reg, argv.filter(arg => !arg.startsWith('-')));
+    if (guess) fallback = `${reg.product} ${guess.path.join(' ')} --help`;
+    return fail(error);
+  }
+  explicitJson = parsed.flags.json === true;
+  json = explicitJson || agent;
   let words = parsed.positionals;
-  if (words[0] === 'commands') return emit(commandsJson(reg), reg.verbs.map(v => verbLine(reg.product, v)).join('\n'));
-  // --help never runs a verb. It answers for the verb named, or lists the
+  // `help <command>` is `<command> --help`, unless a product registered `help`.
+  if (words[0] === 'help' && !reg.verbs.some(v => v.path[0] === 'help')) {
+    help = true;
+    const at = argv.indexOf('help');
+    argv = [...argv.slice(0, at), ...argv.slice(at + 1)];
+    words = words.slice(1);
+    // `help help` is the root help.
+    if (words.length === 1 && words[0] === 'help') words = [];
+  }
+  if (words[0] === 'commands' && !help) return emit(commandsJson(reg), [`Usage: ${reg.product} <command> [options]`, '', 'Commands', ...verbLines(reg.product, reg.verbs)].join('\n'));
+  // Help never runs a verb. It answers for the verb named, or lists the
   // verbs under the words given (all of them at the top level).
   if (help) {
     const found = lookupVerb(reg, words);
     if (found) return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: [describeVerb(found)] }), verbHelp(reg, found));
+    if (words[0] === 'commands') return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: [] }), [`Usage: ${reg.product} commands [options]`, '', 'List every command.', '', 'Options', '  --json      Print machine-readable output', '  -h, --help  Print this help'].join('\n'));
     const under = reg.verbs.filter(v => words.every((w, i) => v.path[i] === w));
-    if (!under.length) return fail(new HranessError('usage', `Unknown command: ${words.join(' ')}.`, undefined, [{ command: `${reg.product} commands --json`, why: 'List every verb', audience: 'agent' }]));
-    return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: under.map(describeVerb) }),
-      [`usage: ${reg.product} ${words.length ? `${words.join(' ')} ` : ''}<command> [options]`, '', ...under.map(v => `  ${verbLine(reg.product, v)}`), '', `Run \`${reg.product} <command> --help\` for one command.`].join('\n'));
+    if (!under.length) return fail(unknownCommand(reg, words));
+    return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: under.map(describeVerb) }), groupHelp(reg, words, under));
   }
   const verb = lookupVerb(reg, words);
-  if (!verb) return fail(new HranessError('usage', words.length ? `Unknown command: ${words.join(' ')}.` : 'Name a command.', undefined, [{ command: `${reg.product} commands --json`, why: 'List every verb', audience: 'agent' }]));
+  if (!verb) {
+    const lead = /^-[A-Za-z]/.test(words[0] ?? '') ? words[0] : undefined;
+    if (lead) return fail(new HranessError('usage', `Unknown option "${lead}", so nothing ran.`, undefined, [{ command: `${reg.product} --help`, why: 'List the commands', audience: 'human' }]));
+    return fail(unknownCommand(reg, words));
+  }
+  const name = `${reg.product} ${verb.path.join(' ')}`;
+  fallback = `${name} --help`;
   try { parsed = parseArgs(argv, verb.valueFlags ?? []); }
   catch (error) { return fail(error); }
-  json = parsed.flags.json === true;
+  explicitJson = parsed.flags.json === true;
+  json = explicitJson || agent;
   words = parsed.positionals;
-  if (lookupVerb(reg, words) !== verb) return fail(new HranessError('usage', `Put options after \`${reg.product} ${verb.path.join(' ')}\`.`));
+  if (lookupVerb(reg, words) !== verb) return fail(new HranessError('usage', `Put options after "${name}".`));
   const accepted = new Set(['json', ...(verb.valueFlags ?? []), ...(verb.flags ?? [])]);
-  const unknown = Object.keys(parsed.flags).find(name => !accepted.has(name));
-  if (unknown) return fail(new HranessError('usage', `Unknown option --${unknown} for \`${reg.product} ${verb.path.join(' ')}\`. Nothing ran.`, undefined, [{ command: `${reg.product} ${verb.path.join(' ')} --help`, why: 'List its options', audience: 'human' }]));
-  if (verb.flags?.some(name => typeof parsed.flags[name] === 'string')) return fail(new HranessError('usage', `--${verb.flags.find(name => typeof parsed.flags[name] === 'string')} takes no value.`));
+  const unknown = Object.keys(parsed.flags).find(flag => !accepted.has(flag));
+  const short = shortOption(argv, verb.valueFlags ?? []);
+  if (short) return fail(new HranessError('usage', `Unknown option "${short}" for "${name}", so nothing ran.`, undefined, [{ command: `${name} --help`, why: 'List its options', audience: 'human' }]));
+  if (unknown) return fail(new HranessError('usage', `Unknown option "--${unknown}" for "${name}", so nothing ran.`, undefined, [{ command: `${name} --help`, why: 'List its options', audience: 'human' }]));
+  if (verb.flags?.some(flag => typeof parsed.flags[flag] === 'string')) return fail(new HranessError('usage', `--${verb.flags.find(flag => typeof parsed.flags[flag] === 'string')} takes no value.`));
   const flags = { ...parsed.flags };
   delete flags.json;
   const args: ParsedArgs = { positionals: words.slice(verb.path.length), flags };
-  const ctx: VerbContext = { product: reg.product, json, audience, io };
+  // A raw verb owns stdout, so it sees only the --json the caller asked for.
+  const ctx: VerbContext = { product: reg.product, json: verb.output === 'raw' ? explicitJson : json, audience, io };
   try {
     const input = verb.input(args);
     if (verb.gate && !verb.operateWhen?.test(input)) {
       const described = verb.gate.describe(input);
       const command = described.command ?? formatCommand(reg.product, verb.path, args);
-      if (verb.gate.tier === 'T3') throw new HranessError('unsupported-platform', 'Gate tier T3 (OS owner authentication) is not supported yet. Nothing changed.');
+      if (verb.gate.tier === 'T3') throw new HranessError('unsupported-platform', 'Deciding with your macOS login is not supported yet, so nothing changed.');
       if (json && audience !== 'human') return emit(errorEnvelope(humanRequired(reg, verb, command)));
       const gate = await (io.gate ?? requireHuman)({ title: described.title, digest: described.digest, tier: verb.gate.tier });
       if (!gate.ok) {

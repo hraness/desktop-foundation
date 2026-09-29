@@ -23,7 +23,7 @@ executable, so the operating system's trust controls apply to it. See the
 ## Install
 
 ```sh
-npm install https://github.com/hraness/desktop-foundation/releases/download/v1.0.0/hraness-desktop-foundation-1.0.0.tgz
+npm install https://github.com/hraness/desktop-foundation/releases/download/v1.1.0/hraness-desktop-foundation-1.1.0.tgz
 ```
 
 The package is published only as GitHub Release assets, not on npm. Check
@@ -31,8 +31,8 @@ the [Releases page](https://github.com/hraness/desktop-foundation/releases)
 for newer versions. Rust products pin the same tag:
 
 ```toml
-desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v1.0.0" }
-hraness-control-kit = { git = "https://github.com/hraness/desktop-foundation", tag = "v1.0.0", features = ["tui"] }
+desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v1.1.0" }
+hraness-control-kit = { git = "https://github.com/hraness/desktop-foundation", tag = "v1.1.0", features = ["tui"] }
 ```
 
 ## Headless control
@@ -79,7 +79,7 @@ Windows and Linux on arm64 and x64; macOS builds are ad-hoc signed.
 | `--notice` | One native alert with the product's buttons, optionally opening a Settings pane. |
 | `--prompt`, `--prompt-probe` | One text-entry dialog (a credential, say), and a check that a dialog can be shown. |
 | `--assemble-app`, `--signing-identity`, `--launch` | The macOS local app a product assembles and signs on the person's own Mac, so its permissions stick across updates. |
-| `--version` | `hraness-helper 1.0.0 protocol/1,2`. |
+| `--version` | `hraness-helper 1.1.0 protocol/1,2`. |
 
 The SDK downloads it on first use, checks its size and SHA-256 against the
 manifest in the package, and caches it:

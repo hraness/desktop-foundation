@@ -258,7 +258,7 @@ impl Registry {
         ErrorBody::new(
             ErrorCode::HumanRequired,
             format!(
-                "`{} {}` is a decision for a person. Nothing changed.",
+                "`{} {}` is a decision for a person, so nothing changed.",
                 self.product,
                 verb.command()
             ),

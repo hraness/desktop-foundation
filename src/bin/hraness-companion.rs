@@ -6,9 +6,10 @@
 //! `--signing-identity`, `--launch`, `--notice`, `--prompt`) runs the same
 //! code as `hraness-helper`, with the same argv, stdout and exit status
 //! (`contract/helper-argv.v0.8.1.json`); only `--version` prints this
-//! binary's name. The menu bar was removed in 1.0: with no arguments,
-//! `--state-dir …` or `--check-protocol …` the alias draws nothing, prints a
-//! `tray-removed` error frame and exits 2 (`docs/migration-1.0.md`).
+//! binary's name. The menu bar was removed in 1.0: with no arguments, or
+//! argv starting `--state-dir`, `--check-protocol` or `--foreground`, the
+//! alias draws nothing, prints a `tray-removed` error frame and exits 2
+//! (`docs/migration-1.0.md`).
 
 use hraness_local_app::helper::{self, Binary};
 use hraness_local_app::wire::{self, ProtocolError, RUNNER_PROTOCOLS};

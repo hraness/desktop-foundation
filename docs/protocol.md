@@ -166,8 +166,7 @@ no arguments at all; it draws nothing and reads nothing for these argv. It print
 ```
 
 on stdout, one line naming `<product> tui` and `<product> status --json` on
-stderr, and exits **2**. `--foreground`, which only the SDK's detached
-launcher used, is refused the same way. Exit 2 is the usage exit code of the
+stderr, and exits **2**. Exit 2 is the usage exit code of the
 [control envelope](control.md#error-codes-and-exit-codes), and no 0.x runner
 ever exited 2, so a supervisor can tell this refusal apart from a crash.
 `hraness-helper` answers the same argv with `invalid-arguments` and exit 1,

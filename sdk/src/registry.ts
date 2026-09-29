@@ -47,13 +47,18 @@ export interface NextStep { command: string; why: string; audience: NextAudience
  * Added in 1.1.0; readers that do not know it can ignore it.
  */
 export interface ErrorPermission { kind: string; settingsUrl?: string | null }
+/** `^[a-z][a-z0-9-]*$`: a valid `error.permission.kind` (contract/names.json `permissionKind`). */
+export const validPermissionKind = (kind: string) => /^[a-z][a-z0-9-]*$/.test(kind);
 /**
- * The `error.permission` member. A settings link that is not one of the known
- * System Settings panes is dropped, so an envelope never carries a link a
- * client should not open. `permissionError()` from `./permissions` gives both
- * fields: `errorPermission(info.kind, info.settingsUrl)`.
+ * The `error.permission` member, or undefined for a kind outside
+ * `^[a-z][a-z0-9-]*$`. A settings link that is not one of the known System
+ * Settings panes is dropped, so an envelope never carries a link a client
+ * should not open. The Rust `ErrorBody::with_permission` gives the same
+ * bytes. `permissionError()` from `./permissions` gives both fields:
+ * `errorPermission(info.kind, info.settingsUrl)`.
  */
-export function errorPermission(kind: string, settingsUrl?: string | null): ErrorPermission {
+export function errorPermission(kind: string, settingsUrl?: string | null): ErrorPermission | undefined {
+  if (!validPermissionKind(kind)) return undefined;
   return settingsUrl && isAllowedSettingsUrl(settingsUrl) ? { kind, settingsUrl } : { kind };
 }
 export interface ErrorBody { code: ErrorCode; message: string; detail?: string; next?: NextStep[]; permission?: ErrorPermission }
@@ -76,9 +81,10 @@ export class HranessError extends Error {
     this.name = 'HranessError';
   }
   toBody(): ErrorBody {
+    const permission = this.permission && errorPermission(this.permission.kind, this.permission.settingsUrl);
     return {
       code: this.code, message: this.message, ...(this.detail ? { detail: this.detail } : {}), ...(this.next.length ? { next: this.next } : {}),
-      ...(this.permission ? { permission: errorPermission(this.permission.kind, this.permission.settingsUrl) } : {}),
+      ...(permission ? { permission } : {}),
     };
   }
 }
@@ -182,6 +188,8 @@ export function defineRegistry(product: string, verbs: Verb<any, any>[]): Regist
   return { product, verbs: [...verbs] };
 }
 
+/** `commands` is built in, not a verb, so `help commands --json` describes it with this. */
+const COMMANDS_DESCRIPTOR: VerbDescriptor = { path: ['commands'], opClass: 'read', schema: COMMANDS_SCHEMA, summary: 'List every command.' };
 export function describeVerb(verb: Verb<any, any>): VerbDescriptor {
   return {
     path: [...verb.path], opClass: verb.opClass, schema: verb.schema, summary: verb.summary,
@@ -200,6 +208,17 @@ function takeHelp(argv: readonly string[]): { help: boolean; rest: string[] } {
   const end = argv.indexOf('--');
   const rest = argv.filter((arg, i) => (end >= 0 && i >= end) || (arg !== '--help' && arg !== '-h'));
   return { help: rest.length !== argv.length, rest };
+}
+/**
+ * Splits `--debug` (before any `--`) out of `argv`: CLI_MENU_STYLE D5 makes it
+ * the same as `HRANESS_DEBUG=1`. A registry whose verbs declare their own
+ * `debug` flag keeps it as that flag.
+ */
+function takeDebug(reg: Registry, argv: readonly string[]): { debug: boolean; rest: string[] } {
+  if (reg.verbs.some(v => v.flags?.includes('debug') || v.valueFlags?.includes('debug'))) return { debug: false, rest: [...argv] };
+  const end = argv.indexOf('--');
+  const rest = argv.filter((arg, i) => (end >= 0 && i >= end) || arg !== '--debug');
+  return { debug: rest.length !== argv.length, rest };
 }
 function verbLines(product: string, verbs: readonly Verb<any, any>[]): string[] {
   const names = verbs.map(v => `${product} ${v.path.join(' ')}`);
@@ -380,8 +399,9 @@ export function renderTextError(error: ErrorBody, fallback: string, stream: { is
  * person. Otherwise the person answers at `/dev/tty`.
  */
 export async function runCli(reg: Registry, fullArgv: readonly string[], io: CliIO): Promise<number> {
-  let { help, rest: argv } = takeHelp(fullArgv);
-  const env = io.env ?? process.env;
+  const { debug, rest: undebugged } = takeDebug(reg, fullArgv);
+  let { help, rest: argv } = takeHelp(undebugged);
+  const env = debug ? { ...(io.env ?? process.env), HRANESS_DEBUG: '1' } : io.env ?? process.env;
   const audience = io.audience ?? detectAudience({ env, stderrIsTTY: io.stderr.isTTY });
   // An agent reads JSON whether or not it asked for it.
   const agent = audience === 'agent';
@@ -400,7 +420,8 @@ export async function runCli(reg: Registry, fullArgv: readonly string[], io: Cli
   };
   const fail = (error: unknown): number => {
     const body: ErrorBody = error instanceof HranessError ? error.toBody() : { code: 'internal', message: 'An unexpected failure.', detail: error instanceof Error ? error.message : String(error) };
-    if (!isErrorCode(body.code, reg.product)) return emit(errorEnvelope({ code: 'internal', message: `The command answered an undeclared code ${body.code}.` }));
+    // The code goes in `detail`, which text mode shows only with `--debug` or `HRANESS_DEBUG=1`.
+    if (!isErrorCode(body.code, reg.product)) return emit(errorEnvelope({ code: 'internal', message: 'The command failed with an error it did not declare.', detail: `Undeclared code ${body.code}.` }));
     return emit(errorEnvelope(body));
   };
   // Find the verb from a plain parse, then parse again with its value flags.
@@ -414,10 +435,12 @@ export async function runCli(reg: Registry, fullArgv: readonly string[], io: Cli
   json = explicitJson || agent;
   let words = parsed.positionals;
   // `help <command>` is `<command> --help`, unless a product registered `help`.
-  if (words[0] === 'help' && !reg.verbs.some(v => v.path[0] === 'help')) {
+  // Only a leading `help` counts (after `--json` at most), so it is never a
+  // flag's value or a word after `--`.
+  const lead = argv.findIndex(arg => arg !== '--json');
+  if (lead >= 0 && argv[lead] === 'help' && words[0] === 'help' && !reg.verbs.some(v => v.path[0] === 'help')) {
     help = true;
-    const at = argv.indexOf('help');
-    argv = [...argv.slice(0, at), ...argv.slice(at + 1)];
+    argv = [...argv.slice(0, lead), ...argv.slice(lead + 1)];
     words = words.slice(1);
     // `help help` is the root help.
     if (words.length === 1 && words[0] === 'help') words = [];
@@ -428,7 +451,7 @@ export async function runCli(reg: Registry, fullArgv: readonly string[], io: Cli
   if (help) {
     const found = lookupVerb(reg, words);
     if (found) return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: [describeVerb(found)] }), verbHelp(reg, found));
-    if (words[0] === 'commands') return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: [] }), [`Usage: ${reg.product} commands [options]`, '', 'List every command.', '', 'Options', '  --json      Print machine-readable output', '  -h, --help  Print this help'].join('\n'));
+    if (words[0] === 'commands') return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: [COMMANDS_DESCRIPTOR] }), [`Usage: ${reg.product} commands [options]`, '', 'List every command.', '', 'Options', '  --json      Print machine-readable output', '  -h, --help  Print this help'].join('\n'));
     const under = reg.verbs.filter(v => words.every((w, i) => v.path[i] === w));
     if (!under.length) return fail(unknownCommand(reg, words));
     return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: under.map(describeVerb) }), groupHelp(reg, words, under));
@@ -467,7 +490,10 @@ export async function runCli(reg: Registry, fullArgv: readonly string[], io: Cli
       if (json && audience !== 'human') return emit(errorEnvelope(humanRequired(reg, verb, command)));
       const gate = await (io.gate ?? requireHuman)({ title: described.title, digest: described.digest, tier: verb.gate.tier });
       if (!gate.ok) {
-        const body = gate.code === 'human-required' ? humanRequired(reg, verb, command) : { code: gate.code, message: gate.message };
+        // A wrong or expired code: running the same command again asks for a new one.
+        const body: ErrorBody = gate.code === 'human-required' ? humanRequired(reg, verb, command)
+          : gate.code === 'gate-failed' || gate.code === 'gate-expired' ? { code: gate.code, message: gate.message, next: [{ command, why: 'Run it again for a new code.', audience: 'human' }] }
+          : { code: gate.code, message: gate.message };
         return emit(errorEnvelope(body));
       }
       ctx.proof = gate.proof;

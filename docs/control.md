@@ -32,9 +32,11 @@ Every command that takes `--json` prints exactly one JSON object, on one line, o
   It is optional, and an envelope without it is byte-identical to 1.0. A
   1.0 reader rejects an envelope that carries it, so set it only toward 1.1
   readers. Build it with `errorPermission(kind, settingsUrl)` (TypeScript) or
-  `ErrorPermission::new(kind).with_settings_url(url)` (Rust). Both drop a
-  link outside System Settings; TypeScript also keeps only the known
-  panes, and Rust checks the `x-apple.systempreferences:` prefix.
+  `ErrorBody::with_permission(ErrorPermission::new(kind).with_settings_url(url))`
+  (Rust). Both keep only the known System Settings panes
+  (`contract/names.json` `settingsUrls`) and leave the member out for a
+  kind outside `^[a-z][a-z0-9-]*$`, with the same bytes
+  (`contract/golden/error-permission-cases.json`).
 - The JSON Schema is `contract/envelope.schema.json`.
 
 ### Error codes and exit codes
@@ -101,15 +103,17 @@ person, an error is two lines on stderr, following `CLI_MENU_STYLE.md` D5:
 ```
 
 The first line is one sentence (plus the suggestion for a mistyped command);
-the second is the first `next` step meant for a person. `HRANESS_DEBUG=1` adds
-the code. A script (the quiet audience) keeps the 1.0 contract: the error
+the second is the first `next` step meant for a person. `--debug` or
+`HRANESS_DEBUG=1` adds the code and detail. A script (the quiet audience) keeps the 1.0 contract: the error
 envelope on stdout, and `FAIL <code>: <message>` on stderr, in ASCII
 whatever the locale. Help starts with `Usage:`, and `<product> help <command>` is the
 same as `<command> --help` unless a product registers its own `help` verb.
 
 A `decide` verb called
-with `--json` by an agent or quiet audience returns exit 3 with a `next` step
-for a person and never prompts. `HRANESS_AUDIENCE=human` and `--confirm` only
+by an agent (with or without `--json`), or with `--json` by a quiet audience,
+returns exit 3 with a `next` step for a person and never prompts. In 1.0 an
+agent without `--json` was prompted at `/dev/tty`; since 1.1 it gets exit 3.
+After a wrong or expired code, the `next` step is the same command again. `HRANESS_AUDIENCE=human` and `--confirm` only
 change wording; they never satisfy the gate. See
 [human-gate.md](human-gate.md).
 

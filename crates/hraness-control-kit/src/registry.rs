@@ -402,6 +402,7 @@ mod tests {
         };
         check("productName", &crate::envelope::valid_product_name);
         check("verbSegment", &valid_segment);
+        check("permissionKind", &crate::envelope::valid_permission_kind);
         check("schemaId", &valid_schema);
         check("productCode", &|code: &str| match code.split_once('.') {
             Some((product, _)) => {

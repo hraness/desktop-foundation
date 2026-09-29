@@ -33,7 +33,8 @@ Every command that takes `--json` prints exactly one JSON object, on one line, o
   1.0 reader rejects an envelope that carries it, so set it only toward 1.1
   readers. Build it with `errorPermission(kind, settingsUrl)` (TypeScript) or
   `ErrorPermission::new(kind).with_settings_url(url)` (Rust). Both drop a
-  link outside System Settings.
+  link outside System Settings; TypeScript also keeps only the known
+  panes, and Rust checks the `x-apple.systempreferences:` prefix.
 - The JSON Schema is `contract/envelope.schema.json`.
 
 ### Error codes and exit codes
@@ -102,7 +103,8 @@ person, an error is two lines on stderr, following `CLI_MENU_STYLE.md` D5:
 The first line is one sentence (plus the suggestion for a mistyped command);
 the second is the first `next` step meant for a person. `HRANESS_DEBUG=1` adds
 the code. A script (the quiet audience) keeps the 1.0 contract: the error
-envelope on stdout, and `FAIL <code>: <message>` on stderr. Help starts with `Usage:`, and `<product> help <command>` is the
+envelope on stdout, and `FAIL <code>: <message>` on stderr, in ASCII
+whatever the locale. Help starts with `Usage:`, and `<product> help <command>` is the
 same as `<command> --help` unless a product registers its own `help` verb.
 
 A `decide` verb called

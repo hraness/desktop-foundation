@@ -9,12 +9,12 @@ Command-line errors and help from `./registry` now follow `CLI_MENU_STYLE.md`, a
 - A person at a terminal sees a text error as two lines on stderr: `✗` and one sentence, then `→` and the one command to run next (`FAIL` and `->` without UTF-8). A mistyped command adds `Did you mean "status"?`, and `HRANESS_DEBUG=1` adds the error code.
 - Help starts with `Usage:`. It says in plain words when a person has to decide, instead of the `[decide T1T2]` tags. `<product> help <command>` works like `<command> --help`, and `help help` prints the root help. User-facing text no longer says "gate".
 - When `detectAudience` reports an agent, `runCli` prints the JSON envelope even without `--json`. Raw verbs still see only the `--json` the caller passed.
-- A single-dash option such as `-x` is a usage error (exit 2), and the command does not run. In 1.0 it reached the verb as a word. After `--`, and for a bare `-` or `-5`, it is still a word.
+- A single-dash option such as `-x`, before or after the command, is a usage error (exit 2), and the command does not run. In 1.0 it reached the verb as a word. After `--`, and for a bare `-` or `-5`, it is still a word.
 - `error.permission` is new and optional: `{ kind, settingsUrl }`, the macOS permission behind the failure and the System Settings pane that fixes it.
   - It is in `contract/envelope.schema.json`, the TypeScript `ErrorBody` and `HranessError`, and the Rust `ErrorBody`.
-  - New helpers: `errorPermission(kind, settingsUrl)` in TypeScript, and `ErrorPermission::new(kind).with_settings_url(url)` with `ErrorBody::with_permission` in Rust. Both drop a link outside System Settings.
+  - New helpers: `errorPermission(kind, settingsUrl)` in TypeScript, and `ErrorPermission::new(kind).with_settings_url(url)` with `ErrorBody::with_permission` in Rust. Both drop a link outside System Settings; TypeScript also keeps only the known panes, and Rust checks the `x-apple.systempreferences:` prefix.
   - `permissionErrorJson` keeps its 1.0 shape.
-- **Scripts (the quiet audience: no terminal, no agent)** get what 1.0 gave them. A failure still prints the error envelope on stdout. The stderr line still starts with `code: message`, now written as `FAIL usage: Unknown command "x".` and `-> example --help`. The 1.0 `  next:` lines are gone.
+- **Scripts (the quiet audience: no terminal, no agent)** get what 1.0 gave them. A failure still prints the error envelope on stdout. The stderr line carries `code: message` after a plain `FAIL `, in ASCII whatever the locale: `FAIL usage: Unknown command "x".` then `-> example --help`. A grep anchored at the line start (`^human-required:`) must allow for the `FAIL ` prefix. The 1.0 `  next:` lines are gone.
 - **`--json` output** has the same shape, with these message changes:
   - An unknown command reads `Unknown command "x".` instead of `Unknown command: x.`, adds `Did you mean …?` when there is a close match, and has two `next` steps (agent first, as before, then `<product> --help` for a person).
   - `Name a command after "approvals".` is new for a group name typed with no command after it.

@@ -395,7 +395,7 @@ export async function runCli(reg: Registry, fullArgv: readonly string[], io: Cli
     const quiet = audience === 'quiet';
     if (json || (envelope.ok && text === undefined) || (!envelope.ok && quiet)) io.stdout.write(`${JSON.stringify(envelope)}\n`);
     else if (envelope.ok) io.stdout.write(text!.endsWith('\n') ? text! : `${text}\n`);
-    if (!envelope.ok && !json) io.stderr.write(renderTextError(envelope.error, fallback, io.stderr, env, { code: quiet }));
+    if (!envelope.ok && !json) io.stderr.write(renderTextError(envelope.error, fallback, io.stderr, quiet ? { ...env, HRANESS_ASCII: '1', NO_COLOR: '1' } : env, { code: quiet }));
     return envelopeExitCode(envelope);
   };
   const fail = (error: unknown): number => {
@@ -434,7 +434,11 @@ export async function runCli(reg: Registry, fullArgv: readonly string[], io: Cli
     return emit(okEnvelope(HELP_SCHEMA, { product: reg.product, verbs: under.map(describeVerb) }), groupHelp(reg, words, under));
   }
   const verb = lookupVerb(reg, words);
-  if (!verb) return fail(unknownCommand(reg, words));
+  if (!verb) {
+    const lead = /^-[A-Za-z]/.test(words[0] ?? '') ? words[0] : undefined;
+    if (lead) return fail(new HranessError('usage', `Unknown option "${lead}", so nothing ran.`, undefined, [{ command: `${reg.product} --help`, why: 'List the commands', audience: 'human' }]));
+    return fail(unknownCommand(reg, words));
+  }
   const name = `${reg.product} ${verb.path.join(' ')}`;
   fallback = `${name} --help`;
   try { parsed = parseArgs(argv, verb.valueFlags ?? []); }

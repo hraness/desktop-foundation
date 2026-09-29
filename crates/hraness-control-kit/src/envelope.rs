@@ -223,7 +223,9 @@ impl ErrorPermission {
 
     /// Sets the System Settings link. Anything outside
     /// `x-apple.systempreferences:` is dropped, as the schema requires, so an
-    /// envelope never carries a link a client should not open. From
+    /// envelope never carries a link a client should not open. This checks
+    /// the prefix only; the TypeScript `errorPermission` also checks the
+    /// exact pane list, which this crate does not carry. From
     /// `hraness-cli-kit`, pass `PermissionErrorInfo::settings_url`, which is
     /// always one of the known panes.
     pub fn with_settings_url(mut self, url: impl Into<String>) -> Self {

@@ -109,6 +109,10 @@ test('runCli: read verbs, text, commands and usage', async () => {
   assert.equal(await runCli(example(), ['approvals', 'decide', 'a1', 'allow-once'], r.value), 3);
   assert.equal((r.json() as any).error.code, 'human-required');
   assert.match(r.err(), /^FAIL human-required: /);
+  // Plain ASCII for scripts even under a UTF-8 locale.
+  r = io({ audience: 'quiet', env: UTF8 });
+  await runCli(example(), ['nope'], r.value);
+  assert.equal(r.err(), 'FAIL usage: Unknown command "nope".\n-> example --help\n');
   // A person at a terminal reads only the two lines.
   r = io({ audience: 'human' });
   assert.equal(await runCli(example(), ['nope'], r.value), 2);
@@ -129,6 +133,7 @@ test('runCli: text errors are one ✗ sentence and one → step, with "Did you m
     [['status', '--frce'], '✗ Unknown option "--frce" for "example status", so nothing ran.\n→ example status --help\n'],
     [['control', 'stop'], '✗ No owner.\n→ example control stop --help\n'],
     [['status', '--Bad'], '✗ Unknown option "--Bad", so nothing ran.\n→ example status --help\n'],
+    [['-x', 'status'], '✗ Unknown option "-x", so nothing ran.\n→ example --help\n'],
     [['status', '-x'], '✗ Unknown option "-x" for "example status", so nothing ran.\n→ example status --help\n'],
   ];
   for (const [argv, want] of cases) {

@@ -1,6 +1,6 @@
 {
   "name": "@hraness/desktop-foundation",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "The one-shot desktop helper, control kit and CLI contract that Hraness CLI tools share on macOS, Windows, and Linux, with no app bundle or installer.",
   "type": "module",
   "license": "MIT",

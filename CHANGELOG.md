@@ -1,21 +1,40 @@
 # Changelog
 
+## 1.1.1 - 2026-09-29
+
+Fixes from the review of 1.1.0. Exit codes, schema ids, error codes and the envelope shape are unchanged. Some behaviour, message text and helper signatures did change, and every change is listed below.
+
+### Changes
+
+- **`help` is a command only as the first word** (after `--json` at most). In 1.1.0 `runCli` removed the first `help` anywhere in the command line, so `approvals decide a1 --digest help deny` lost its `--digest` value, and `-- help` printed help. Now a flag's value and every word after `--` are left alone.
+- **`--debug`** works like `HRANESS_DEBUG=1`, as `CLI_MENU_STYLE.md` D5 says: a text error adds the code and detail. `runCli` takes `--debug` (before any `--`) out of the command line, unless one of the product's verbs declares its own `debug` flag, in which case it stays that verb's flag and the other verbs reject it as before. 1.1.0 answered `--debug` with an unknown-option error.
+- **An undeclared code no longer shows its code to a person.** The `internal` error reads `The command failed with an error it did not declare.`, and the code moved to `detail` as `Undeclared code <code>.`, which text mode shows only with `--debug` or `HRANESS_DEBUG=1`. In 1.1.0 the message was `The command answered an undeclared code <code>.` This changes `--json` `error.message` and adds `error.detail`.
+- **A wrong or expired code points at the same command.** `gate-failed` and `gate-expired` from `runCli` now have one `next` step for a person, the same command again, so the `→` line re-runs it. In 1.1.0 they had no `next`, and the `→` line pointed at `--help`. This adds `error.next` to those `--json` envelopes. T3 `unsupported-platform` still points at `--help`, since running it again cannot succeed in this release.
+- **`help commands --json`** lists one descriptor for `commands` in `data.verbs` instead of an empty list.
+- **`error.permission` is built the same way by both kits.** In 1.1.0 TypeScript kept only the known System Settings panes, while Rust kept any `x-apple.systempreferences:` link.
+  - Both now keep only the twelve panes in `contract/names.json` `settingsUrls`. Rust exports them as `SETTINGS_URLS`.
+  - Both leave `permission` out for a kind outside `^[a-z][a-z0-9-]*$` (`validPermissionKind`, `valid_permission_kind`).
+  - `contract/golden/error-permission-cases.json` checks that both kits print the same bytes.
+  - `errorPermission` now returns `ErrorPermission | undefined`. TypeScript code that assigns its result to an `ErrorPermission` must handle `undefined`.
+  - Rust `ErrorPermission::with_settings_url` drops a link that is not one of the twelve panes, and `ErrorBody::with_permission` drops a permission with an invalid kind.
+  - The Rust reader now rejects a `permission` whose kind or link the schema rejects. 1.1.0 accepted it.
+  - `permissionErrorJson` keeps its 1.0 shape. Its `error.permission` is now tested to hold the same kind and link as `errorPermission` and to pass the schema.
+- **Documented from 1.1.0:** an agent that runs a `decide` verb without `--json` gets `human-required` (exit 3) and no prompt. In 1.0 only `--json` did that, and an agent without it was prompted at `/dev/tty`. The 1.1.0 notes left this out. A person who wants to decide runs the command at their own terminal, as the `next` step says.
+
 ## 1.1.0 - 2026-09-29
 
 Command-line errors and help from `./registry` now follow `CLI_MENU_STYLE.md`, agents get JSON without asking for it, and an error can name the macOS permission behind it. Exit codes, schema ids, error codes, the envelope shape and the order of `next` are unchanged. Some message text did change, and every change is listed below.
 
 ### Changes
 
-- A person at a terminal sees a text error as two lines on stderr: `✗` and one sentence, then `→` and the one command to run next (`FAIL` and `->` without UTF-8). A mistyped command adds `Did you mean "status"?`, and `--debug` or `HRANESS_DEBUG=1` adds the error code and detail. `runCli` takes `--debug` (before any `--`) out of the command line, unless a verb declares its own `debug` flag.
-- Help starts with `Usage:`. It says in plain words when a person has to decide, instead of the `[decide T1T2]` tags. `<product> help <command>` works like `<command> --help` when `help` is the first word (after `--json` at most); a `help` that is a flag's value or comes after `--` is left alone. `help help` prints the root help, and `help commands --json` describes `commands`. User-facing text no longer says "gate".
+- A person at a terminal sees a text error as two lines on stderr: `✗` and one sentence, then `→` and the one command to run next (`FAIL` and `->` without UTF-8). A mistyped command adds `Did you mean "status"?`, and `HRANESS_DEBUG=1` adds the error code.
+- Help starts with `Usage:`. It says in plain words when a person has to decide, instead of the `[decide T1T2]` tags. `<product> help <command>` works like `<command> --help`, and `help help` prints the root help. User-facing text no longer says "gate".
 - When `detectAudience` reports an agent, `runCli` prints the JSON envelope even without `--json`. Raw verbs still see only the `--json` the caller passed.
-- **An agent that runs a `decide` verb without `--json` now gets `human-required` (exit 3) and no prompt.** In 1.0 only `--json` did that, and an agent without it was prompted at `/dev/tty`. A person who wants to decide runs the command at their own terminal, as the `next` step says.
-- A wrong or expired code (`gate-failed`, `gate-expired`) now has one `next` step, the same command again, so the `→` line re-runs it. In 1.0 these had no `next`.
 - A single-dash option such as `-x`, before or after the command, is a usage error (exit 2), and the command does not run. In 1.0 it reached the verb as a word. After `--`, and for a bare `-` or `-5`, it is still a word.
 - `error.permission` is new and optional: `{ kind, settingsUrl }`, the macOS permission behind the failure and the System Settings pane that fixes it.
   - It is in `contract/envelope.schema.json`, the TypeScript `ErrorBody` and `HranessError`, and the Rust `ErrorBody`.
-  - New helpers: `errorPermission(kind, settingsUrl)` and `validPermissionKind` in TypeScript, and `ErrorPermission::new(kind).with_settings_url(url)`, `ErrorBody::with_permission`, `valid_permission_kind` and `SETTINGS_URLS` in Rust. Both kits keep only the twelve known System Settings panes (`contract/names.json` `settingsUrls`) and leave `permission` out for a kind outside `^[a-z][a-z0-9-]*$`; `contract/golden/error-permission-cases.json` checks that they print the same bytes. `errorPermission` returns `undefined` for such a kind. The Rust reader rejects a `permission` whose kind or link the schema rejects.
-  - `permissionErrorJson` keeps its 1.0 shape, including `settingsUrl: null` for a kind with no pane. Its `error.permission` holds the same kind and link as `errorPermission` and passes the same schema.
+  - New helpers: `errorPermission(kind, settingsUrl)` in TypeScript, and `ErrorPermission::new(kind).with_settings_url(url)` with `ErrorBody::with_permission` in Rust. Both drop a link outside System Settings; TypeScript also keeps only the known panes, and Rust checks the `x-apple.systempreferences:` prefix.
+  - `permissionErrorJson` keeps its 1.0 shape.
 - **Scripts (the quiet audience: no terminal, no agent)** get what 1.0 gave them. A failure still prints the error envelope on stdout. The stderr line carries `code: message` after a plain `FAIL `, in ASCII whatever the locale: `FAIL usage: Unknown command "x".` then `-> example --help`. A grep anchored at the line start (`^human-required:`) must allow for the `FAIL ` prefix. The 1.0 `  next:` lines are gone.
 - **`--json` output** has the same shape, with these message changes:
   - An unknown command reads `Unknown command "x".` instead of `Unknown command: x.`, adds `Did you mean …?` when there is a close match, and has two `next` steps (agent first, as before, then `<product> --help` for a person).
@@ -23,8 +42,7 @@ Command-line errors and help from `./registry` now follow `CLI_MENU_STYLE.md`, a
   - Unknown options read `Unknown option "--x" for "example status", so nothing ran.`, and a malformed one reads `Unknown option "--Bad", so nothing ran.`
   - `Put options after "example status".` uses quotes instead of backticks.
   - Messages that ended with "… . Nothing changed." now end with ", so nothing changed." This covers `human-required`, `gate-failed`, `gate-expired` and T3 `unsupported-platform`, in TypeScript and Rust. The T3 message now reads `Deciding with your macOS login is not supported yet, so nothing changed.`
-  - An undeclared code reads `The command failed with an error it did not declare.`, with `Undeclared code <code>.` in `detail`, instead of 1.0's `The verb answered an undeclared code <code>.` A person sees the code only with `--debug` or `HRANESS_DEBUG=1`.
-  - `help commands --json` lists one descriptor for `commands` in `data.verbs`.
+  - An undeclared code reads `The command answered an undeclared code …` instead of `The verb answered …`.
   - Match on `error.code`, never on message text.
 - **`commands` text output** is a `Usage:` line and a `Commands` list without class tags. It is no longer one bare line per verb. Scripts should read `commands --json`.
 - **1.0 readers reject `error.permission`**. The 1.0 schema's `error` has `additionalProperties: false`, and the 1.0 Rust `ErrorBody` denies unknown fields. An envelope without it is byte-identical to 1.0. Set it only when every reader is on 1.1.

@@ -103,18 +103,19 @@ person, an error is two lines on stderr, following `CLI_MENU_STYLE.md` D5:
 ```
 
 The first line is one sentence (plus the suggestion for a mistyped command);
-the second is the first `next` step meant for a person. `--debug` or
-`HRANESS_DEBUG=1` adds the code and detail. A script (the quiet audience) keeps the 1.0 contract: the error
-envelope on stdout, and `FAIL <code>: <message>` on stderr, in ASCII
+the second is the first `next` step meant for a person. `HRANESS_DEBUG=1`,
+or `--debug` since 1.1.1, adds the code and detail. A script (the quiet
+audience) keeps the 1.0 contract: the error envelope on stdout, and `FAIL <code>: <message>` on stderr, in ASCII
 whatever the locale. Help starts with `Usage:`, and `<product> help <command>` is the
 same as `<command> --help` unless a product registers its own `help` verb.
 
 A `decide` verb called
 by an agent (with or without `--json`), or with `--json` by a quiet audience,
 returns exit 3 with a `next` step for a person and never prompts. In 1.0 an
-agent without `--json` was prompted at `/dev/tty`; since 1.1 it gets exit 3.
-After a wrong or expired code, the `next` step is the same command again. `HRANESS_AUDIENCE=human` and `--confirm` only
-change wording; they never satisfy the gate. See
+agent without `--json` was prompted at `/dev/tty`; since 1.1.0 it gets
+exit 3. Since 1.1.1, after a wrong or expired code, the `next` step is the
+same command again. `HRANESS_AUDIENCE=human` and `--confirm` only change
+wording; they never satisfy the gate. See
 [human-gate.md](human-gate.md).
 
 ## Owner files

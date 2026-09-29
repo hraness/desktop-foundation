@@ -5,6 +5,7 @@
 ### Changes
 
 - `runCompanion` takes an optional `startupTimeoutMs` for the runner's ready event. It defaults to `timeoutMs`, so existing callers see no change.
+- An empty `capabilities/` folder now ships with the crate. Without it, cargo reran the build script on every build and rebuilt the crate, including in products that depend on it.
 
 ## 0.9.0 - 2026-09-28
 

@@ -153,14 +153,21 @@ fn t3_unsupported() -> ErrorBody {
 const ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
 fn one_time_code() -> Result<String, ErrorBody> {
-    let bytes = crypto::random_bytes::<6>().map_err(|e| {
-        ErrorBody::new(ErrorCode::Internal, "Could not draw a code.").with_detail(e.to_string())
-    })?;
-    // 256 % 31 bias is under 1%; acceptable for a 6-symbol typed code.
-    let symbols: String = bytes
-        .iter()
-        .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char)
-        .collect();
+    // Rejection sampling: only bytes below the largest multiple of the
+    // alphabet size are used, so every symbol is equally likely.
+    let limit = (256 / ALPHABET.len() * ALPHABET.len()) as u8;
+    let mut symbols = String::with_capacity(6);
+    while symbols.len() < 6 {
+        let bytes = crypto::random_bytes::<16>().map_err(|e| {
+            ErrorBody::new(ErrorCode::Internal, "Could not draw a code.").with_detail(e.to_string())
+        })?;
+        for b in bytes.iter().filter(|b| **b < limit) {
+            if symbols.len() == 6 {
+                break;
+            }
+            symbols.push(ALPHABET[*b as usize % ALPHABET.len()] as char);
+        }
+    }
     Ok(format!("{}-{}", &symbols[..3], &symbols[3..]))
 }
 

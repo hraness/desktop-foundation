@@ -11,7 +11,7 @@
 // pseudo-terminal.
 
 import { execFile } from 'node:child_process';
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { closeSync, openSync, writeSync } from 'node:fs';
 import { ReadStream } from 'node:tty';
 
@@ -105,7 +105,7 @@ export function openDevTty(path = '/dev/tty'): GateTerminal {
 // No 0/O/1/I/L, so a code survives being read aloud.
 const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 export function oneTimeCode(): string {
-  const symbols = [...randomBytes(6)].map(b => ALPHABET[b % ALPHABET.length]).join('');
+  const symbols = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
   return `${symbols.slice(0, 3)}-${symbols.slice(3)}`;
 }
 export const normalizeCode = (code: string) => code.trim().replace(/[\s-]/g, '').toUpperCase();

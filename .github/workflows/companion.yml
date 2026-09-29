@@ -9,6 +9,9 @@ on:
   # Pull requests run all six targets only when they touch platform code (see
   # scripts/native-scope.mjs). Main, this nightly run, manual runs and tags
   # always run every target, and a red main run opens a tracking issue.
+  # GitHub disables schedules on public repositories after 60 days without
+  # activity; main pushes keep it alive, and a long-quiet repo should check
+  # the Actions tab before relying on the nightly run.
   schedule:
     - cron: '23 7 * * *'
   workflow_dispatch:
@@ -33,7 +36,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       # docs: every changed file is documentation; no native legs or package.
-      # subset: platform-neutral changes; Linux x64 and macOS arm64 only.
+      # subset: platform-neutral changes; Linux x64, macOS arm64, Windows x64.
       # full: all six targets and the package. Non-PR runs are always full.
       scope: ${{ steps.scope.outputs.scope }}
       matrix: ${{ steps.scope.outputs.matrix }}
@@ -59,8 +62,9 @@ jobs:
           ]'
           scope=full
           if [ "$EVENT_NAME" = pull_request ]; then
-            # Run the base commit's selector so a pull request cannot narrow
-            # its own matrix. Any failure, including a missing selector,
+            # Run the base commit's selector, so an edit to the selector alone
+            # cannot narrow its own pull request's matrix (workflow edits are
+            # reviewed as usual). Any failure, including a missing selector,
             # leaves the scope at full.
             if git rev-parse --verify --quiet 'HEAD^2' >/dev/null \
               && git show 'HEAD^1:scripts/native-scope.mjs' > "$RUNNER_TEMP/native-scope.mjs" \
@@ -69,7 +73,7 @@ jobs:
             fi
           fi
           if [ "$scope" = subset ]; then
-            matrix=$(jq -c '[.[] | select(.target == "x86_64-unknown-linux-gnu" or .target == "aarch64-apple-darwin")]' <<< "$full")
+            matrix=$(jq -c '[.[] | select(.target == "x86_64-unknown-linux-gnu" or .target == "aarch64-apple-darwin" or .target == "x86_64-pc-windows-msvc")]' <<< "$full")
           else
             matrix=$(jq -c . <<< "$full")
           fi
@@ -146,7 +150,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # All six targets, or Linux x64 and macOS arm64 for a subset PR.
+        # All six targets, or one per OS family (Linux x64, macOS arm64,
+        # Windows x64) for a subset PR.
         include: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -352,7 +357,7 @@ jobs:
           case "$SCOPE" in
             # A docs-only pull request deliberately skips the native matrix.
             docs) test "$NATIVE_RESULT" = skipped && test "$PACKAGE_RESULT" = skipped ;;
-            # Two targets passed; the package needs all six and waits for main.
+            # Three targets passed; the package needs all six and waits for main.
             subset) test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = skipped ;;
             full) test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = success ;;
             *) echo "unknown native scope: $SCOPE"; exit 1 ;;
@@ -360,9 +365,10 @@ jobs:
   main-health:
     # A pull request can skip four targets, so main is where a platform-only
     # break first shows. A red full run on main opens (or comments on) one
-    # tracking issue; the next green one closes it.
+    # tracking issue; the next green one closes it. A cancelled nightly run
+    # counts as red, so the nightly cannot go quiet by being cancelled.
     name: Main health
-    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (needs.required.result == 'success' || needs.required.result == 'failure')
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (needs.required.result == 'success' || needs.required.result == 'failure' || (github.event_name == 'schedule' && needs.required.result == 'cancelled'))
     needs: [required]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -381,8 +387,8 @@ jobs:
           title='Companion: full native matrix is failing on main'
           issue=$(gh issue list --state open --limit 100 --json number,title \
             --jq "map(select(.title == \"$title\")) | first | .number // empty")
-          if [ "$RESULT" = failure ]; then
-            body="The $EVENT_NAME run for $SHA failed: $RUN_URL"
+          if [ "$RESULT" = failure ] || [ "$RESULT" = cancelled ]; then
+            body="The $EVENT_NAME run for $SHA ended $RESULT: $RUN_URL"
             if [ -n "$issue" ]; then gh issue comment "$issue" --body "$body"
             else gh issue create --title "$title" --body "$body"; fi
           elif [ -n "$issue" ]; then

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // Compiled to dist/test; the repository root is two levels up.
@@ -11,8 +12,9 @@ const rootPath = fileURLToPath(root);
 type Change = { status: string; path: string };
 type Result = { scope: 'docs' | 'subset' | 'full'; reasons: string[] };
 type Selector = {
-  selectScope: (changes: Change[], read: (side: 'base' | 'head', path: string) => string) => Result;
-  classifyPath: (path: string) => string;
+  selectScope: (changes: Change[], read: (side: 'base' | 'head', path: string) => string, has?: (side: 'base' | 'head', path: string) => boolean) => Result;
+  classifyPath: (path: string, status?: string) => string;
+  PACKAGED_DOCS: Set<string>;
 };
 const load = async () => await import(script) as Selector;
 
@@ -31,7 +33,7 @@ test('documentation-only pull requests skip the native matrix', async () => {
   assert.equal(result.scope, 'docs');
 });
 
-test('platform-neutral source runs the Linux x64 and macOS arm64 subset', async () => {
+test('platform-neutral source runs the Linux x64, macOS arm64 and Windows x64 subset', async () => {
   const { selectScope } = await load();
   const prose = '// Linux trays ignore this field; macOS and Windows show it.\n';
   const read = files({ 'src/protocol_v2.rs': { base: neutral, head: prose + neutral }, 'sdk/src/registry.ts': { head: 'export const x = 1;\n' } });
@@ -40,7 +42,7 @@ test('platform-neutral source runs the Linux x64 and macOS arm64 subset', async 
     { status: 'A', path: 'sdk/src/registry.ts' },
     { status: 'M', path: 'contract/error-codes.json' },
     { status: 'M', path: 'CHANGELOG.md' },
-  ], read);
+  ], read, () => false);
   assert.equal(result.scope, 'subset');
 });
 
@@ -49,6 +51,9 @@ test('a touched platform branch runs every target', async () => {
   const markers = [
     '#[cfg(target_os = "windows")]', '#[cfg(windows)]', '#[cfg(not(unix))]', 'cfg!(target_arch = "aarch64")',
     "if (process.platform === 'win32') {}", "process.arch === 'arm64'", "const shell = 'pwsh';", "const os = 'darwin';", 'if os == "windows" {}',
+    'use std::os::windows::ffi::OsStrExt;', 'use std::os::unix::fs::PermissionsExt;', 'windows::Win32::Foundation::HANDLE', 'libc::getuid()',
+    "import { platform } from 'node:os';", "import { EOL, homedir } from 'os';", 'path.sep', 'os.EOL', 'path.win32.normalize(p)',
+    "openSync('/dev/tty', 'r')", "spawnSync('ps', ['-o', 'comm='])", "const bin = name + '.exe';",
   ];
   for (const marker of markers) {
     const read = files({ 'src/protocol_v2.rs': { base: neutral, head: `${neutral}${marker}\n` } });
@@ -62,6 +67,64 @@ test('a touched platform branch runs every target', async () => {
   // A file named for a platform needs every target whatever its content.
   const named = files({ 'src/macos_menu.rs': { base: neutral, head: neutral } });
   assert.equal(selectScope([{ status: 'M', path: 'src/macos_menu.rs' }], named).scope, 'full');
+});
+
+test('security and process modules run every target, whatever their content', async () => {
+  const { selectScope } = await load();
+  for (const path of ['sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/client.ts', 'sdk/src/prompt.ts', 'crates/hraness-control-kit/src/crypto.rs']) {
+    const read = files({ [path]: { base: neutral, head: neutral } });
+    assert.equal(selectScope([{ status: 'M', path }], read, () => false).scope, 'full', path);
+  }
+});
+
+test('an SDK module whose paired test branches on the platform runs every target', async () => {
+  const { selectScope } = await load();
+  const source = 'export const x = 1;\n';
+  const marked = files({ 'sdk/src/widget.ts': { base: source, head: source }, 'sdk/test/widget.test.ts': { base: "if (process.platform === 'win32') {}\n", head: 'x\n' } });
+  assert.equal(selectScope([{ status: 'M', path: 'sdk/src/widget.ts' }], marked, () => true).scope, 'full');
+  const plain = files({ 'sdk/src/widget.ts': { base: source, head: source }, 'sdk/test/widget.test.ts': { base: 'x\n', head: 'x\n' } });
+  assert.equal(selectScope([{ status: 'M', path: 'sdk/src/widget.ts' }], plain, () => true).scope, 'subset');
+  // No paired test on either side: judged by the module alone.
+  const alone = files({ 'sdk/src/widget.ts': { base: source, head: source } });
+  assert.equal(selectScope([{ status: 'M', path: 'sdk/src/widget.ts' }], alone, () => false).scope, 'subset');
+  // A failing existence check fails closed.
+  const broken = () => { throw new Error('ls-tree failed'); };
+  assert.equal(selectScope([{ status: 'M', path: 'sdk/src/widget.ts' }], alone, broken).scope, 'full');
+});
+
+test('documentation that code or the package reads is not docs-only', async () => {
+  const { selectScope } = await load();
+  // include_str! by Rust tests that run only on native legs.
+  for (const path of ['docs/protocol-v2.md', 'docs/permissions.md'])
+    assert.equal(selectScope([{ status: 'M', path }], files({})).scope, 'subset', path);
+  // The packaged skill, and deleting any packaged doc, needs the package job.
+  assert.equal(selectScope([{ status: 'M', path: 'skills/companion/SKILL.md' }], files({})).scope, 'full');
+  for (const path of ['docs/installation.md', 'README.md', 'LICENSE'])
+    assert.equal(selectScope([{ status: 'D', path }], files({})).scope, 'full', path);
+  assert.equal(selectScope([{ status: 'M', path: 'docs/installation.md' }], files({})).scope, 'docs');
+});
+
+test('the doc lists match what the code reads', async (t) => {
+  const { classifyPath, PACKAGED_DOCS } = await load();
+  const listed = spawnSync('git', ['ls-files', '*.rs'], { cwd: rootPath, encoding: 'utf8' });
+  if (listed.status !== 0) return t.skip('git is not available');
+  let included = 0;
+  for (const file of listed.stdout.split('\n').filter(Boolean)) {
+    for (const [, target] of readFileSync(new URL(file, root), 'utf8').matchAll(/include_str!\("([^"]+\.md)"\)/g)) {
+      const doc = fileURLToPath(new URL(target, new URL(file, root))).slice(rootPath.length);
+      assert.notEqual(classifyPath(doc), 'docs', `${file} includes ${doc}; add it to ASSERTED_DOCS`);
+      included += 1;
+    }
+  }
+  assert.ok(included > 0, 'expected Rust tests to include documentation');
+  let packaged = 0;
+  const smoke = readFileSync(new URL('scripts/package-smoke.mjs', root), 'utf8');
+  for (const [, doc] of smoke.matchAll(/'((?:[\w-]+\/)*[\w.-]+\.md|LICENSE)'/g))
+  {
+    assert.ok(PACKAGED_DOCS.has(doc), `package-smoke asserts ${doc}; add it to PACKAGED_DOCS`);
+    packaged += 1;
+  }
+  assert.ok(packaged > 0, 'expected package-smoke to assert packaged documentation');
 });
 
 test('build, packaging, CI and selector changes run every target', async () => {

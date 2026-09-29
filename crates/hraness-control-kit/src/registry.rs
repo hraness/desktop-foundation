@@ -53,6 +53,13 @@ pub struct Verb {
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<GateTier>,
+    /// For a gated verb whose class depends on its input, such as
+    /// `approvals decide <id> --digest <d> deny|allow-once`: which inputs
+    /// an agent may run on its own, as `operate` with no gate. The product
+    /// checks the input with [`Registry::needs_gate`]; every other input
+    /// keeps the gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operate_when: Option<String>,
 }
 
 impl Verb {
@@ -63,11 +70,19 @@ impl Verb {
             schema: schema.to_string(),
             summary: summary.to_string(),
             gate: None,
+            operate_when: None,
         }
     }
 
     pub fn gated(mut self, gate: GateTier) -> Self {
         self.gate = Some(gate);
+        self
+    }
+
+    /// Marks a gated verb whose `summary` inputs run as `operate`, such
+    /// as "deny" on `approvals decide`.
+    pub fn operate_when(mut self, summary: &str) -> Self {
+        self.operate_when = Some(summary.to_string());
         self
     }
 
@@ -86,6 +101,7 @@ pub enum RegistryError {
     DecideWithoutGate(String),
     GateOnUngatedClass(String),
     InvalidSchema(String),
+    OperateWhenWithoutGate(String),
 }
 
 impl std::fmt::Display for RegistryError {
@@ -101,6 +117,9 @@ impl std::fmt::Display for RegistryError {
                 write!(f, "verb {v:?} has a gate but its class needs none")
             }
             RegistryError::InvalidSchema(s) => write!(f, "invalid schema {s:?}"),
+            RegistryError::OperateWhenWithoutGate(v) => {
+                write!(f, "verb {v:?} has operate_when without a gate or a summary")
+            }
         }
     }
 }
@@ -120,23 +139,35 @@ struct CommandsData<'a> {
     verbs: &'a [Verb],
 }
 
-fn valid_segment(s: &str) -> bool {
+/// A verb word: `[a-z][a-z0-9-]{0,31}`, from `contract/names.json`.
+pub fn valid_segment(s: &str) -> bool {
+    crate::envelope::valid_product_name(s)
+}
+
+fn valid_schema_tail(s: &str) -> bool {
     let b = s.as_bytes();
     !b.is_empty()
         && b.len() <= 32
-        && b[0].is_ascii_lowercase()
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
         && b.iter()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
-fn valid_schema(s: &str) -> bool {
+/// A schema id such as `example.status/1` or `example.2fa/1`, from
+/// `contract/names.json`.
+pub fn valid_schema(s: &str) -> bool {
     let Some((name, version)) = s.rsplit_once('/') else {
         return false;
     };
+    let mut parts = name.split('.');
+    let first = parts.next().unwrap_or("");
+    let rest: Vec<&str> = parts.collect();
     !version.is_empty()
+        && version.len() <= 9
         && version.bytes().all(|b| b.is_ascii_digit())
-        && !name.is_empty()
-        && name.split('.').all(valid_segment)
+        && crate::envelope::valid_product_name(first)
+        && !rest.is_empty()
+        && rest.iter().all(|p| valid_schema_tail(p))
 }
 
 impl Registry {
@@ -178,6 +209,13 @@ impl Registry {
             }
             _ => {}
         }
+        if verb
+            .operate_when
+            .as_ref()
+            .is_some_and(|s| verb.gate.is_none() || s.is_empty())
+        {
+            return Err(RegistryError::OperateWhenWithoutGate(command));
+        }
         self.verbs.push(verb);
         Ok(self)
     }
@@ -194,6 +232,13 @@ impl Registry {
                 v.path.len() <= args.len() && v.path.iter().zip(args).all(|(p, a)| p == a.as_ref())
             })
             .max_by_key(|v| v.path.len())
+    }
+
+    /// Whether this run of `verb` needs the human gate. `operate_input`
+    /// is the product's answer to the verb's `operate_when`, such as
+    /// "the decision is deny"; it is ignored for a verb without one.
+    pub fn needs_gate(&self, verb: &Verb, operate_input: bool) -> bool {
+        verb.gate.is_some() && !(verb.operate_when.is_some() && operate_input)
     }
 
     /// The `commands --json` envelope.
@@ -342,6 +387,63 @@ mod tests {
             r.register(Verb::new(&["ok"], OpClass::Read, "example.a", "x")),
             Err(RegistryError::InvalidSchema(_))
         ));
+    }
+
+    #[test]
+    fn names_match_the_contract() {
+        let c: serde_json::Value = serde_json::from_str(crate::contract::NAMES).unwrap();
+        let check = |kind: &str, f: &dyn Fn(&str) -> bool| {
+            for (list, want) in [("valid", true), ("invalid", false)] {
+                for v in c["cases"][kind][list].as_array().unwrap() {
+                    let v = v.as_str().unwrap();
+                    assert_eq!(f(v), want, "{kind} {v:?}");
+                }
+            }
+        };
+        check("productName", &crate::envelope::valid_product_name);
+        check("verbSegment", &valid_segment);
+        check("schemaId", &valid_schema);
+        check("productCode", &|code: &str| match code.split_once('.') {
+            Some((product, _)) => {
+                matches!(
+                    ErrorCode::parse(code, Some(product)),
+                    Some(ErrorCode::Product(_))
+                )
+            }
+            None => false,
+        });
+    }
+
+    #[test]
+    fn operate_when_lets_deny_skip_the_gate() {
+        let mut r = Registry::new("example");
+        r.register(
+            Verb::new(
+                &["approvals", "decide"],
+                OpClass::Decide,
+                "example.2fa/1",
+                "x",
+            )
+            .gated(GateTier::T1T2)
+            .operate_when("deny"),
+        )
+        .unwrap();
+        let verb = r.lookup(&["approvals", "decide"]).unwrap();
+        assert!(!r.needs_gate(verb, true));
+        assert!(r.needs_gate(verb, false));
+        let listed = serde_json::to_value(r.commands_json()).unwrap();
+        assert_eq!(listed["data"]["verbs"][0]["operateWhen"], "deny");
+        assert_eq!(listed["data"]["verbs"][0]["opClass"], "decide");
+        assert_eq!(
+            r.register(
+                Verb::new(&["legacy"], OpClass::DecideLegacy, "example.a/1", "x")
+                    .operate_when("deny")
+            )
+            .unwrap_err(),
+            RegistryError::OperateWhenWithoutGate("legacy".into())
+        );
+        let plain = Verb::new(&["x"], OpClass::Operate, "example.a/1", "x");
+        assert!(!r.needs_gate(&plain, false));
     }
 
     #[test]

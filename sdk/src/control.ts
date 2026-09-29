@@ -6,7 +6,7 @@
 //   admin.sock                  0600  the product's own CLI, with admin.cap
 //   admin.cap                   0600  a fresh random capability per owner
 //   owner.json                  0600  {schema, pid, bootId, processStartId, generation}
-//   owner.lock                  0600  the TS owner's claim (Node has no flock)
+//   owner.lock.<n>              0600  the TS owner's numbered claims (Node has no flock)
 //
 // Node has no peer-credential API, so a TS owner relies on the 0700
 // directory, the 0600 sockets and the capability.
@@ -14,11 +14,11 @@
 import { execFile, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { HranessError, isErrorCode, type ErrorCode } from './registry.js';
+import { HranessError, isErrorCode, validProductCode, validProductName, type ErrorCode } from './registry.js';
 
 export const CONTROL_PROTOCOL = 'hraness.control/1';
 export const WIRE_VERSION = 1;
@@ -33,8 +33,6 @@ export interface OwnerStatus { running: boolean; stale: boolean; owner?: OwnerIn
 export interface Peer { socket: 'agent' | 'admin' }
 type Handler = (request: unknown, peer: Peer) => Promise<unknown>;
 
-const PRODUCT = /^[a-z][a-z0-9-]{0,63}$/;
-const PRODUCT_CODE = /^[a-z][a-z0-9-]*\.[a-z0-9][a-z0-9.-]*$/;
 export function ownerPathsIn(stateHome: string): OwnerPaths {
   const dir = join(stateHome, 'control');
   return {
@@ -48,7 +46,7 @@ export function ownerPathsIn(stateHome: string): OwnerPaths {
  * on macOS and `$XDG_STATE_HOME/<product>` (default `~/.local/state/<product>`).
  */
 export function ownerPaths(product: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): OwnerPaths {
-  if (!PRODUCT.test(product)) throw new HranessError('usage', 'Invalid product name.');
+  if (!validProductName(product)) throw new HranessError('usage', 'Invalid product name.');
   const override = env[`${product.toUpperCase().replaceAll('-', '_')}_STATE_HOME`];
   if (override && isAbsolute(override)) return ownerPathsIn(override);
   const home = env.HOME && isAbsolute(env.HOME) ? env.HOME : homedir();
@@ -58,19 +56,29 @@ export function ownerPaths(product: string, env: NodeJS.ProcessEnv = process.env
 }
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+// TZ=UTC: `ps -o lstart=` prints local time, so an owner started under one
+// time zone would otherwise look dead to a checker running under another.
 function run(program: string, args: string[]): Promise<string | undefined> {
-  return new Promise(resolve => execFile(program, args, { env: { ...process.env, LC_ALL: 'C' }, timeout: 5000 }, (error, stdout) => {
+  return new Promise(resolve => execFile(program, args, { env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' }, timeout: 5000 }, (error, stdout) => {
     resolve(error || !stdout.trim() ? undefined : stdout);
   }));
+}
+/**
+ * The part of `sysctl -n kern.boottime` that names the boot: `sec=…,usec=…`.
+ * The date text after it is local time and changes with TZ, so it is dropped.
+ */
+export function bootTimeKey(raw: string): string {
+  const match = /sec\s*=\s*(\d+)\s*,\s*usec\s*=\s*(\d+)/.exec(raw);
+  return match ? `sec=${match[1]},usec=${match[2]}` : raw.trim();
 }
 /** A digest of this boot. Same value the Rust kit writes. */
 export async function bootId(): Promise<string | undefined> {
   const raw = process.platform === 'linux'
-    ? await readFile('/proc/sys/kernel/random/boot_id', 'utf8').catch(() => undefined)
-    : await run('sysctl', ['-n', 'kern.boottime']);
-  return raw === undefined ? undefined : sha256(`boot:${raw.trim()}`);
+    ? (await readFile('/proc/sys/kernel/random/boot_id', 'utf8').catch(() => undefined))?.trim()
+    : await run('sysctl', ['-n', 'kern.boottime']).then(text => text === undefined ? undefined : bootTimeKey(text));
+  return raw === undefined ? undefined : sha256(`boot:${raw}`);
 }
-/** A digest of when `pid` started, so a reused pid does not match. */
+/** A digest of when `pid` started, so a reused pid does not match. Independent of the caller's TZ. */
 export async function processStartId(pid: number): Promise<string | undefined> {
   let raw: string | undefined;
   if (process.platform === 'linux') {
@@ -109,29 +117,89 @@ export async function readOwnerFile(paths: OwnerPaths): Promise<OwnerFile> {
 }
 
 interface Claim { pid: number; bootId: string; processStartId: string }
+/** How many numbered claims below its own a new owner keeps. */
+const KEPT_CLAIMS = 16;
+const claimPath = (paths: OwnerPaths, n: number) => `${paths.claim}.${n}`;
+/** The numbers of every `owner.lock.<n>`, highest first. */
+async function claimNumbers(paths: OwnerPaths): Promise<number[]> {
+  const prefix = `${paths.claim.slice(paths.dir.length + 1)}.`;
+  return (await readdir(paths.dir))
+    .filter(name => name.startsWith(prefix) && /^[1-9][0-9]{0,14}$/.test(name.slice(prefix.length)))
+    .map(name => Number(name.slice(prefix.length)))
+    .sort((a, b) => b - a);
+}
 /**
- * Claims the owner slot. A live owner (it answers, or its claim names a
- * running process) gets `control-already-running`. A stale claim is renamed
- * aside, never deleted, and the claim is retried once.
+ * Creates `owner.lock.<n>` with its whole content in one step: the claim is
+ * written to a private temporary file and hard-linked into place, so no one
+ * ever reads an empty or partial claim. False when `n` is taken.
  */
-async function claimOwner(paths: OwnerPaths, self: Claim): Promise<void> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try { await writePrivate(paths.claim, JSON.stringify(self), true); return; }
-    catch (error) { if (!errno(error, 'EEXIST')) throw error; }
-    const running = new HranessError('control-already-running', 'Another owner already holds the control lock.');
-    if (await hello(paths).then(() => true, () => false)) throw running;
-    let claim: Claim | undefined;
-    try { claim = JSON.parse(await readFile(paths.claim, 'utf8')); } catch { claim = undefined; }
-    if (claim && Number.isSafeInteger(claim.pid) && await identityMatches(claim.pid, claim.bootId, claim.processStartId)) throw running;
-    await rename(paths.claim, `${paths.claim}.stale-${Date.now()}-${randomBytes(4).toString('hex')}`).catch(error => { if (!errno(error, 'ENOENT')) throw error; });
+async function createClaim(paths: OwnerPaths, n: number, self: Claim): Promise<boolean> {
+  const temp = `${paths.claim}.new-${randomBytes(8).toString('hex')}`;
+  await writePrivate(temp, JSON.stringify(self), true);
+  try { await link(temp, claimPath(paths, n)); return true; }
+  catch (error) { if (errno(error, 'EEXIST')) return false; throw error; }
+  finally { await unlink(temp).catch(() => {}); }
+}
+/** Marks this owner's claim released on the way out; the file itself stays. */
+async function releaseClaim(paths: OwnerPaths, n: number): Promise<void> {
+  const temp = `${paths.claim}.new-${randomBytes(8).toString('hex')}`;
+  try { await writePrivate(temp, JSON.stringify({ released: true }), true); await rename(temp, claimPath(paths, n)); }
+  catch { await unlink(temp).catch(() => {}); }
+}
+async function claimIsLive(paths: OwnerPaths, n: number): Promise<boolean> {
+  let claim: Claim | undefined;
+  try { claim = JSON.parse(await readFile(claimPath(paths, n), 'utf8')); } catch { return false; }
+  return !!claim && Number.isSafeInteger(claim.pid) && typeof claim.bootId === 'string' && typeof claim.processStartId === 'string'
+    && await identityMatches(claim.pid, claim.bootId, claim.processStartId);
+}
+/**
+ * Claims the owner slot and returns the claim's number. Claims are numbered
+ * files, `owner.lock.<n>`, created with a hard link, which fails when the
+ * name exists. The highest number is the owner. A starter creates the next
+ * number only after it finds the highest claim's process gone, so two
+ * starters that both find a crashed owner race for the same name and one
+ * loses. A starter that created a number and then sees a higher one backs
+ * off. The highest claim is never removed, even after a clean stop (it is
+ * marked released in place), so the numbers only grow; a new owner removes claims more than ${KEPT_CLAIMS} below its own.
+ * A live owner (it answers, or its claim names a running process) gets
+ * `control-already-running`.
+ */
+async function claimOwner(paths: OwnerPaths, self: Claim): Promise<number> {
+  const running = new HranessError('control-already-running', 'Another owner already holds the control lock.');
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const top = (await claimNumbers(paths))[0] ?? 0;
+    if (top) {
+      if (await hello(paths).then(() => true, () => false)) throw running;
+      if (await claimIsLive(paths, top)) throw running;
+    }
+    const mine = top + 1;
+    if (!await createClaim(paths, mine, self)) continue;
+    const numbers = await claimNumbers(paths);
+    if (numbers[0] > mine) {
+      await unlink(claimPath(paths, mine)).catch(() => {});
+      throw running;
+    }
+    for (const n of numbers) if (n <= mine - KEPT_CLAIMS) await unlink(claimPath(paths, n)).catch(() => {});
+    return mine;
   }
   throw new HranessError('control-already-running', 'Another owner claimed the control lock first.');
 }
-/** Removes a leftover socket file. Anything else at that path is refused. */
+/**
+ * Removes a leftover socket file. A socket that still accepts a connection
+ * belongs to a live owner and is refused, as is anything that is not a socket.
+ */
 async function reclaimSocket(path: string): Promise<void> {
   let info;
   try { info = await lstat(path); } catch (error) { if (errno(error, 'ENOENT')) return; throw error; }
   if (!info.isSocket()) throw new HranessError('permission-denied', `${path} exists and is not a socket.`);
+  const live = await new Promise<boolean>(resolve => {
+    const socket = createConnection(path);
+    const done = (value: boolean) => { socket.destroy(); resolve(value); };
+    socket.setTimeout(1000, () => done(true));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+  if (live) throw new HranessError('control-already-running', 'Another owner is still listening on the control socket.');
   await unlink(path);
 }
 
@@ -165,7 +233,7 @@ export async function serveControl(opts: ServeControlOptions): Promise<void> {
   await privateDir(paths.dir);
   const [boot, start] = [await bootId(), await processStartId(process.pid)];
   if (!boot || !start) throw new HranessError('internal', "Could not read this process's identity.");
-  await claimOwner(paths, { pid: process.pid, bootId: boot, processStartId: start });
+  const claimed = await claimOwner(paths, { pid: process.pid, bootId: boot, processStartId: start });
   const cap = randomBytes(32);
   const owner: OwnerFile = { schema: 1, pid: process.pid, bootId: boot, processStartId: start, generation: randomBytes(16).toString('hex') };
   const info: OwnerInfo = { product, pid: process.pid, generation: owner.generation, protocols: [...Object.keys(opts.agent.protocols), CONTROL_PROTOCOL].sort() };
@@ -177,6 +245,9 @@ export async function serveControl(opts: ServeControlOptions): Promise<void> {
   const onAbort = () => stop();
   opts.signal.addEventListener('abort', onAbort, { once: true });
   try {
+    // Refuse before writing anything a live owner uses.
+    await reclaimSocket(paths.agentSock);
+    await reclaimSocket(paths.adminSock);
     await writePrivate(paths.cap, cap.toString('hex'));
     created.push(paths.cap);
     await writePrivate(paths.ownerJson, JSON.stringify(owner));
@@ -246,8 +317,7 @@ export async function serveControl(opts: ServeControlOptions): Promise<void> {
     for (const path of created) await unlink(path).catch(() => {});
     const current = await readOwnerFile(paths).catch(() => undefined);
     if (current?.generation === owner.generation) await unlink(paths.ownerJson).catch(() => {});
-    const claim = await readFile(paths.claim, 'utf8').then(JSON.parse, () => undefined) as Claim | undefined;
-    if (claim?.pid === process.pid && claim.processStartId === start) await unlink(paths.claim).catch(() => {});
+    await releaseClaim(paths, claimed);
   }
 }
 
@@ -266,7 +336,7 @@ function exchange(sock: string, frame: unknown, timeoutMs = DEFAULT_IDLE_MS): Pr
       try { value = JSON.parse(reply); } catch { return finish(() => reject(new HranessError('owner-unavailable', 'The owner answered something unreadable.'))); }
       if (value.ok === true) return finish(() => resolve(value.result ?? null));
       const raw = value.error?.code;
-      const code: ErrorCode = typeof raw === 'string' && (isErrorCode(raw) || PRODUCT_CODE.test(raw)) ? raw as ErrorCode : 'internal';
+      const code: ErrorCode = typeof raw === 'string' && (isErrorCode(raw) || validProductCode(raw)) ? raw as ErrorCode : 'internal';
       const message = typeof value.error?.message === 'string' ? value.error.message : 'The owner refused the request.';
       finish(() => reject(new HranessError(code, message)));
     };

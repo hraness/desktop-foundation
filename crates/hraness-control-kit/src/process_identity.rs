@@ -33,7 +33,27 @@ fn raw_start(pid: u32) -> Option<String> {
 
 #[cfg(not(target_os = "linux"))]
 fn raw_boot_id() -> Option<String> {
-    run("sysctl", &["-n", "kern.boottime"])
+    run("sysctl", &["-n", "kern.boottime"]).map(|raw| boot_time_key(&raw))
+}
+
+/// The part of `sysctl -n kern.boottime` that names the boot:
+/// `sec=…,usec=…`. The date text after it is local time and changes with
+/// TZ, so it is dropped. Same key as the TypeScript `bootTimeKey`.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn boot_time_key(raw: &str) -> String {
+    let number_after = |label: &str| -> Option<&str> {
+        let at = raw.find(label)? + label.len();
+        let rest = raw[at..].trim_start().strip_prefix('=')?.trim_start();
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        (end > 0).then(|| &rest[..end])
+    };
+    // The first "sec" is the seconds field; "usec" comes after it.
+    match (number_after("sec"), number_after("usec")) {
+        (Some(sec), Some(usec)) => format!("sec={sec},usec={usec}"),
+        _ => raw.trim().to_string(),
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -46,6 +66,9 @@ fn run(program: &str, args: &[&str]) -> Option<String> {
     let out = Command::new(program)
         .args(args)
         .env("LC_ALL", "C")
+        // `ps -o lstart=` prints local time; pin it so an owner started
+        // under one TZ does not look dead to a checker under another.
+        .env("TZ", "UTC")
         .output()
         .ok()?;
     let text = String::from_utf8(out.stdout).ok()?;
@@ -84,6 +107,42 @@ mod tests {
         assert_eq!(process_start_id(pid).unwrap(), start);
         assert!(matches(pid, &boot, &start));
         assert!(!matches(pid, &boot, &"0".repeat(64)));
+    }
+
+    #[test]
+    fn boot_time_key_drops_the_local_time_text() {
+        let local = "{ sec = 1790535348, usec = 479171 } Sun Sep 27 14:55:48 2026\n";
+        let utc = "{ sec = 1790535348, usec = 479171 } Sun Sep 27 18:55:48 2026\n";
+        assert_eq!(boot_time_key(local), "sec=1790535348,usec=479171");
+        assert_eq!(boot_time_key(local), boot_time_key(utc));
+        assert_ne!(
+            boot_time_key(local),
+            boot_time_key("{ sec = 1790535349, usec = 479171 } Sun Sep 27 14:55:49 2026")
+        );
+        assert_eq!(boot_time_key(" other \n"), "other");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn start_ids_ignore_the_callers_time_zone() {
+        let pid = std::process::id().to_string();
+        let ps = |tz: &str| {
+            let out = Command::new("ps")
+                .args(["-o", "lstart=", "-p", &pid])
+                .env("LC_ALL", "C")
+                .env("TZ", tz)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        // Kolkata is UTC+5:30 all year, so its local text always differs.
+        assert_ne!(ps("UTC"), ps("Asia/Kolkata"));
+        assert_eq!(
+            raw_start(std::process::id()).as_deref(),
+            Some(ps("UTC").as_str())
+        );
+        let raw = run("sysctl", &["-n", "kern.boottime"]).unwrap();
+        assert!(raw_boot_id().unwrap().starts_with("sec="), "{raw}");
     }
 
     #[test]

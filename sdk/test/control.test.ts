@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
-  adminRequest, agentRequest, bootId, CONTROL_PROTOCOL, controlStatus, ensureOwner, ownerPaths, ownerPathsIn,
+  adminRequest, agentRequest, bootId, bootTimeKey, CONTROL_PROTOCOL, controlStatus, ensureOwner, ownerPaths, ownerPathsIn,
   processStartId, readOwnerFile, serveControl, type OwnerInfo, type OwnerPaths,
 } from '../src/control.js';
 import { HranessError } from '../src/registry.js';
@@ -85,7 +85,9 @@ test('serve: modes, hello on both sockets, agent protocols, admin cap, stop and 
     assert.deepEqual(await controlStatus(paths), { running: true, stale: false, owner: info });
     assert.deepEqual(await adminRequest(paths, { op: 'control.stop' }), readContract('golden/control-response-ok.json').result);
     await owner.done;
-    assert.deepEqual((await readdir(paths.dir)).sort(), []);
+    // Only the claim stays, marked released, so claim numbers never repeat.
+    assert.deepEqual((await readdir(paths.dir)).sort(), ['owner.lock.1']);
+    assert.deepEqual(JSON.parse(await readFile(`${paths.claim}.1`, 'utf8')), { released: true });
     assert.deepEqual(await controlStatus(paths), { running: false, stale: false });
     assert.equal(await code(agentRequest(paths, 'example.approvals/1', {})), 'owner-unavailable');
   } finally { owner.abort.abort(); await owner.done.catch(() => {}); await rm(dir, { recursive: true, force: true }); }
@@ -118,10 +120,59 @@ test('a killed owner leaves stale files that the next owner reclaims without sig
     const owner = start(paths);
     const info = await owner.ready;
     assert.equal(info.pid, process.pid);
-    assert.ok((await readdir(paths.dir)).some(name => name.startsWith('owner.lock.stale-')), 'the stale claim is renamed aside, not deleted');
+    const names = await readdir(paths.dir);
+    assert.ok(names.includes('owner.lock.1') && names.includes('owner.lock.2'), 'the dead claim stays; the new owner takes the next number');
     owner.abort.abort();
     await owner.done;
+    assert.ok((await readdir(paths.dir)).includes('owner.lock.2'), 'a clean stop keeps the highest claim');
   } finally { child.kill('SIGKILL'); await rm(dir, { recursive: true, force: true }); }
+});
+
+const racerScript = (dir: string) => `import(${JSON.stringify(controlModule)}).then(m => m.serveControl({ product: 'example', paths: m.ownerPathsIn(${JSON.stringify(dir)}), agent: { protocols: {} }, admin: {}, signal: new AbortController().signal, onReady: () => process.stdout.write('ready\\n') })).catch(e => { process.stdout.write('lost ' + e.code + '\\n'); process.exit(0); })`;
+
+test('starters racing over a crashed owner leave exactly one owner', unixOnly, async () => {
+  for (let trial = 0; trial < 6; trial++) {
+    const dir = await home();
+    const paths = ownerPathsIn(dir);
+    await mkdir(paths.dir, { recursive: true, mode: 0o700 });
+    // The claim a crashed owner leaves: a pid that no longer runs.
+    const dead = spawn(process.execPath, ['-e', '0']);
+    await new Promise(resolve => dead.once('exit', resolve));
+    await writeFile(`${paths.claim}.1`, JSON.stringify({ pid: dead.pid, bootId: 'x', processStartId: 'y' }), { mode: 0o600 });
+    const racers = Array.from({ length: 4 }, () => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', racerScript(dir)], { stdio: ['ignore', 'pipe', 'ignore'] });
+      let out = '';
+      child.stdout!.on('data', chunk => { out += chunk; });
+      return { child, out: () => out };
+    });
+    try {
+      for (let i = 0; i < 400 && !racers.every(r => /^(ready|lost)/m.test(r.out())); i++) await delay(25);
+      await delay(300);
+      const ready = racers.filter(r => /^ready$/m.test(r.out())).length;
+      assert.equal(ready, 1, `trial ${trial}: ${racers.map(r => r.out().trim()).join(' | ')}`);
+      assert.ok(racers.filter(r => !/^ready$/m.test(r.out())).every(r => r.out().trim() === 'lost control-already-running'));
+      assert.equal((await controlStatus(paths)).running, true);
+    } finally {
+      for (const r of racers) r.child.kill('SIGKILL');
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('a socket that still answers is never unlinked', unixOnly, async () => {
+  const dir = await home();
+  const paths = ownerPathsIn(dir);
+  const first = start(paths);
+  try {
+    await first.ready;
+    // Simulate a starter that got past the claim: the live sockets must survive.
+    const names = (await readdir(paths.dir)).filter(n => /^owner\.lock\.\d+$/.test(n));
+    for (const name of names) await rm(join(paths.dir, name));
+    const second = start(paths);
+    assert.equal(await code(second.done), 'control-already-running');
+    assert.equal((await lstat(paths.agentSock)).isSocket(), true);
+    assert.equal((await controlStatus(paths)).running, true);
+  } finally { first.abort.abort(); await first.done; await rm(dir, { recursive: true, force: true }); }
 });
 
 test('a non-socket at a socket path is refused, never removed', unixOnly, async () => {
@@ -155,4 +206,28 @@ test('ensureOwner starts one owner, reuses it, and kills only its own child when
     const exits = spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' });
     await assert.rejects(ensureOwner(paths, () => exits, 300), (e: HranessError) => e.code === 'owner-unavailable');
   } finally { await adminRequest(paths, { op: 'control.stop' }).catch(() => {}); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('boot and start identity do not depend on the caller\'s time zone', async () => {
+  assert.equal(bootTimeKey('{ sec = 1790535348, usec = 479171 } Sun Sep 27 14:55:48 2026\n'), 'sec=1790535348,usec=479171');
+  assert.equal(bootTimeKey('{ sec = 1790535348, usec = 479171 } Sun Sep 27 18:55:48 2026\n'), 'sec=1790535348,usec=479171');
+  assert.notEqual(bootTimeKey('{ sec = 1790535349, usec = 479171 } Sun Sep 27 14:55:49 2026'), 'sec=1790535348,usec=479171');
+});
+
+test('a live process has the same identity under every caller time zone', unixOnly, async () => {
+  // A checker under another TZ (Kolkata is UTC+5:30 all year) sees the same identity for this live process.
+  const url = new URL('../src/control.js', import.meta.url).href;
+  const script = `const m = await import(${JSON.stringify(url)}); console.log(JSON.stringify([await m.bootId(), await m.processStartId(${process.pid})]));`;
+  const seen = async (tz: string) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TZ: tz }, stdio: ['ignore', 'pipe', 'inherit'] });
+    let out = '';
+    child.stdout.on('data', chunk => { out += chunk; });
+    await new Promise(resolve => child.on('close', resolve));
+    return JSON.parse(out) as [string, string];
+  };
+  const mine = [await bootId(), await processStartId(process.pid)];
+  assert.ok(mine[0] && mine[1]);
+  assert.deepEqual(await seen('UTC'), mine);
+  assert.deepEqual(await seen('Asia/Kolkata'), mine);
+  assert.deepEqual(await seen('America/Puerto_Rico'), mine);
 });

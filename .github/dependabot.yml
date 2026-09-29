@@ -4,9 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    # One pull request per week for every action bump, so the six-target
-    # matrix runs once and bumps that touch companion.yml never conflict.
+    # One pull request per week for minor and patch action bumps, so the
+    # six-target matrix runs once and bumps that touch companion.yml never
+    # conflict. Major bumps arrive as their own PRs so one breaking change
+    # cannot hold back the rest.
     groups:
       actions:
         patterns: ['*']
+        update-types: [minor, patch]
     open-pull-requests-limit: 2

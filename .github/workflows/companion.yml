@@ -205,6 +205,7 @@ jobs:
         run: |
           cargo build --locked --release --bin hraness-companion --bin hraness-helper 2> "$RUNNER_TEMP/build.log" || { cat "$RUNNER_TEMP/build.log"; exit 1; }
           grep -E 'dirty|Compiling|Finished' "$RUNNER_TEMP/build.log" | head -40 || true
+          grep -E -A6 '^warning' "$RUNNER_TEMP/build.log" | head -80 || true
       # The cache's post step retains reusable build inputs even if a later
       # desktop integration test fails. Every gate still runs on every tree.
       - name: Headless protocol probe

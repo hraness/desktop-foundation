@@ -111,7 +111,8 @@ test('the doc lists match what the code reads', async (t) => {
   let included = 0;
   for (const file of listed.stdout.split('\n').filter(Boolean)) {
     for (const [, target] of readFileSync(new URL(file, root), 'utf8').matchAll(/include_str!\("([^"]+\.md)"\)/g)) {
-      const doc = fileURLToPath(new URL(target, new URL(file, root))).slice(rootPath.length);
+      // URL arithmetic keeps forward slashes on Windows too.
+      const doc = new URL(target, new URL(file, root)).href.slice(root.href.length);
       assert.notEqual(classifyPath(doc), 'docs', `${file} includes ${doc}; add it to ASSERTED_DOCS`);
       included += 1;
     }

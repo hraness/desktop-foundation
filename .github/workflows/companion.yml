@@ -6,15 +6,20 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  # Pull requests run all six targets only when they touch platform code (see
+  # scripts/native-scope.mjs). Main, this nightly run, manual runs and tags
+  # always run every target, and a red main run opens a tracking issue.
+  schedule:
+    - cron: '23 7 * * *'
   workflow_dispatch:
 permissions:
   contents: read
-# A newer push to a pull request supersedes its older run. Pushes to main and
-# tags get one group per ref and SHA, so a main run is never queued behind or
-# cancelled by a later merge, and a tag never waits for the main run of the
-# same commit.
+# A newer push to a pull request supersedes its older run. Every other run
+# gets one group per event, ref and SHA, so a main run is never queued behind
+# or cancelled by a later merge or the nightly run, and a tag never waits for
+# the main run of the same commit.
 concurrency:
-  group: companion-${{ github.event_name == 'pull_request' && github.ref || format('{0}-{1}', github.ref, github.sha) }}
+  group: companion-${{ github.event_name == 'pull_request' && github.ref || format('{0}-{1}-{2}', github.event_name, github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_INCREMENTAL: 0
@@ -26,24 +31,51 @@ jobs:
     name: Detect changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
     outputs:
-      # true only when every file a pull request touches is documentation;
-      # pushes, tags and manual runs always build everything.
-      docs_only: ${{ steps.filter.outputs.docs == 'true' }}
+      # docs: every changed file is documentation; no native legs or package.
+      # subset: platform-neutral changes; Linux x64 and macOS arm64 only.
+      # full: all six targets and the package. Non-PR runs are always full.
+      scope: ${{ steps.scope.outputs.scope }}
+      matrix: ${{ steps.scope.outputs.matrix }}
     steps:
-      - uses: dorny/paths-filter@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
-        id: filter
         with:
-          predicate-quantifier: every
-          filters: |
-            docs:
-              - '**/*.md'
-              - 'docs/**'
-              - 'LICENSE'
+          persist-credentials: false
+          # The merge commit and its base parent: HEAD^1..HEAD is the change.
+          fetch-depth: 2
+      - name: Select native scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          full='[
+            {"os":"macos-14","target":"aarch64-apple-darwin"},
+            {"os":"macos-15-intel","target":"x86_64-apple-darwin"},
+            {"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},
+            {"os":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-gnu"},
+            {"os":"windows-2022","target":"x86_64-pc-windows-msvc"},
+            {"os":"windows-11-vs2026-arm","target":"aarch64-pc-windows-msvc"}
+          ]'
+          scope=full
+          if [ "$EVENT_NAME" = pull_request ]; then
+            # Run the base commit's selector so a pull request cannot narrow
+            # its own matrix. Any failure, including a missing selector,
+            # leaves the scope at full.
+            if git rev-parse --verify --quiet 'HEAD^2' >/dev/null \
+              && git show 'HEAD^1:scripts/native-scope.mjs' > "$RUNNER_TEMP/native-scope.mjs" \
+              && picked=$(node "$RUNNER_TEMP/native-scope.mjs" 'HEAD^1' HEAD); then
+              case "$picked" in docs|subset|full) scope=$picked ;; esac
+            fi
+          fi
+          if [ "$scope" = subset ]; then
+            matrix=$(jq -c '[.[] | select(.target == "x86_64-unknown-linux-gnu" or .target == "aarch64-apple-darwin")]' <<< "$full")
+          else
+            matrix=$(jq -c . <<< "$full")
+          fi
+          echo "Native scope: $scope" >> "$GITHUB_STEP_SUMMARY"
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
   sdk:
     name: SDK
     runs-on: ubuntu-24.04
@@ -110,17 +142,12 @@ jobs:
   native:
     name: Native (${{ matrix.target }})
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.scope == 'subset' || needs.changes.outputs.scope == 'full'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: macos-14, target: aarch64-apple-darwin }
-          - { os: macos-15-intel, target: x86_64-apple-darwin }
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
-          - { os: windows-2022, target: x86_64-pc-windows-msvc }
-          - { os: windows-11-vs2026-arm, target: aarch64-pc-windows-msvc }
+        # All six targets, or Linux x64 and macOS arm64 for a subset PR.
+        include: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -262,8 +289,9 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
   package:
+    # The manifest and package need all six binaries, so only full runs.
     needs: [changes, sdk, native]
-    if: needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.scope == 'full'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -306,7 +334,8 @@ jobs:
     steps:
       - name: Every blocking job passed
         env:
-          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCOPE: ${{ needs.changes.outputs.scope }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           SDK_RESULT: ${{ needs.sdk.result }}
           CLI_KIT_RESULT: ${{ needs.cli-kit.result }}
@@ -318,11 +347,46 @@ jobs:
           test "$SDK_RESULT" = success
           test "$CLI_KIT_RESULT" = success
           test "$CONTROL_KIT_RESULT" = success
-          if [ "$DOCS_ONLY" = true ]; then
+          # Only a pull request may narrow the matrix.
+          if [ "$EVENT_NAME" != pull_request ]; then test "$SCOPE" = full; fi
+          case "$SCOPE" in
             # A docs-only pull request deliberately skips the native matrix.
-            test "$NATIVE_RESULT" = skipped && test "$PACKAGE_RESULT" = skipped
-          else
-            test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = success
+            docs) test "$NATIVE_RESULT" = skipped && test "$PACKAGE_RESULT" = skipped ;;
+            # Two targets passed; the package needs all six and waits for main.
+            subset) test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = skipped ;;
+            full) test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = success ;;
+            *) echo "unknown native scope: $SCOPE"; exit 1 ;;
+          esac
+  main-health:
+    # A pull request can skip four targets, so main is where a platform-only
+    # break first shows. A red full run on main opens (or comments on) one
+    # tracking issue; the next green one closes it.
+    name: Main health
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (needs.required.result == 'success' || needs.required.result == 'failure')
+    needs: [required]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.required.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          title='Companion: full native matrix is failing on main'
+          issue=$(gh issue list --state open --limit 100 --json number,title \
+            --jq "map(select(.title == \"$title\")) | first | .number // empty")
+          if [ "$RESULT" = failure ]; then
+            body="The $EVENT_NAME run for $SHA failed: $RUN_URL"
+            if [ -n "$issue" ]; then gh issue comment "$issue" --body "$body"
+            else gh issue create --title "$title" --body "$body"; fi
+          elif [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "The $EVENT_NAME run for $SHA passed: $RUN_URL"
           fi
   release:
     if: startsWith(github.ref, 'refs/tags/v')

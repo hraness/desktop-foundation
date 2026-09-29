@@ -23,7 +23,7 @@
     { "code": "internal", "exit": 1, "meaning": "An unexpected failure." }
   ],
   "productCodes": {
-    "pattern": "^[a-z][a-z0-9-]*\\.[a-z0-9][a-z0-9.-]*$",
+    "pattern": "^[a-z][a-z0-9-]{0,31}\\.[a-z0-9][a-z0-9.-]{0,63}$",
     "exit": 1,
     "rule": "A product adds codes only under its own prefix, such as ghostget.policy-locked. The registry rejects any other code that is not listed above."
   }

@@ -14,8 +14,10 @@ async function collect(stem){
   return list;
 }
 const assets=await collect('hraness-companion');
-// From 0.9.0: the headless one-shot helper, listed separately so 0.8.x
-// readers that know only `assets` keep working.
+// From 0.9.0: the headless one-shot helper. The 0.8.x SDK refuses unknown
+// top-level manifest fields, so a 0.9.0 or later manifest needs SDK 0.9.0 or
+// later. The SDK ships with its own manifest, so this only matters to a
+// product that pins a newer manifest than its SDK.
 const helperAssets=await collect('hraness-helper');
 const manifest={schemaVersion:1,version:pkg.version,repository:'hraness/desktop-foundation',tag:`v${pkg.version}`,assets,helperAssets};
 if(process.env.GITHUB_REF_TYPE==='tag' && process.env.GITHUB_REF_NAME!==manifest.tag)throw new Error('Package/tag version mismatch');

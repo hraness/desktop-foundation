@@ -13,7 +13,7 @@ The tray, `./menu-kit` and the companion lifecycle calls are unchanged in
 
 ## Envelope
 
-Every command that takes `--json` prints exactly one JSON object on stdout.
+Every command that takes `--json` prints exactly one JSON object, on one line, on stdout.
 
 ```json
 {"ok":true,"schema":"example.status/1","generatedAt":"2026-09-28T00:00:00.000Z","data":{},"next":[]}
@@ -21,6 +21,8 @@ Every command that takes `--json` prints exactly one JSON object on stdout.
 ```
 
 - `schema` names the shape of `data` as `<product>.<noun>/<n>`.
+- Product names, verb words, schema ids and product error codes follow
+  `contract/names.json`, which both kits test against.
 - `generatedAt` is UTC with milliseconds.
 - `next` lists follow-up commands, each `{command, why, audience}` where
   `audience` is `agent` or `human`.
@@ -53,6 +55,21 @@ verb with an operation class from `contract/op-classes.json`:
 - `decide-legacy`: a decision the product has always let a caller make. It is
   listed as such so the gap is visible in `commands --json`.
 
+A verb whose class depends on its input, such as `approvals decide <id>
+--digest <d> <allow-once|deny>`, is registered as `decide` with an
+`operateWhen` test (`operate_when` in Rust). Input that passes the test, such
+as `deny`, runs as `operate` without the gate; every other input still needs a
+person. `commands --json` lists the verb as `decide` with an `operateWhen`
+summary.
+
+Flags that take a value (`--digest <d>`, `--width N`) are named in the verb's
+`valueFlags`, so `--digest abc` and `--digest=abc` parse the same way. The
+`next` command handed to a person keeps every positional and flag, in the
+`--flag=value` form, so it reads back to the same input.
+
+A verb with `output: 'raw'`, such as `tui` or `control serve`, owns stdout
+and returns its exit status as a number; `runCli` prints no envelope for it.
+
 `<product> commands --json` prints the registry (path, class, schema, summary
 and gate tier) so an agent can discover what it may call.
 
@@ -72,7 +89,7 @@ on macOS and `$XDG_STATE_HOME/<product>` (default `~/.local/state/<product>`).
 |---|---|---|
 | `control/` | 0700 | The directory. The owner creates it 0700, tightens a looser mode back to 0700, and refuses a directory that belongs to another user. |
 | `supervisor.lock` | 0600 | Rust owners hold an exclusive lock here for their lifetime. |
-| `owner.lock` | 0600 | TypeScript owners create this claim with `O_EXCL`. A claim from a process that is gone is renamed aside to `owner.lock.stale-<ms>-<hex>`, never deleted. |
+| `owner.lock.<n>` | 0600 | TypeScript owners' numbered claims. Each is written in full to a temporary file and hard-linked into place, which fails if the name exists. The highest number is the owner. A starter takes the next number only after it finds the highest claim's process gone, so starters racing over a crashed owner compete for one name and all but one get `control-already-running`. A clean stop marks its claim released in place; claims are never renamed, and a new owner removes those 16 or more numbers below its own. |
 | `owner.json` | 0600 | `{schema, pid, bootId, processStartId, generation}`. |
 | `agent.sock` | 0600 | Agent requests. |
 | `admin.sock` | 0600 | Admin requests. |
@@ -82,8 +99,9 @@ on macOS and `$XDG_STATE_HOME/<product>` (default `~/.local/state/<product>`).
 the process start time, so a reused pid is never mistaken for the owner.
 A second owner gets `control-already-running` (exit 5). A socket left by an
 owner that is gone is removed only after the new owner holds the claim, and
-only when the path is a socket; any other file at that path is left alone and
-the owner refuses to start.
+only when the path is a socket that no longer accepts connections; a socket
+that still answers, or any other file at that path, is left alone and the
+owner refuses to start.
 
 `controlStatus` reads these files and probes the socket. It never sends a
 signal. `ensureOwner` / `ensure_owner` starts the owner on demand, waits for

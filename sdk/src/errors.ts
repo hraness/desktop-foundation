@@ -10,3 +10,5 @@ export class CompanionError extends Error {
   }
   toJSON() { return { code: this.code, message: this.message, guidance: this.guidance }; }
 }
+
+// Probe: exercises the native-scope subset path. Not for merge.

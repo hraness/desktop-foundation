@@ -272,6 +272,7 @@ pub fn probe() -> PromptCapability {
 }
 
 /// Whether this host can show a native dialog right now.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn probe_capable() -> bool {
     platform::probe().capable
 }

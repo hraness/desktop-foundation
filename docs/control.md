@@ -26,6 +26,10 @@ Every command that takes `--json` prints exactly one JSON object, on one line, o
 - `generatedAt` is UTC with milliseconds.
 - `next` lists follow-up commands, each `{command, why, audience}` where
   `audience` is `agent` or `human`.
+- Since 1.1.0, `error.permission` may name the macOS permission behind a
+  failure, `{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:…"}`.
+  `settingsUrl` is absent or null when the kind has no System Settings pane.
+  It is optional, so a 1.0 reader only sees it when a product sets it.
 - The JSON Schema is `contract/envelope.schema.json`.
 
 ### Error codes and exit codes
@@ -82,7 +86,21 @@ and returns its exit status as a number; `runCli` prints no envelope for it.
 `<product> commands --json` prints the registry (path, class, schema, summary
 and gate tier) so an agent can discover what it may call.
 
-`runCli` handles `--json`, usage errors and the gate. A `decide` verb called
+`runCli` handles `--json`, usage errors and the gate. When `detectAudience`
+reports an agent, it prints the JSON envelope even without `--json`. For a
+person, an error is two lines on stderr, following `CLI_MENU_STYLE.md` D5:
+
+```
+✗ Unknown command "stats". Did you mean "status"?
+→ example --help
+```
+
+The first line is one sentence (plus the suggestion for a mistyped command);
+the second is the first `next` step meant for a person. `HRANESS_DEBUG=1` adds
+the code. Help starts with `Usage:`, and `<product> help <command>` is the
+same as `<command> --help` unless a product registers its own `help` verb.
+
+A `decide` verb called
 with `--json` by an agent or quiet audience returns exit 3 with a `next` step
 for a person and never prompts. `HRANESS_AUDIENCE=human` and `--confirm` only
 change wording; they never satisfy the gate. See

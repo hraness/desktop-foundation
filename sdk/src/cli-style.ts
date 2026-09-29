@@ -129,3 +129,39 @@ export function formatBytes(bytes: number): string {
 export function exitQuietlyOnBrokenPipe(stream: NodeJS.WriteStream = process.stdout, exit: (code: number) => void = code => process.exit(code)): void {
   stream.on('error', (error: NodeJS.ErrnoException) => { if (error.code === 'EPIPE') exit(0); else throw error; });
 }
+
+/** Damerau (optimal string alignment) edit distance: a swap of two neighbors counts once. */
+export function editDistance(a: string, b: string): number {
+  const x = [...a];
+  const y = [...b];
+  const d = Array.from({ length: x.length + 1 }, (_, i) => Array.from({ length: y.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= x.length; i++) {
+    for (let j = 1; j <= y.length; j++) {
+      let best = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && x[i - 1] === y[j - 2] && x[i - 2] === y[j - 1]) best = Math.min(best, d[i - 2][j - 2] + 1);
+      d[i][j] = best;
+    }
+  }
+  return d[x.length][y.length];
+}
+
+/**
+ * The closest candidate to `input`, if any is close enough: a unique prefix
+ * of at least three letters, or at most one edit per three letters. Each
+ * candidate is `[word to compare, text to suggest]`. Same rule as the Rust
+ * `hraness_cli_kit::clap::closest`.
+ */
+export function closest(input: string, candidates: readonly (readonly [string, string])[]): string | undefined {
+  const lower = input.toLowerCase();
+  if ([...lower].length >= 3) {
+    const prefixed = [...new Set(candidates.filter(([word]) => word.startsWith(lower)).map(([, suggestion]) => suggestion))];
+    if (prefixed.length === 1) return prefixed[0];
+  }
+  const limit = Math.max(1, Math.floor([...lower].length / 3));
+  let best: { distance: number; suggestion: string } | undefined;
+  for (const [word, suggestion] of candidates) {
+    const distance = editDistance(lower, word);
+    if (distance <= limit && (!best || distance < best.distance)) best = { distance, suggestion };
+  }
+  return best?.suggestion;
+}

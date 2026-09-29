@@ -129,28 +129,28 @@ export interface RequireHumanOptions {
 
 /** T1+T2. Without a controlling terminal it answers `human-required`; it never reads stdin. */
 export async function requireHuman(opts: RequireHumanOptions): Promise<GateResult> {
-  if (opts.tier === 'T3') return { ok: false, code: 'unsupported-platform', message: 'Gate tier T3 (OS owner authentication) is not supported yet. Nothing changed.' };
+  if (opts.tier === 'T3') return { ok: false, code: 'unsupported-platform', message: 'Deciding with your macOS login is not supported yet, so nothing changed.' };
   const ttl = opts.ttlMs ?? DEFAULT_CODE_TTL_MS;
   let term: GateTerminal;
   try { term = opts.terminal ?? openDevTty(opts.tty); }
-  catch { return { ok: false, code: 'human-required', message: 'This decision needs a person at a terminal. Nothing changed.' }; }
+  catch { return { ok: false, code: 'human-required', message: 'This decision needs a person at a terminal, so nothing changed.' }; }
   try {
-    if (!await term.isForeground().catch(() => false)) return { ok: false, code: 'human-required', message: 'This decision needs the terminal in the foreground. Nothing changed.' };
+    if (!await term.isForeground().catch(() => false)) return { ok: false, code: 'human-required', message: 'This decision needs the terminal in the foreground, so nothing changed.' };
     const code = oneTimeCode();
     term.write(`\n${printable(opts.title)}\nDigest: ${printable(opts.digest)}\nType ${code} to confirm (${Math.round(ttl / 1000)} s): `);
     const started = Date.now();
     const line = await term.readLine(ttl);
     if (line === null || Date.now() - started > ttl) {
-      term.write('\nExpired. Nothing changed.\n');
-      return { ok: false, code: 'gate-expired', message: 'The code expired. Nothing changed.' };
+      term.write('\nThe code expired, so nothing changed.\n');
+      return { ok: false, code: 'gate-expired', message: 'The code expired, so nothing changed.' };
     }
     if (!sameText(normalizeCode(line), normalizeCode(code))) {
-      term.write('The code did not match. Nothing changed.\n');
-      return { ok: false, code: 'gate-failed', message: 'The code did not match. Nothing changed.' };
+      term.write('The code did not match, so nothing changed.\n');
+      return { ok: false, code: 'gate-failed', message: 'The code did not match, so nothing changed.' };
     }
     return { ok: true, proof: { tier: 'T1T2', digest: opts.digest, confirmedAt: new Date().toISOString() } };
   } catch {
-    return { ok: false, code: 'human-required', message: 'The terminal failed. Nothing changed.' };
+    return { ok: false, code: 'human-required', message: 'The terminal failed, so nothing changed.' };
   } finally { term.close(); }
 }
 
@@ -196,7 +196,7 @@ export function redeemChallenge(c: Challenge, verb: string, digest: string): Red
 
 /** T3 owner authentication. Reserved: always rejects with `unsupported-platform`. */
 export async function ownerAuthorize(_helper: string, _opts: { reason: string; digest: string }): Promise<boolean> {
-  const error = new Error('Gate tier T3 (OS owner authentication) is not supported yet.') as Error & { code: string };
+  const error = new Error('Deciding with your macOS login is not supported yet, so nothing changed.') as Error & { code: string };
   error.code = 'unsupported-platform';
   throw error;
 }

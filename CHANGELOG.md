@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 - 2026-09-29
+
+Command-line errors and help from `./registry` now read like the rest of the Hraness tools, agents get JSON without asking for it, and an error can name the macOS permission behind it. Everything is additive: a 1.0 reader accepts every 1.1 envelope that sets no permission, and the `--json` bytes are unchanged.
+
+### Changes
+
+- A text error from `runCli` is two lines on stderr: `✗` and one sentence, then `→` and the one command to run next (`FAIL` and `->` without UTF-8). A mistyped command adds `Did you mean "status"?`; `HRANESS_DEBUG=1` adds the error code.
+- Help starts with `Usage:`, says in plain words when a person has to decide, and `<product> help <command>` works like `<command> --help`. User-facing text no longer says "gate".
+- When `detectAudience` reports an agent, `runCli` prints the JSON envelope even without `--json`. A person at a terminal still reads text.
+- The envelope's `error` takes an optional `permission: { kind, settingsUrl }`, the macOS permission behind the failure and the System Settings pane that fixes it. It is in `contract/envelope.schema.json`, the TypeScript `ErrorBody` and `HranessError`, and the Rust `ErrorBody` (`ErrorPermission`, `with_permission`). `ErrorBody` in Rust gained a field, so code that builds it with a struct literal needs `..` or `ErrorBody::new`.
+
 ## 1.0.0 - 2026-09-29
 
 The menu bar is gone. Products run through the owner process, `status --json`, `tui` and the verbs that 0.9 added; `hraness-helper` handles the few things a terminal cannot. Every product already moved off the tray, and each pins an exact release, so nothing changes until a product bumps. See `docs/migration-1.0.md`.

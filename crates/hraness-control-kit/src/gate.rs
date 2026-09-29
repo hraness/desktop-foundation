@@ -145,7 +145,7 @@ fn human_required(message: &str) -> ErrorBody {
 fn t3_unsupported() -> ErrorBody {
     ErrorBody::new(
         ErrorCode::UnsupportedPlatform,
-        "Gate tier T3 (OS owner authentication) is not supported yet.",
+        "Deciding with your macOS login is not supported yet, so nothing changed.",
     )
 }
 
@@ -188,7 +188,7 @@ pub fn require_human(title: &str, digest: &str, tier: GateTier) -> Result<GatePr
     #[cfg(unix)]
     {
         let mut tty = DevTty::open().map_err(|_| {
-            human_required("This decision needs a person at a terminal. Nothing changed.")
+            human_required("This decision needs a person at a terminal, so nothing changed.")
         })?;
         require_human_with(&mut tty, title, digest, tier, DEFAULT_CODE_TTL)
     }
@@ -197,7 +197,7 @@ pub fn require_human(title: &str, digest: &str, tier: GateTier) -> Result<GatePr
         let _ = (title, digest);
         Err(ErrorBody::new(
             ErrorCode::UnsupportedPlatform,
-            "The human gate needs a Unix terminal.",
+            "This decision needs a Unix terminal, so nothing changed.",
         ))
     }
 }
@@ -215,7 +215,7 @@ pub fn require_human_with(
     }
     if !term.is_foreground().unwrap_or(false) {
         return Err(human_required(
-            "This decision needs the terminal in the foreground. Nothing changed.",
+            "This decision needs the terminal in the foreground, so nothing changed.",
         ));
     }
     let code = one_time_code()?;
@@ -232,23 +232,23 @@ pub fn require_human_with(
     let started = std::time::Instant::now();
     let line = term.read_line(ttl).map_err(io)?;
     let Some(line) = line else {
-        let _ = term.write("\nExpired. Nothing changed.\n");
+        let _ = term.write("\nThe code expired, so nothing changed.\n");
         return Err(ErrorBody::new(
             ErrorCode::GateExpired,
-            "The code expired. Nothing changed.",
+            "The code expired, so nothing changed.",
         ));
     };
     if started.elapsed() > ttl {
         return Err(ErrorBody::new(
             ErrorCode::GateExpired,
-            "The code expired. Nothing changed.",
+            "The code expired, so nothing changed.",
         ));
     }
     if !crypto::constant_time_eq(normalize(&line).as_bytes(), normalize(&code).as_bytes()) {
-        let _ = term.write("The code did not match. Nothing changed.\n");
+        let _ = term.write("The code did not match, so nothing changed.\n");
         return Err(ErrorBody::new(
             ErrorCode::GateFailed,
-            "The code did not match. Nothing changed.",
+            "The code did not match, so nothing changed.",
         ));
     }
     Ok(GateProof {

@@ -195,6 +195,31 @@ pub struct ErrorBody {
     pub detail: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next: Vec<NextStep>,
+    /// Added in 1.1.0: the macOS permission behind the failure, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Boxed so `ErrorBody` stays small enough to return in a `Result`.
+    pub permission: Option<Box<ErrorPermission>>,
+}
+
+/// The `error.permission` member: a permission kind such as
+/// `full-disk-access`, and the System Settings pane that fixes it when the
+/// kind has one. Added in 1.1.0; readers that predate it never see it
+/// unless a product sets it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ErrorPermission {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_url: Option<String>,
+}
+
+impl ErrorPermission {
+    pub fn new(kind: impl Into<String>, settings_url: Option<impl Into<String>>) -> Self {
+        Self {
+            kind: kind.into(),
+            settings_url: settings_url.map(Into::into),
+        }
+    }
 }
 
 impl ErrorBody {
@@ -204,7 +229,13 @@ impl ErrorBody {
             message: message.into(),
             detail: None,
             next: Vec::new(),
+            permission: None,
         }
+    }
+
+    pub fn with_permission(mut self, permission: ErrorPermission) -> Self {
+        self.permission = Some(Box::new(permission));
+        self
     }
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
@@ -428,6 +459,7 @@ mod tests {
             include_str!("../../../contract/golden/envelope-error.json"),
             include_str!("../../../contract/golden/envelope-human-required.json"),
             include_str!("../../../contract/golden/envelope-product-code.json"),
+            include_str!("../../../contract/golden/envelope-permission.json"),
             include_str!("../../../contract/golden/commands.json"),
         ];
         for text in goldens {
@@ -439,6 +471,41 @@ mod tests {
         assert!(serde_json::from_str::<Envelope<()>>(bad).is_err());
         let unknown = r#"{"ok":false,"schema":"hraness.error/1","generatedAt":"2026-09-28T00:00:00.000Z","error":{"code":"nope","message":"m"}}"#;
         assert!(serde_json::from_str::<Envelope<()>>(unknown).is_err());
+    }
+
+    #[test]
+    fn permission_is_optional_and_additive() {
+        let env: Envelope<()> = Envelope::error(
+            ErrorBody::new(ErrorCode::PermissionDenied, "No access.").with_permission(
+                ErrorPermission::new(
+                    "full-disk-access",
+                    Some(
+                        "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+                    ),
+                ),
+            ),
+        );
+        let text = serde_json::to_string(&env).unwrap();
+        assert!(text.contains(r#""permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:"#), "{text}");
+        assert_eq!(serde_json::from_str::<Envelope<()>>(&text).unwrap(), env);
+        // No pane: settingsUrl is left out, and a null reads as none.
+        let keychain = ErrorBody::new(ErrorCode::PermissionDenied, "No access.")
+            .with_permission(ErrorPermission::new("keychain", None::<String>));
+        assert_eq!(
+            serde_json::to_string(&keychain).unwrap(),
+            r#"{"code":"permission-denied","message":"No access.","permission":{"kind":"keychain"}}"#
+        );
+        let null: ErrorBody = serde_json::from_str(
+            r#"{"code":"permission-denied","message":"m","permission":{"kind":"keychain","settingsUrl":null}}"#,
+        )
+        .unwrap();
+        assert_eq!(null.permission.unwrap().settings_url, None);
+        // Without it, the 1.0.0 bytes are unchanged.
+        assert!(
+            !serde_json::to_string(&ErrorBody::new(ErrorCode::Usage, "m"))
+                .unwrap()
+                .contains("permission")
+        );
     }
 
     #[test]

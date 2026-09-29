@@ -52,7 +52,7 @@ test('agent markers match contract/agent-markers.json', () => {
 });
 
 test('every golden envelope passes the schema and a wrong one does not', () => {
-  for (const name of ['envelope-ok.json', 'envelope-error.json', 'envelope-human-required.json', 'envelope-product-code.json', 'commands.json']) {
+  for (const name of ['envelope-ok.json', 'envelope-error.json', 'envelope-human-required.json', 'envelope-product-code.json', 'envelope-permission.json', 'commands.json']) {
     assert.deepEqual(validate(schema, readContract(`golden/${name}`)), [], name);
   }
   assert.notDeepEqual(validate(schema, { ok: false, schema: 'hraness.error/2', generatedAt: AT.toISOString(), error: { code: 'usage', message: 'x' } }), []);
@@ -99,7 +99,97 @@ test('runCli: read verbs, text, commands and usage', async () => {
   assert.equal((r.json() as any).error.next[0].command, 'example commands --json');
   r = io();
   assert.equal(await runCli(example(), ['nope'], r.value), 2);
-  assert.match(r.err(), /^usage: Unknown command: nope\./);
+  assert.equal(r.err(), 'FAIL Unknown command "nope".\n-> example --help\n');
+});
+
+const UTF8 = { LANG: 'en_US.UTF-8' };
+
+test('runCli: text errors are one ✗ sentence and one → step, with "Did you mean" for a near miss', async () => {
+  const cases: [string[], string][] = [
+    [['stats'], '✗ Unknown command "stats". Did you mean "status"?\n→ example --help\n'],
+    [['approvals', 'decid'], '✗ Unknown command "approvals decid". Did you mean "approvals decide"?\n→ example approvals --help\n'],
+    [['approvals'], '✗ Name a command after "approvals".\n→ example approvals --help\n'],
+    [[], '✗ Name a command.\n→ example --help\n'],
+    [['comands'], '✗ Unknown command "comands". Did you mean "commands"?\n→ example --help\n'],
+    [['zzzzzz'], '✗ Unknown command "zzzzzz".\n→ example --help\n'],
+    [['status', '--frce'], '✗ Unknown option "--frce" for "example status", so nothing ran.\n→ example status --help\n'],
+    [['control', 'stop'], '✗ No owner.\n→ example control stop --help\n'],
+  ];
+  for (const [argv, want] of cases) {
+    const r = io({ audience: 'human', env: UTF8 });
+    const code = await runCli(example(), argv, r.value);
+    assert.ok(code === 2 || code === 4, argv.join(' '));
+    assert.equal(r.out(), '', argv.join(' '));
+    assert.equal(r.err(), want, argv.join(' '));
+    const [first, second] = r.err().split('\n');
+    assert.equal(first.match(/[.?!](\s|$)/g)?.length ?? 0, first.includes('Did you mean') ? 2 : 1, `one sentence (plus the suggestion): ${first}`);
+    assert.match(second, /^→ \S/);
+  }
+  // HRANESS_DEBUG adds the code, and nothing else changes.
+  const r = io({ audience: 'human', env: { ...UTF8, HRANESS_DEBUG: '1' } });
+  await runCli(example(), ['stats'], r.value);
+  assert.equal(r.err(), '✗ Unknown command "stats". Did you mean "status"?\n→ example --help\n  code: usage\n');
+});
+
+test('runCli: an agent gets the JSON envelope without --json', async () => {
+  const ran: string[] = [];
+  for (const extra of [{ audience: 'agent' as const }, { env: { CLAUDECODE: '1' } }]) {
+    let r = io(extra);
+    assert.equal(await runCli(example(ran), ['stats'], r.value), 2);
+    assert.equal(r.err(), '');
+    const envelope = r.json() as any;
+    assert.deepEqual(validate(schema, envelope), []);
+    assert.equal(envelope.error.message, 'Unknown command "stats". Did you mean "status"?');
+    assert.deepEqual(envelope.error.next.map((n: any) => n.audience), ['agent', 'human']);
+    r = io(extra);
+    assert.equal(await runCli(example(ran), ['status'], r.value), 0);
+    assert.deepEqual((r.json() as any).data, { owner: 'running' });
+    r = io(extra);
+    assert.equal(await runCli(example(ran), ['--help'], r.value), 0);
+    assert.equal((r.json() as any).schema, HELP_SCHEMA);
+    // A decision still answers human-required and never prompts.
+    r = io({ ...extra, gate: async () => { throw new Error('prompted'); } });
+    assert.equal(await runCli(example(ran), ['approvals', 'decide', 'a1', 'allow-once'], r.value), 3);
+    assert.equal((r.json() as any).error.code, 'human-required');
+  }
+  assert.deepEqual(ran, ['status', 'status']);
+  // A person without --json still reads text.
+  const r = io({ audience: 'human', env: UTF8 });
+  assert.equal(await runCli(example(), ['status'], r.value), 0);
+  assert.equal(r.out(), 'owner running\n');
+});
+
+test('help and error text: sentence-case Usage, `help <cmd>`, and no "gate"', async () => {
+  const reg = example();
+  const texts: string[] = [];
+  for (const argv of [['--help'], ['help'], ['help', 'approvals', 'decide'], ['approvals', '--help'], ['help', 'status'], ['commands'], ['help', 'commands'], ['nope'], ['approvals', 'decide', 'a1', 'allow-once']]) {
+    const r = io({ audience: 'human', env: UTF8, gate: async () => ({ ok: false as const, code: 'gate-failed' as const, message: 'The code did not match, so nothing changed.' }) });
+    await runCli(reg, argv, r.value);
+    texts.push(r.out() + r.err());
+  }
+  for (const text of texts) {
+    assert.doesNotMatch(text, /\bgate\b/i, text);
+    assert.doesNotMatch(text, /^usage:/m, text);
+  }
+  assert.match(texts[0], /^Usage: example <command> \[options\]\n/);
+  assert.match(texts[0], /Run `example help <command>` for one command\./);
+  assert.equal(texts[1], texts[0]);
+  assert.match(texts[2], /^Usage: example approvals decide \[options\]\n\nAllow or deny a waiting request\nA person decides this at their own terminal\.\n/);
+  assert.match(texts[3], /^Usage: example approvals <command> \[options\]/);
+  assert.match(texts[3], /Run `example help approvals <command>`/);
+});
+
+test('error.permission is optional, round-trips and matches the schema', () => {
+  const golden = readContract('golden/envelope-permission.json');
+  assert.deepEqual(validate(schema, golden), []);
+  const body = new HranessError('example.full-disk-access', golden.error.message, undefined, golden.error.next, golden.error.permission).toBody();
+  assert.deepEqual(body, golden.error);
+  assert.deepEqual(validate(schema, errorEnvelope({ code: 'permission-denied', message: 'm', permission: { kind: 'keychain', settingsUrl: null } })), []);
+  assert.deepEqual(validate(schema, errorEnvelope({ code: 'permission-denied', message: 'm', permission: { kind: 'keychain' } })), []);
+  assert.notDeepEqual(validate(schema, errorEnvelope({ code: 'permission-denied', message: 'm', permission: { settingsUrl: null } as any })), []);
+  assert.notDeepEqual(validate(schema, errorEnvelope({ code: 'permission-denied', message: 'm', permission: { kind: 'keychain', settingsUrl: 'https://x' } })), []);
+  assert.notDeepEqual(validate(schema, errorEnvelope({ code: 'permission-denied', message: 'm', permission: { kind: 'keychain', extra: 1 } as any })), []);
+  assert.equal('permission' in new HranessError('usage', 'm').toBody(), false);
 });
 
 test('runCli: error codes map to exit codes, and undeclared codes become internal', async () => {
@@ -261,13 +351,13 @@ test('runCli: --help prints help, exits 0 and never runs the verb', async () => 
   for (const argv of [['control', 'stop', '--help'], ['control', 'stop', '-h'], ['--help', 'control', 'stop'], ['control', '--help', 'stop']]) {
     const r = io({ gate });
     assert.equal(await runCli(reg, argv, r.value), 0, argv.join(' '));
-    assert.match(r.out(), /^usage: example control stop \[options\]\n\nStop the owner\nClass: operate\./);
+    assert.match(r.out(), /^Usage: example control stop \[options\]\n\nStop the owner\n\nOptions\n/);
   }
   let r = io({ gate });
   assert.equal(await runCli(reg, ['approvals', 'decide', 'a1', 'allow-once', '--digest', 'd', '--help'], r.value), 0);
-  assert.match(r.out(), /usage: example approvals decide <id> <allow-once\|deny> \[options\]/);
+  assert.match(r.out(), /Usage: example approvals decide <id> <allow-once\|deny> \[options\]/);
   assert.match(r.out(), /--digest <value>\n  --dry-run\n/);
-  assert.match(r.out(), /gate T1T2/);
+  assert.match(r.out(), /A person decides this at their own terminal\./);
   r = io({ gate });
   assert.equal(await runCli(reg, ['control', 'stop', '--help', '--json'], r.value), 0);
   assert.equal((r.json() as any).schema, HELP_SCHEMA);
@@ -275,8 +365,8 @@ test('runCli: --help prints help, exits 0 and never runs the verb', async () => 
   // A group and the top level list their verbs.
   r = io({ gate });
   assert.equal(await runCli(reg, ['--help'], r.value), 0);
-  assert.match(r.out(), /example control stop {2}\[operate\]/);
-  assert.match(r.out(), /example approvals decide {2}\[decide T1T2\]/);
+  assert.match(r.out(), /example control stop {6}Stop the owner/);
+  assert.match(r.out(), /example approvals decide {2}Allow or deny a waiting request/);
   r = io({ gate });
   assert.equal(await runCli(reg, ['approvals', '-h'], r.value), 0);
   assert.doesNotMatch(r.out(), /control stop/);

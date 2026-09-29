@@ -93,8 +93,8 @@ const helper = await resolveHelper({ manifest: await packagedManifest() });
 
 `hraness-companion` is an alias kept for products and local apps built before
 1.0. It gives the same output and exit status as `hraness-helper` for every
-mode above; only `--version` prints its own name. Asked for the old menu bar
-(no arguments, `--state-dir`, `--check-protocol` or `--foreground`), it
+mode above; only `--version` prints its own name. Given the old menu bar argv
+(`--state-dir`, `--check-protocol` or `--foreground`) or no arguments, it
 draws nothing and exits 2 with a `tray-removed` error that points to
 `<product> tui` and `<product> status --json`. See the
 [helper protocol](docs/protocol.md).

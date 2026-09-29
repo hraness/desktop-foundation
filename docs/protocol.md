@@ -156,9 +156,10 @@ counts as `primary`.
 
 ## Removed tray modes
 
-Until 0.9, `hraness-companion` with no arguments, with `--state-dir <dir>`,
-or with `--check-protocol` ran or checked the menu bar. From 1.0 the alias
-draws nothing and reads nothing for these argv. It prints
+Until 0.9, `hraness-companion --state-dir <dir>` ran the menu bar and
+`hraness-companion --check-protocol` checked it. From 1.0 the alias refuses
+any argv starting `--state-dir`, `--check-protocol` or `--foreground`, and
+no arguments at all; it draws nothing and reads nothing for these argv. It prints
 
 ```json
 {"type":"error","version":1,"code":"tray-removed"}

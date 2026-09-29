@@ -19,7 +19,7 @@ Your product should already have, on 0.9:
 Then look for the common uses of what 1.0 removed:
 
 ```sh
-git grep -nE "desktop-foundation/menu-kit|Companion|Snapshot|RunnerProtocols|parseRunnerEvent|assertAppId|openBrowser|permissionMenuItems|menuLoginItem|lintMenu|desktop_foundation::|permission_menu_items|PermissionMenuRow|Surface::Menu" -- ':!*.lock'
+git grep -nE "desktop-foundation/menu-kit|[Cc]ompanion[A-Z]|Companion|MenuModel|MenuItem|TrayIcon|runnerProtocols|Snapshot|RunnerProtocols|parseRunnerEvent|assertAppId|openBrowser|permissionMenuItems|menuLoginItem|lintMenu|desktop_foundation::|permission_menu_items|PermissionMenuRow|Surface::Menu" -- ':!*.lock'
 ```
 
 Review each hit against the table below. The grep is a first pass, not
@@ -38,12 +38,12 @@ name that is still in use.
 | Root exports for menu snapshots: `validateSnapshot`, `validateSnapshotV2`, `downlevelSnapshot`, `parseRunnerProtocols`, `runnerProtocols`, `parseRunnerEvent`, `assertAppId`, `PROTOCOL_VERSION`, `ACTION_ERROR_MS` and the `MenuModel`, `MenuItem`, `Snapshot` and `TrayIcon` types, and related helpers, constants and `*V2` and `Runner*` types (`MAX_FRAME_BYTES` stays, for the notice and prompt frames) | Nothing |
 | `openBrowser` and the Rust `browser` module | The product's own launcher, or print the URL |
 | `permissionMenuItems` (TypeScript), `permission_menu_items` and `PermissionMenuRow` (Rust), and the menu surface in permission copy (`Surface::Menu` in Rust) | `renderPrePrompt`, `renderRecovery` and `permissionErrorJson` |
-| The Rust crate's `MenuModel`, `MenuNode`, `Host`, `run`, `outputs` and symbol table, and the Tauri, WebKitGTK and AppIndicator dependencies | `hraness-control-kit` with the `tui` feature |
+| The Rust crate's `MenuModel`, `MenuNode`, `Host`, `run`, `outputs`, `protocol`, `protocol_v2` and symbol table, the `Options`, `DispatchOutcome` and `RefreshHandle` types, and the Tauri, WebKitGTK and AppIndicator dependencies | `hraness-control-kit` with the `tui` feature |
 
 Still exported, unchanged: `packagedManifest`, `parseReleaseManifest`,
 `ensureBinary`, `inspectBinary`, `userPaths`, `diagnosePlatform`, the
 prompt calls, the notice and permission-kind types, `./permissions`,
-`./audience`, `./cli-style` and every 0.9 subpath. The Rust crate
+`./audience`, `./cli-style` and every other 0.9 subpath. The Rust crate
 re-exports `identity`, `notice`, `prompt`, `service`, `audience` and
 `permissions` from `hraness-local-app` and `hraness-cli-kit`.
 

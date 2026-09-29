@@ -297,7 +297,9 @@ $shellLibrary = Join-Path ([Environment]::GetFolderPath('System')) 'shell32.dll'
 # Require a working shell before expensive compilation; retain all native gates.
 # A freshly started shell can lag on registering its tray handler, so the
 # bounded probe retries inside the fixture budget before the host is declared
-# unsupported.
+# unsupported. With -AllowUnsupported on a shell this fixture did not start
+# (the hosted Windows ARM64 image), a second identical failure is final: the
+# lag the retries wait out cannot apply, and the loop would only burn ~75 s.
 $probePassed = $false
 $probeAttempt = 0
 do {
@@ -346,6 +348,7 @@ do {
         $probeProcess.Dispose()
     }
     if ($probePassed -or $fixtureWatch.ElapsedMilliseconds -ge 75000) { break }
+    if ($AllowUnsupported -and -not $explorerStarted -and $probeAttempt -ge 2) { break }
     Start-Sleep -Milliseconds 10000
 } while ($true)
 if ($env:GITHUB_OUTPUT) {

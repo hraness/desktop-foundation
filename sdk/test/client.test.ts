@@ -94,9 +94,10 @@ async function start(t: TestContext, mode = 'normal', overrides: Partial<Compani
     appId: 'test.client', name: 'Client test', title: 'Te', stateDir: dir,
     binary: nativeFixture ?? process.execPath,
     binaryArgs: nativeFixture ? [mode, tracePath] : ['--input-type=module', '-e', fakeRunner(mode, tracePath), '--'],
-    // Allow cold Node startup on Windows ARM; deadline assertions still use
-    // explicit 100ms where startup is not involved.
-    timeoutMs: 750, refreshMs: 100,
+    // A cold `node -e` child can take ~1 s to start on slow hosted runners
+    // (macOS Intel, Windows ARM), so startup gets its own generous deadline;
+    // callback deadlines stay at 750ms and explicit 100ms where startup is not involved.
+    timeoutMs: 750, startupTimeoutMs: 2500, refreshMs: 100,
     snapshot: () => items, onAction: () => {},
     onDiagnostic: code => diagnostics.push(code), ...overrides,
   });

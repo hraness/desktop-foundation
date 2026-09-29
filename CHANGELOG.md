@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- `runCompanion` takes an optional `startupTimeoutMs` for the runner's ready event. It defaults to `timeoutMs`, so existing callers see no change.
+
 ## 0.9.0 - 2026-09-28
 
 Products can now run without a menu bar: one owner process per product, short-lived commands that print JSON, a human gate for decisions a person owns, and terminal views in place of the menu. Everything is additive; the tray, `./menu-kit` and the companion lifecycle calls work as before.

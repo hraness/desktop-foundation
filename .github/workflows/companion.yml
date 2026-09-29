@@ -9,8 +9,12 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# A newer push to a pull request supersedes its older run. Pushes to main and
+# tags get one group per ref and SHA, so a main run is never queued behind or
+# cancelled by a later merge, and a tag never waits for the main run of the
+# same commit.
 concurrency:
-  group: companion-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: companion-${{ github.event_name == 'pull_request' && github.ref || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_INCREMENTAL: 0
@@ -139,6 +143,9 @@ jobs:
           if ('${{ runner.arch }}' -eq 'ARM64') { ./scripts/windows-desktop-fixture.ps1 -AllowUnsupported }
           else { ./scripts/windows-desktop-fixture.ps1 }
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          # fmt and clippy for the root crate run once, on the Linux x64 leg.
+          components: ${{ matrix.target == 'x86_64-unknown-linux-gnu' && 'clippy, rustfmt' || '' }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ matrix.target }}
@@ -165,6 +172,14 @@ jobs:
       - name: Native Rust tests
         id: native_tests
         run: cargo test --locked --release
+      # The root crate's style and lint gate. The kits run theirs in their own
+      # jobs; this leg is ~3 min shorter than the slowest leg, so it adds no
+      # wall-clock. --release shares build scripts and proc-macros with the tests.
+      - name: Root crate fmt and clippy (Linux x64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cargo fmt --all --check
+          cargo clippy -p desktop-foundation --locked --release --all-targets -- -D warnings
       # Auxiliary evidence must not replace or mask the required Rust test result.
       - name: Diagnose Windows native imports and manifests
         continue-on-error: true
@@ -181,8 +196,15 @@ jobs:
           path: target/windows-loader-diagnostics/*
           if-no-files-found: warn
           retention-days: 7
-      # Reuses the release artifacts the test build just produced.
-      - run: cargo build --locked --release --bin hraness-companion --bin hraness-helper
+      # Reuses the release artifacts the test build just produced. The
+      # fingerprint log names the reason if cargo recompiles anything here.
+      - name: Build shipping binaries
+        shell: bash
+        env:
+          CARGO_LOG: cargo::core::compiler::fingerprint=info
+        run: |
+          cargo build --locked --release --bin hraness-companion --bin hraness-helper 2> "$RUNNER_TEMP/build.log" || { cat "$RUNNER_TEMP/build.log"; exit 1; }
+          grep -E 'dirty|Compiling|Finished' "$RUNNER_TEMP/build.log" | head -40 || true
       # The cache's post step retains reusable build inputs even if a later
       # desktop integration test fails. Every gate still runs on every tree.
       - name: Headless protocol probe
@@ -258,8 +280,14 @@ jobs:
           merge-multiple: true
       # The package smoke runs the Linux runner, which links WebKitGTK and
       # the tray libraries at load time. Runtime packages only, no -dev.
+      # Cached by package list; install scripts rerun on restore so the
+      # ldconfig, GLib schema and gdk-pixbuf loader triggers still apply.
       - name: Install runner runtime libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
+        with:
+          packages: libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
+          version: package-runtime-1
+          execute_install_scripts: true
       - run: npm ci --ignore-scripts
       # The SDK tests already ran on this tree in the sdk job and on every
       # native leg; packaging only needs the compiled dist.

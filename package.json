@@ -26,7 +26,7 @@
     "build:sdk": "tsc -p sdk/tsconfig.json",
     "test:sdk": "node scripts/test-sdk.mjs",
     "check:sdk": "npm run build:sdk && npm run test:sdk",
-    "check": "npm run check:sdk && cargo test --locked && cargo build --locked --release --bin hraness-companion"
+    "check": "npm run check:sdk && cargo test --locked --release && cargo build --locked --release --bin hraness-companion --bin hraness-helper"
   },
   "devDependencies": { "@types/node": "22.19.7", "typescript": "5.9.3" }
 }

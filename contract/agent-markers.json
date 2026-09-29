@@ -1,0 +1,6 @@
+{
+  "schema": "hraness.agent-markers/1",
+  "about": "Advisory signs that an AI agent, not a person, is running a command (gate tier T0). They choose wording and next steps only. They never satisfy or bypass a gate.",
+  "env": ["AI_AGENT", "CLAUDECODE", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CURSOR_AGENT", "GEMINI_CLI"],
+  "processNames": ["claude", "codex", "cursor-agent", "gemini", "aider", "devin"]
+}

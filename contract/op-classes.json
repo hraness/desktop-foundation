@@ -1,0 +1,13 @@
+{
+  "schema": "hraness.op-classes/1",
+  "classes": [
+    { "name": "read", "gate": "none", "meaning": "Reads state. Never changes anything." },
+    { "name": "operate", "gate": "none", "meaning": "Changes state in a way an agent may do on its own, such as deny, cancel, pause or stop." },
+    { "name": "decide", "gate": "required", "meaning": "A decision that belongs to a person, such as allowing a request or loosening a permission. Needs the human gate." },
+    { "name": "decide-legacy", "gate": "optional", "meaning": "A decision whose current behaviour predates the gate and is kept as is. The registry makes it visible." }
+  ],
+  "gateTiers": [
+    { "name": "T1T2", "meaning": "A controlling terminal in the foreground (T1) and a one-time code typed at /dev/tty (T2)." },
+    { "name": "T3", "meaning": "Reserved for OS owner authentication. Not supported yet: it answers unsupported-platform." }
+  ]
+}

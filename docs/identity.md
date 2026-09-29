@@ -1,15 +1,16 @@
 # Product identity on macOS
 
 Status: built for desktop-foundation 0.8.0 (see
-[implementation notes](#implementation-notes)). It replaces the "unbundled
+[implementation notes](#implementation-notes)); from 1.0 the helper runs
+every mode below, and `hraness-companion` answers them the same way. It replaces the "unbundled
 companions only" rule for macOS in `AGENTS.md` and
 `skills/companion/SKILL.md`.
 
 ## The problem
 
 macOS names whatever executable it sees. Today a login item shows as `node`,
-`bun` or `env`, the menu bar allow-list and Activity Monitor show
-`hraness-companion-aarch64-apple-darwin`, the native dialog has a generic
+`bun` or `env`, Activity Monitor shows
+`hraness-helper-aarch64-apple-darwin`, the native dialog has a generic
 icon, and Rust products show bare executable names. Ad-hoc signatures change
 with every build, so each upgrade resets Full Disk Access, Automation and
 keychain approvals.
@@ -79,7 +80,7 @@ without the hardened runtime, so no Apple Events entitlement is needed.
 
 Two things decide what macOS names:
 
-- The menu bar item, Activity Monitor and native dialogs use the bundle of
+- Activity Monitor and native dialogs use the bundle of
   the running executable. Running `Contents/MacOS/<Product>` as a child with
   pipes, as the SDK does today, is enough.
 - Privacy prompts and grants follow the responsible process: the process
@@ -98,7 +99,7 @@ state directory (never argv, so no values show in `ps`), spawns that command as
 a child with `HRANESS_APP_BUNDLE_ID=app.hraness.<appId>` in its environment,
 forwards SIGTERM and SIGINT, and exits with the child's status. It stays the
 parent on purpose: `exec` would make the child its own responsible process.
-The product owner then starts the menu runner from the same bundle path.
+The product's helper dialogs then run from the same bundle path.
 
 Login startup points at the bundle:
 
@@ -121,7 +122,7 @@ The runner builds bundles so the SDK and Rust products share one
 implementation:
 
 ```text
-hraness-companion --assemble-app
+hraness-helper --assemble-app
 ```
 
 Request on stdin, result on stdout, one line each:
@@ -149,7 +150,7 @@ Steps:
    Helpers use `app.hraness.<appId>.<helper>`.
 5. Run `codesign --verify --strict` on the result.
 6. Swap it in with renames. A running copy keeps its old files until restart;
-   the SDK restarts the companion afterwards.
+   the product restarts its owner afterwards.
 
 `HRANESS_SIGNING=ad-hoc` forces ad-hoc signing, and tests inject a fake
 `codesign` and a temporary `HOME`. No test touches the login keychain.
@@ -174,8 +175,8 @@ upgrades, so privacy and keychain approvals survive them.
 Runner commands, each printing one JSON line:
 
 ```text
-hraness-companion --signing-identity status   {"type":"signing-identity","version":1,"state":"ready"|"missing"|"unavailable","sha1":"…"}
-hraness-companion --signing-identity ensure   creates the identity when missing
+hraness-helper --signing-identity status   {"type":"signing-identity","version":1,"state":"ready"|"missing"|"unavailable","sha1":"…"}
+hraness-helper --signing-identity ensure   creates the identity when missing
 ```
 
 ### Prompts this raises
@@ -206,8 +207,8 @@ on every signing, would show a password prompt at each upgrade.
 
 ## Implementation notes
 
-As built in 0.8.0 (`src/identity.rs`, runner commands in
-`src/bin/hraness-companion.rs`):
+As built in 0.8.0 (now `crates/hraness-local-app/src/identity.rs`, with the
+helper modes in `crates/hraness-local-app/src/helper.rs`):
 
 - `status` lists identities with `security find-identity -p codesigning
   <login keychain>` without `-v`, because the self-signed certificate is not
@@ -245,7 +246,7 @@ through `--launch`. The unit tests use a fake `security`, `openssl` and
 ```text
 ✓ Textbutler.app is signed by Hraness Local Signing
 ⚠ Textbutler.app is ad-hoc signed, so macOS asks for its permissions again after each update.
-→ textbutler menubar install
+→ textbutler login-item install
 ```
 
 ## Windows and Linux

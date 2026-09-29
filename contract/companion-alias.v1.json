@@ -1,0 +1,78 @@
+{
+  "schema": "hraness.companion-alias/1",
+  "since": "v1.0.0",
+  "about": "From desktop-foundation 1.0 `hraness-companion` is an alias of `hraness-helper`. For every argv that is not a removed tray mode, both binaries print the same stdout and stderr bytes and exit with the same status; only `--version` names the binary that ran. The removed tray modes below are any argv starting `--state-dir` or `--check-protocol` (in 0.x, `--state-dir <dir>` ran the menu bar and `--check-protocol` its self-check), any argv starting `--foreground` (the flag product CLIs passed to their menu bar command), and no arguments; 0.x answered the other forms with an error, and 1.0 refuses them all with the clearer one. They draw nothing, read no stdin, print `refusalStdout` on stdout and a line starting with `refusalStderrPrefix` on stderr, and exit `refusalExit`. `hraness-helper` answers the same argv with `invalid-arguments` and exit 1, as in v0.8.1. The v0.8.1 cases named in `supersedesCompanionCases` are tray modes, so for `hraness-companion` this file replaces them; `hraness-helper` still keeps them.",
+  "trayModes": [
+    [],
+    [
+      "--state-dir",
+      "/tmp/hraness-companion-state"
+    ],
+    [
+      "--state-dir"
+    ],
+    [
+      "--check-protocol"
+    ],
+    [
+      "--check-protocol",
+      "extra"
+    ],
+    [
+      "--foreground"
+    ]
+  ],
+  "supersedesCompanionCases": [
+    "no arguments",
+    "state-dir without a path"
+  ],
+  "refusalExit": 2,
+  "refusalStdout": "{\"type\":\"error\",\"version\":1,\"code\":\"tray-removed\"}",
+  "refusalStderrPrefix": "hraness-companion: the menu bar was removed in desktop-foundation 1.0. Run `<product> tui` to watch a product, or `<product> status --json` from a script.",
+  "helperAnswersTrayModesWith": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}",
+  "parityExtraArgv": [
+    [
+      "--bogus"
+    ],
+    [
+      "menubar"
+    ],
+    [
+      "--version",
+      "--version"
+    ],
+    [
+      "--prompt-probe",
+      "extra"
+    ],
+    [
+      "--assemble-app",
+      "extra"
+    ],
+    [
+      "--signing-identity",
+      "bogus",
+      "extra"
+    ],
+    [
+      "--launch",
+      "relative.json"
+    ],
+    [
+      "--launch",
+      "/nonexistent/argv.json",
+      "extra"
+    ],
+    [
+      "--notice",
+      "extra"
+    ],
+    [
+      "--prompt",
+      "extra"
+    ],
+    [
+      "--prompt"
+    ]
+  ]
+}

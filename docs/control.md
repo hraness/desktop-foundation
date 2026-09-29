@@ -1,6 +1,6 @@
 # Headless control
 
-From 0.9.0 a product can run without a menu bar. One **owner** process per
+From 0.9.0 a product runs without a menu bar, and from 1.0 there is none. One **owner** process per
 product holds the product's state and answers requests on two Unix sockets.
 Every other command is a short-lived client that prints a JSON envelope with
 `--json`. The TypeScript side is `@hraness/desktop-foundation/control` and
@@ -8,8 +8,8 @@ Every other command is a short-lived client that prints a JSON envelope with
 same files in [`contract/`](../contract), and tests on both sides check the
 same golden fixtures in `contract/golden/`.
 
-The tray, `./menu-kit` and the companion lifecycle calls are unchanged in
-0.9.x. Nothing in this document replaces them yet.
+1.0 removed the tray, `./menu-kit` and the companion lifecycle calls; see
+[the migration guide](migration-1.0.md).
 
 ## Envelope
 

@@ -1,9 +1,10 @@
-//! Login startup and liveness for Rust menu bar products.
+//! Login startup and liveness for Rust products' background owners.
 //!
-//! The TypeScript SDK owns `menubar install/uninstall/status` for SDK
-//! products. Rust products (AI Charts, Slopcamera, Valhalla, PeopleBlade)
-//! use this module instead of hand-rolled LaunchAgents, so every product
-//! writes the same plist, reports the same states and prints the same copy.
+//! The TypeScript SDK owns `control install/uninstall/status` for SDK
+//! products (`./login`). Rust products use this module instead of
+//! hand-rolled LaunchAgents, so every product writes the same plist, reports
+//! the same states and prints the same copy. The menu bar these login items
+//! once opened was removed in desktop-foundation 1.0.
 //!
 //! Nothing here calls `launchctl`: the LaunchAgent takes effect at the next
 //! login, and macOS shows its "Login item added" notice when the file
@@ -321,7 +322,7 @@ fn remove_legacy(plan: &LaunchAgentPlan) {
 }
 
 /// Removes this product's LaunchAgent (and legacy one) when they are ours.
-/// Does not stop a running menu bar.
+/// Does not stop a running owner.
 pub fn uninstall(plan: &LaunchAgentPlan) -> Result<Change, ServiceError> {
     let app_id = app_id_of(plan);
     let current = owned(&plan.path, app_id)?;
@@ -342,8 +343,9 @@ pub fn uninstall(plan: &LaunchAgentPlan) -> Result<Change, ServiceError> {
     })
 }
 
-/// Held for the life of a running menu bar. A second launch finds the lock
-/// taken and exits with [`EXIT_ALREADY_RUNNING`].
+/// Held for the life of a running owner process. The file keeps its 0.x
+/// `.menubar.lock` name so status stays correct across the upgrade. A second
+/// launch finds the lock taken and exits with [`EXIT_ALREADY_RUNNING`].
 pub struct InstanceLock {
     _file: File,
 }
@@ -394,7 +396,7 @@ impl InstanceLock {
         real_directory(state_dir)?;
         let file = open_lock(&path)?;
         // `is_running` holds a shared lock for an instant; retry briefly so
-        // a status check never makes a starting menu bar think it is a
+        // a status check never makes a starting owner think it is a
         // second copy.
         for attempt in 0..10 {
             match fs2::FileExt::try_lock_exclusive(&file) {
@@ -413,7 +415,7 @@ impl InstanceLock {
     }
 }
 
-/// Whether a menu bar holding [`InstanceLock`] is running. `None` when it
+/// Whether an owner holding [`InstanceLock`] is running. `None` when it
 /// cannot be told (no state folder yet counts as not running).
 pub fn is_running(state_dir: &Path, app_id: &str) -> Option<bool> {
     let path = lock_path(state_dir, app_id).ok()?;
@@ -433,7 +435,7 @@ pub fn is_running(state_dir: &Path, app_id: &str) -> Option<bool> {
     }
 }
 
-/// One product's login and liveness state, for `menubar status`.
+/// One product's login and liveness state, for `control status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServiceStatus {
     pub login: LoginState,
@@ -475,8 +477,8 @@ impl ServiceStatus {
         let name = &item.name;
         let command = &item.command;
         let mut lines = vec![match self.running {
-            Some(true) => format!("{ok} {name} is in your menu bar"),
-            Some(false) => format!("{off} {name} isn't in your menu bar"),
+            Some(true) => format!("{ok} {name} is running"),
+            Some(false) => format!("{off} {name} isn't running"),
             None => format!("{warn} Couldn't tell whether {name} is running"),
         }];
         lines.push(match self.login {
@@ -490,13 +492,13 @@ impl ServiceStatus {
         });
         let hint = match (self.login, self.running) {
             (LoginState::NotOurs, _) => Some(format!(
-                "Move ~/Library/LaunchAgents/app.hraness.{}.plist to the Trash, then run {command} menubar install",
+                "Move ~/Library/LaunchAgents/app.hraness.{}.plist to the Trash, then run {command} control install",
                 item.app_id
             )),
             (LoginState::Unknown, _) => Some(format!("{command} doctor")),
-            (LoginState::Outdated, _) => Some(format!("{command} menubar install")),
-            (_, Some(false)) => Some(format!("{command} menubar start")),
-            (LoginState::Off, _) => Some(format!("{command} menubar install")),
+            (LoginState::Outdated, _) => Some(format!("{command} control install")),
+            (_, Some(false)) => Some(format!("{command} control serve")),
+            (LoginState::Off, _) => Some(format!("{command} control install")),
             _ => None,
         };
         if let Some(hint) = hint {
@@ -515,14 +517,14 @@ pub fn login_item_notice(product: &str, requester: &str, glyphs: Glyphs) -> Stri
     let thats = if requester == product {
         String::new()
     } else {
-        format!(". That's {product}'s menu bar")
+        format!(". That's how {product} starts in the background")
     };
     format!(
-        "{lock} macOS will show a notice that {requester} can open at login{thats}.\n   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in {SETTINGS_PATH}.\n"
+        "{lock} macOS will show a notice that {requester} can open at login{thats}.\n   It starts in the background when you log in and shows no window or icon. Turn it off any time in {SETTINGS_PATH}.\n"
     )
 }
 
-/// What `menubar install` prints after it wrote the LaunchAgent.
+/// What `control install` prints after it wrote the LaunchAgent.
 pub fn install_result(item: &LoginItem, change: Change, glyphs: Glyphs) -> String {
     let ok = glyphs.get("✓", "OK");
     let next = glyphs.get("→", "->");
@@ -530,19 +532,22 @@ pub fn install_result(item: &LoginItem, change: Change, glyphs: Glyphs) -> Strin
     match change {
         Change::Unchanged => format!("{ok} {name} already opens at login\n"),
         _ => format!(
-            "{ok} {name} will open at login\n{next} {} menubar start to open it now\n",
+            "{ok} {name} will open at login\n{next} {} control serve to start it now\n",
             item.command
         ),
     }
 }
 
-/// What `menubar uninstall` prints.
+/// What `control uninstall` prints.
 pub fn uninstall_result(item: &LoginItem, change: Change, glyphs: Glyphs) -> String {
     let ok = glyphs.get("✓", "OK");
     let name = &item.name;
     match change {
         Change::Removed => {
-            format!("{ok} {name} won't open at login. Quit it from its menu when you're done.\n")
+            format!(
+                "{ok} {name} won't open at login. Stop it with {} control stop when you're done.\n",
+                item.command
+            )
         }
         _ => format!("{ok} {name} already doesn't open at login\n"),
     }
@@ -556,7 +561,7 @@ pub fn error_message(item: &LoginItem, error: ServiceError, glyphs: Glyphs) -> S
     let command = &item.command;
     match error.kind {
         ServiceErrorKind::NotOurs => format!(
-            "{fail} {name}'s login item was changed outside {command}, so it was left alone.\n  Move ~/Library/LaunchAgents/app.hraness.{}.plist to the Trash, then try again.\n{next} {command} menubar install\n", item.app_id
+            "{fail} {name}'s login item was changed outside {command}, so it was left alone.\n  Move ~/Library/LaunchAgents/app.hraness.{}.plist to the Trash, then try again.\n{next} {command} control install\n", item.app_id
         ),
         ServiceErrorKind::Unwritable => format!(
             "{fail} Couldn't write {name}'s login item. Check that your Library folder is writable.\n{next} {command} doctor\n"
@@ -727,23 +732,23 @@ mod tests {
             |login, running| ServiceStatus { login, running }.human(&spec, Glyphs::Unicode);
         assert_eq!(
             status(LoginState::On, Some(true)),
-            "✓ AI Charts is in your menu bar\n✓ Opens at login\n"
+            "✓ AI Charts is running\n✓ Opens at login\n"
         );
         assert_eq!(
             status(LoginState::Off, Some(false)),
-            "○ AI Charts isn't in your menu bar\n○ Doesn't open at login\n→ aicharts menubar start\n"
+            "○ AI Charts isn't running\n○ Doesn't open at login\n→ aicharts control serve\n"
         );
         assert_eq!(
             status(LoginState::Off, Some(true)),
-            "✓ AI Charts is in your menu bar\n○ Doesn't open at login\n→ aicharts menubar install\n"
+            "✓ AI Charts is running\n○ Doesn't open at login\n→ aicharts control install\n"
         );
         assert_eq!(
             status(LoginState::Outdated, None),
-            "⚠ Couldn't tell whether AI Charts is running\n⚠ Opens at login with an older version\n→ aicharts menubar install\n"
+            "⚠ Couldn't tell whether AI Charts is running\n⚠ Opens at login with an older version\n→ aicharts control install\n"
         );
         assert_eq!(
             ServiceStatus { login: LoginState::NotOurs, running: Some(true) }.human(&spec, Glyphs::Ascii),
-            "OK AI Charts is in your menu bar\nWARN A login item for AI Charts was changed outside aicharts\n-> Move ~/Library/LaunchAgents/app.hraness.aicharts.plist to the Trash, then run aicharts menubar install\n"
+            "OK AI Charts is running\nWARN A login item for AI Charts was changed outside aicharts\n-> Move ~/Library/LaunchAgents/app.hraness.aicharts.plist to the Trash, then run aicharts control install\n"
         );
         assert_eq!(
             serde_json::to_string(&ServiceStatus {
@@ -761,15 +766,15 @@ mod tests {
         let spec = item(&home);
         assert_eq!(
             login_item_notice("AI Charts", "AI Charts", Glyphs::Unicode),
-            "🔐 macOS will show a notice that AI Charts can open at login.\n   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.\n"
+            "🔐 macOS will show a notice that AI Charts can open at login.\n   It starts in the background when you log in and shows no window or icon. Turn it off any time in System Settings › General › Login Items & Extensions.\n"
         );
         assert_eq!(
             login_item_notice("AI Charts", "aicharts", Glyphs::Ascii),
-            "NOTE macOS will show a notice that aicharts can open at login. That's AI Charts's menu bar.\n   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.\n"
+            "NOTE macOS will show a notice that aicharts can open at login. That's how AI Charts starts in the background.\n   It starts in the background when you log in and shows no window or icon. Turn it off any time in System Settings › General › Login Items & Extensions.\n"
         );
         assert_eq!(
             install_result(&spec, Change::Created, Glyphs::Unicode),
-            "✓ AI Charts will open at login\n→ aicharts menubar start to open it now\n"
+            "✓ AI Charts will open at login\n→ aicharts control serve to start it now\n"
         );
         assert_eq!(
             install_result(&spec, Change::Unchanged, Glyphs::Unicode),
@@ -777,11 +782,11 @@ mod tests {
         );
         assert_eq!(
             uninstall_result(&spec, Change::Removed, Glyphs::Unicode),
-            "✓ AI Charts won't open at login. Quit it from its menu when you're done.\n"
+            "✓ AI Charts won't open at login. Stop it with aicharts control stop when you're done.\n"
         );
         assert_eq!(
             error_message(&spec, ServiceError::new(ServiceErrorKind::NotOurs), Glyphs::Unicode),
-            "✗ AI Charts's login item was changed outside aicharts, so it was left alone.\n  Move ~/Library/LaunchAgents/app.hraness.aicharts.plist to the Trash, then try again.\n→ aicharts menubar install\n"
+            "✗ AI Charts's login item was changed outside aicharts, so it was left alone.\n  Move ~/Library/LaunchAgents/app.hraness.aicharts.plist to the Trash, then try again.\n→ aicharts control install\n"
         );
     }
 }

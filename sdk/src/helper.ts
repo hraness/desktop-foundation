@@ -1,8 +1,8 @@
 // Finds the `hraness-helper` binary a product runs for app assembly, launch,
-// notices and permission checks. From v0.9.0 each release carries
-// `hraness-helper-<target>` beside `hraness-companion-<target>`; through
-// v0.9.x the companion is a byte-identical alias, so an older pinned
-// manifest without helper assets still works through it.
+// notices, prompts and permission checks. From v0.9.0 each release carries
+// `hraness-helper-<target>` beside `hraness-companion-<target>`. From 1.0 the
+// companion is only an alias of the helper (it has no menu bar), so an older
+// pinned manifest without helper assets still works through it.
 
 import { constants } from 'node:fs';
 import { access, lstat } from 'node:fs/promises';

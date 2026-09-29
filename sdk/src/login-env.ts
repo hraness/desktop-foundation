@@ -1,10 +1,10 @@
-// Credentials for a menu bar started at login. A login item starts without
+// Credentials for a process started at login. A login item starts without
 // the terminal's environment, so a product that reads a token from, say,
-// SPONGE_API_TOKEN would come up signed out. `menubar install` saves the
-// values of the variables the product names in `loginEnv` to a private file
-// in its state directory; the login-started `--foreground` process fills in
+// SPONGE_API_TOKEN would come up signed out. `saveLoginEnvironment` saves the
+// values of the variables the product names to a private file in its state
+// directory; the login-started process calls `loadLoginEnvironment` to fill in
 // any of those variables that are unset. Values never go into the login item
-// file, argv, menus or logs.
+// file, argv or logs.
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, rename, unlink } from 'node:fs/promises';
@@ -19,7 +19,7 @@ const MAX_FILE = 64 * 1024;
 export interface LoginEnvResult {
   /** Names whose current values were saved. */
   saved: string[];
-  /** Names that are unset here, so the login-started menu bar won't have them. */
+  /** Names that are unset here, so a login-started process won't have them. */
   missing: string[];
 }
 

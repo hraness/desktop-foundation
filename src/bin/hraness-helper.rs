@@ -1,10 +1,9 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
-//! The one-shot helper: every non-tray mode of `hraness-companion`
-//! (`--version`, `--prompt-probe`, `--assemble-app`, `--signing-identity`,
-//! `--launch`, `--notice`, `--prompt`) with the same argv, stdout and exit
-//! contract (`contract/helper-argv.v0.8.1.json`). It links no Tauri and
-//! draws no menu bar.
+//! The one-shot helper: `--version`, `--prompt-probe`, `--assemble-app`,
+//! `--signing-identity`, `--launch`, `--notice` and `--prompt`, with the
+//! v0.8.1 argv, stdout and exit contract
+//! (`contract/helper-argv.v0.8.1.json`). `hraness-companion` is its alias.
 
 use hraness_local_app::helper::{self, Binary};
 use hraness_local_app::wire::{self, ProtocolError, RUNNER_PROTOCOLS};

@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import { ensureBinary, type ReleaseManifest } from './install.js';
-import { packagedManifest } from './client.js';
-import { MAX_FRAME_BYTES } from './protocol.js';
+import { packagedManifest, type ReleaseManifest } from './install.js';
+import { resolveHelper } from './helper.js';
+import { MAX_FRAME_BYTES } from './notice.js';
 
 export const PROMPT_LIMITS = {
   title: 128,
@@ -88,7 +88,7 @@ function parsePromptResult(line: string): PromptResult {
 async function resolveBinary(options: PromptBinaryOptions): Promise<{ program: string; args: string[] }> {
   if (options.binary) return { program: options.binary, args: [...(options.binaryArgs ?? [])] };
   const manifest = options.manifest ?? await packagedManifest();
-  const binary = await ensureBinary({ manifest, cacheDir: options.cacheDir });
+  const binary = await resolveHelper({ manifest, cacheDir: options.cacheDir });
   return { program: binary.path, args: [...(options.binaryArgs ?? [])] };
 }
 

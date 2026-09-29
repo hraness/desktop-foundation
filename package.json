@@ -1,7 +1,7 @@
 {
   "name": "@hraness/desktop-foundation",
-  "version": "0.9.0",
-  "description": "Menu bar and tray companions that CLI tools launch themselves on macOS, Windows, and Linux, with no app bundle or installer.",
+  "version": "1.0.0",
+  "description": "The one-shot desktop helper, control kit and CLI contract that Hraness CLI tools share on macOS, Windows, and Linux, with no app bundle or installer.",
   "type": "module",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/hraness/desktop-foundation.git" },
@@ -11,7 +11,6 @@
     "./permissions": { "types": "./dist/src/permissions.d.ts", "import": "./dist/src/permissions.js" },
     "./audience": { "types": "./dist/src/audience.d.ts", "import": "./dist/src/audience.js" },
     "./cli-style": { "types": "./dist/src/cli-style.d.ts", "import": "./dist/src/cli-style.js" },
-    "./menu-kit": { "types": "./dist/src/menu-kit.d.ts", "import": "./dist/src/menu-kit.js" },
     "./registry": { "types": "./dist/src/registry.d.ts", "import": "./dist/src/registry.js" },
     "./control": { "types": "./dist/src/control.d.ts", "import": "./dist/src/control.js" },
     "./human-gate": { "types": "./dist/src/human-gate.d.ts", "import": "./dist/src/human-gate.js" },
@@ -20,8 +19,7 @@
     "./retire": { "types": "./dist/src/retire.d.ts", "import": "./dist/src/retire.js" },
     "./helper": { "types": "./dist/src/helper.d.ts", "import": "./dist/src/helper.js" }
   },
-  "bin": { "companion": "./dist/src/cli.js" },
-  "files": ["dist/src", "src", "crates/hraness-control-kit/src", "crates/hraness-local-app/src", "sdk/src/protocol.ts", "sdk/src/client.ts", "sdk/src/commands.ts", "sdk/src/prompt.ts", "release-manifest.json", "contract", "README.md", "docs", "skills", "LICENSE"],
+  "files": ["dist/src", "src", "crates/hraness-control-kit/src", "crates/hraness-local-app/src", "sdk/src/prompt.ts", "release-manifest.json", "contract", "README.md", "docs", "skills", "LICENSE"],
   "scripts": {
     "build:sdk": "tsc -p sdk/tsconfig.json",
     "test:sdk": "node scripts/test-sdk.mjs",

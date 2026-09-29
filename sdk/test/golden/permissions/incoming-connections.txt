@@ -32,12 +32,6 @@ NOTE macOS will ask to let vhalla accept incoming network connections for Exampl
 {"title":"Example can't accept incoming network connections","lines":["Example couldn't accept incoming network connections. macOS may be blocking vhalla. Check System Settings › Network › Firewall."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't accept incoming network connections. macOS may be blocking vhalla.","next":"example doctor","permission":{"kind":"incoming-connections","settingsUrl":"x-apple.systempreferences:com.apple.Network-Settings.extension"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Firewall","detail":"To accept incoming network connections"}
-{"kind":"action","id":"foundation.settings.incoming-connections","label":"Open Firewall settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Firewall is off","detail":"Turn on vhalla to accept incoming network connections"}
-{"kind":"action","id":"foundation.settings.incoming-connections","label":"Open Firewall settings","symbol":"action.permission","opens":"settings"}
 
 # incoming-connections · requester: terminal
 ## cli pre-prompt, interactive
@@ -73,9 +67,3 @@ NOTE macOS will ask to let vhalla accept incoming network connections for Exampl
 {"title":"Example can't accept incoming network connections","lines":["Example couldn't accept incoming network connections. macOS may be blocking vhalla. Check System Settings › Network › Firewall."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't accept incoming network connections. macOS may be blocking vhalla.","next":"example doctor","permission":{"kind":"incoming-connections","settingsUrl":"x-apple.systempreferences:com.apple.Network-Settings.extension"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Firewall","detail":"To accept incoming network connections"}
-{"kind":"action","id":"foundation.settings.incoming-connections","label":"Open Firewall settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Firewall is off","detail":"Turn on vhalla to accept incoming network connections"}
-{"kind":"action","id":"foundation.settings.incoming-connections","label":"Open Firewall settings","symbol":"action.permission","opens":"settings"}

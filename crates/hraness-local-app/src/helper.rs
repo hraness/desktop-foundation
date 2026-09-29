@@ -1,4 +1,5 @@
-//! The non-tray modes shared by `hraness-helper` and `hraness-companion`.
+//! The one-shot modes shared by `hraness-helper` and its `hraness-companion`
+//! alias.
 //! Argv, stdout and exit status are frozen by
 //! `contract/helper-argv.v0.8.1.json`.
 
@@ -22,8 +23,8 @@ pub struct Binary<'a> {
 }
 
 /// Runs the helper mode `args` names. `None` means the argv is not a helper
-/// mode; the caller decides (the companion tries the tray, the helper
-/// answers `invalid-arguments`).
+/// mode, and the caller answers `invalid-arguments` (the companion alias
+/// first refuses the removed tray modes; see [`is_tray_mode`]).
 pub fn dispatch(args: &[OsString], binary: Binary<'_>) -> Option<Result<(), ProtocolError>> {
     let one = |flag: &str| args.len() == 1 && args[0] == flag;
     if one("--version") {
@@ -58,6 +59,43 @@ pub fn dispatch(args: &[OsString], binary: Binary<'_>) -> Option<Result<(), Prot
         );
     }
     None
+}
+
+/// The exit status `hraness-companion` uses when asked for the menu bar,
+/// which was removed in 1.0. It matches the control contract's usage code.
+pub const TRAY_REMOVED_EXIT: i32 = 2;
+/// The error code `hraness-companion` prints for a removed tray mode.
+pub const TRAY_REMOVED_CODE: &str = "tray-removed";
+/// What `hraness-companion` prints on stderr for a removed tray mode.
+pub const TRAY_REMOVED_MESSAGE: &str =
+    "hraness-companion: the menu bar was removed in desktop-foundation 1.0. \
+Run `<product> tui` to watch a product, or `<product> status --json` from a script. \
+See docs/migration-1.0.md.";
+
+/// True for the argv refused as removed tray modes, frozen in
+/// `contract/companion-alias.v1.json`: no arguments, and any argv starting
+/// `--state-dir` or `--check-protocol` (the 0.x menu bar and its wire
+/// self-check) or `--foreground` (the flag product CLIs passed to their
+/// menu bar command). 0.x answered malformed variants of these with
+/// `invalid-arguments`; 1.0 refuses them all with the clearer error. Every
+/// other argv is either a helper mode or `invalid-arguments`, exactly as in
+/// `hraness-helper`.
+pub fn is_tray_mode(args: &[OsString]) -> bool {
+    match args.first() {
+        None => true,
+        Some(first) => TRAY_FLAGS.iter().any(|flag| first == flag),
+    }
+}
+
+const TRAY_FLAGS: [&str; 3] = ["--state-dir", "--check-protocol", "--foreground"];
+
+/// Refuses a removed tray mode: one `tray-removed` error frame on stdout,
+/// the pointer to the terminal views on stderr, exit
+/// [`TRAY_REMOVED_EXIT`]. Nothing is drawn and nothing is read from stdin.
+pub fn refuse_tray_mode() -> ! {
+    let _ = crate::wire::write_error(&mut std::io::stdout(), VERSION, TRAY_REMOVED_CODE);
+    eprintln!("{TRAY_REMOVED_MESSAGE}");
+    std::process::exit(TRAY_REMOVED_EXIT);
 }
 
 /// Prints `{"type":"error",…}` for a failed mode and exits 1, like the

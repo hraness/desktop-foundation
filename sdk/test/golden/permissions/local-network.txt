@@ -32,12 +32,6 @@ NOTE macOS will ask to let Example find and connect to devices on your local net
 {"title":"Example can't find and connect to devices on your local network","lines":["Example couldn't find and connect to devices on your local network. macOS may be blocking Example. Check System Settings › Privacy & Security › Local Network."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't find and connect to devices on your local network. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"local-network","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Local Network","detail":"To find and connect to devices on your local network"}
-{"kind":"action","id":"foundation.settings.local-network","label":"Open Local Network settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Local Network is off","detail":"Turn on Example to find and connect to devices on your local network"}
-{"kind":"action","id":"foundation.settings.local-network","label":"Open Local Network settings","symbol":"action.permission","opens":"settings"}
 
 # local-network · requester: terminal
 ## cli pre-prompt, interactive
@@ -73,9 +67,3 @@ NOTE macOS will ask to let Terminal find and connect to devices on your local ne
 {"title":"Example can't find and connect to devices on your local network","lines":["Example couldn't find and connect to devices on your local network. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Local Network."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't find and connect to devices on your local network. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"local-network","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Local Network","detail":"To find and connect to devices on your local network"}
-{"kind":"action","id":"foundation.settings.local-network","label":"Open Local Network settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Local Network is off","detail":"Turn on Terminal to find and connect to devices on your local network"}
-{"kind":"action","id":"foundation.settings.local-network","label":"Open Local Network settings","symbol":"action.permission","opens":"settings"}

@@ -1,108 +1,79 @@
 # Architecture
 
-The shared companion separates desktop presentation from product authority.
-One versioned native executable serves every product; each product runs its own
-instance and supplies its menu through the TypeScript SDK. This avoids a
-separate native build and desktop installer for every product.
+desktop-foundation gives Hraness CLI products a shared way to run without a
+window or a menu bar: one owner process per product, short-lived commands
+that print JSON, a human gate for decisions a person owns, terminal views,
+and one small native helper for the few things a terminal cannot do (a
+dialog, a credential prompt, the macOS local app).
 
 ```text
-product menubar
-  └─ SDK: verify binary, start/reuse the product's foreground owner
-       ├─ product code: read daemon state, authorize and perform actions
-       ├─ authenticated loopback service: status and stop
-       └─ hraness-companion: native tray + per-product OS lock
-             snapshots → JSON lines → menu
-             action ID + revision → product handler
+product CLI
+  ├─ registry: verbs, operation classes, JSON envelope, exit codes
+  ├─ control: one owner per product, agent + admin sockets (0700 dir)
+  │    └─ ensureOwner / controlStatus (never signals a process)
+  ├─ human-gate: decide verbs need a person at /dev/tty
+  ├─ tui: interactive view, plain snapshot, or the status --json object
+  └─ hraness-helper (native, one task, then exit)
+        --notice · --prompt · --prompt-probe · --version
+        --assemble-app · --signing-identity · --launch   (macOS local app)
 ```
+
+1.0 removed the 0.x menu bar (the Tauri tray runner, `./menu-kit` and the
+companion lifecycle calls). `hraness-companion` remains as an alias of the
+helper; see the [migration guide](migration-1.0.md).
 
 ## Responsibilities
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| Product CLI/daemon | Accounts, data, permission checks, provider APIs, browser routes, snapshot content and action handlers | Native tray rendering or shared binary publication |
-| TypeScript SDK | Pinned binary installation, process lifecycle, status/stop, callback deadlines, optional login registration | Product authorization or permission escalation |
-| Native runner | Menu rendering, events, OS singleton lock, exit on Quit or parent disconnect | Provider credentials, arbitrary shell commands, daemon APIs or product filesystem access through the protocol |
-| Shared release workflow | Six target builds, tests, executable assets, SDK archive, manifests and provenance | Product release gates or interactive desktop qualification |
+| Product CLI and owner | Accounts, data, permission checks, provider APIs, verbs and their handlers | Native binary publication |
+| TypeScript SDK and Rust crates | The envelope and registry, owner sockets, the human gate, terminal views, login items, retiring old login items, pinned helper installation | Product authorization or permission escalation |
+| Native helper | One dialog, prompt or local-app step per run, with bounded input | Provider credentials, shell commands, daemon APIs or product files |
+| Shared release workflow | Six target builds, tests, executable assets, SDK archive, manifests and provenance | Product release gates |
 
-The runner executes as the same OS user. The JSON protocol is an application
-boundary, **not an OS sandbox**. Keep product secrets out of labels and action
-IDs; do not assume another program running as that user is isolated from the
-companion's files or processes.
-
-## Menu and action contract
-
-[`CompanionOptions`](../sdk/src/client.ts) supplies a stable `appId`, product
-name, one or two alphanumeric title characters, a private `stateDir`, and
-`snapshot(signal)` / `onAction(id, signal)` callbacks. Use a lowercase app ID
-of at most 64 characters, starting with a letter and containing letters,
-digits, dots or hyphens, with no consecutive dots.
-
-The wire menu supports labels, actions, checkmarks, shortcuts, submenus,
-separators and Quit. It does not currently expose every feature of the older
-Rust `MenuModel`, such as per-item image previews. Use the browser for forms,
-account management and larger views. A product may stay on the Rust host API
-until its required features have a supported shared-runner equivalent.
-
-The SDK validates and copies snapshots, assigns revisions and dispatches only
-enabled action IDs from the current revision. Reads and mutations have bounded
-waits and cancellation signals. Product callbacks must also use finite IO
-deadlines, honor cancellation and reconcile ambiguous results. A timed-out
-action is not automatically retried. Refresh from confirmed product state;
-never toggle a displayed value as proof that a mutation completed.
+The helper and the owner run as the same OS user. The sockets and the JSON
+frames are application boundaries, **not an OS sandbox**. See
+[control](control.md#where-the-sockets-are-and-are-not-a-boundary) and the
+[human gate threat model](human-gate.md#threat-model).
 
 ## Lifecycle and storage
 
-[`handleCompanionCommand`](../sdk/src/commands.ts) starts a detached owner by
-re-entering the installed product CLI's private `--foreground` branch. The
-initial CLI returns after status is confirmed. A native OS lock prevents a
-second runner for the same product and state directory. Quit and `stop` end
-the companion; stopping the product daemon is a separate product action.
+A product keeps its state in one owner process (`control serve`). Other
+commands reach it through `agentRequest` or `adminRequest`, and
+`ensureOwner` starts it on demand. `controlStatus` reads the owner files and
+asks the socket; it never signals a PID. A login item for the owner is
+opt-in (`./login`), and `retireLegacyLoginItem` (`./retire`) moves a 0.x
+menu bar login item aside after checking it is the product's own.
 
-The owner exposes only authenticated loopback `status` and `stop` operations.
-An unpredictable token is kept in an instance-specific receipt in the product's
-state directory, not in argv. Each owner removes only its own receipt.
-Status distinguishes a responding owner from an unreachable receipt. Lifecycle
-code never signals a PID copied from that receipt. Use a stable state directory
-under `userPaths().dataDir`, with a distinct subdirectory for each product.
-
-Executable caches are shared by release repository, version and target.
-Autostart entries are per product and per user. Login registration is explicit
-and takes effect at the next sign-in. Unregistering it leaves the running
-companion, shared cache and product data intact.
+The helper cache is shared by release repository, version and target. The
+SDK downloads the helper once, verifies its size and SHA-256 against the
+manifest in the package, and publishes it atomically.
 
 ## Distribution and trust
 
-The versioned SDK archive embeds the exact native asset manifest. First start
-downloads the matching raw executable from the named GitHub release; subsequent
-starts verify the cached bytes. The installer bounds downloads, checks size and
-SHA-256, restricts redirects, and publishes the verified file atomically. It
-does not extract archives or run an installation shell script.
+The versioned SDK archive embeds the exact native asset manifest. The
+installer bounds downloads, checks size and SHA-256, restricts redirects,
+and never extracts archives or runs an installation script.
 
 The SDK package and its manifest are the trust root. Product maintainers pin
 the admitted archive in their dependency lockfile. The installer does not
-independently verify GitHub build attestations at runtime; release admission
-and the published provenance provide that separate evidence. SHA-256 matching
+verify GitHub build attestations at runtime; release admission and the
+published provenance provide that separate evidence. A SHA-256 match
 establishes byte identity, not that software is harmless.
 
-End users need the product's supported runtime, not a compiler, Cargo, Swift
-or Xcode. The pipeline does not create `.app` bundles, desktop installers or
-Apple notarization submissions. OS approval can still be necessary and can
-be unavailable under device policy. Only the human makes that trust decision;
-see [installation guidance](installation.md).
+End users need the product's runtime, not a compiler, Cargo, Swift or Xcode.
+The pipeline creates no installers and no Apple notarization submissions;
+macOS helper builds are ad-hoc signed. OS approval can still be needed; see
+[installation guidance](installation.md).
 
-## Platform and migration boundary
+## Platform boundary
 
-The native surface targets macOS menu bars, Windows notification areas and
-compatible Linux AppIndicator desktops on x64 and arm64. Linux runtime
-libraries and a tray host remain prerequisites. Builds and protocol probes do
-not prove that a visible menu works on a clean desktop; see the
-[platform evidence contract](platforms.md).
+The helper builds for macOS, Windows and Linux on x64 and arm64. The
+dialogs work on each; the local app is macOS only. Terminal views and the
+owner sockets need no GUI at all, so products now work the same over SSH
+and in CI. Platform-specific product features (Apple Messages, Contacts,
+Mac capture helpers) stay with their products. See the
+[platform contract](platforms.md).
 
-This portability does not move Ghostget's Apple Messages/Contacts APIs,
-Slopcamera's Mac capture helpers, or any other platform-specific capability to
-Windows or Linux. Provider authentication, permissions and delivery requirements
-remain with their existing owners. The shared runner is available for adoption;
-this repository does not establish that every existing product has migrated.
-Follow the [product adoption recipe](adoption.md) for each consumer.
-
-For integrations in other languages, use the [versioned JSON-lines protocol](protocol.md).
+For integrations in other languages, use the [helper protocol](protocol.md)
+and the [control wire format](control.md#wire-format).

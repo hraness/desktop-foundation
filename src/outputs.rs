@@ -6,11 +6,11 @@
 //! `reveal` dispatches. The directory stays the authority; this module only
 //! reads it.
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::fs::{self, Metadata};
 #[cfg(not(unix))]
 use std::fs::{File, OpenOptions};
-use std::fs::{self, Metadata};
 use std::hash::{Hash, Hasher};
 use std::io::Cursor;
 #[cfg(not(unix))]
@@ -64,19 +64,34 @@ impl Fingerprint {
         #[cfg(unix)]
         use std::os::unix::fs::MetadataExt;
         Self {
-            size: meta.len(), modified: meta.modified().ok(),
+            size: meta.len(),
+            modified: meta.modified().ok(),
             #[cfg(unix)]
             identity: (meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec()),
         }
     }
 }
 
-struct ListedFile { name: String, path: PathBuf, fingerprint: Fingerprint }
-struct Listing { files: Vec<ListedFile>, total: usize, partial: bool, available: bool }
+struct ListedFile {
+    name: String,
+    path: PathBuf,
+    fingerprint: Fingerprint,
+}
+struct Listing {
+    files: Vec<ListedFile>,
+    total: usize,
+    partial: bool,
+    available: bool,
+}
 
 impl OutputsSection {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        OutputsSection { dir: dir.into(), limit: DEFAULT_LIMIT, thumbs: Mutex::new(HashMap::new()), offered: Mutex::new(HashMap::new()) }
+        OutputsSection {
+            dir: dir.into(),
+            limit: DEFAULT_LIMIT,
+            thumbs: Mutex::new(HashMap::new()),
+            offered: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn with_limit(mut self, limit: usize) -> Self {
@@ -91,30 +106,71 @@ impl OutputsSection {
     /// Bounded newest-first listing. Directories, hidden files, and symlinks
     /// are skipped.
     pub fn entries(&self) -> Vec<OutputEntry> {
-        self.scan().files.into_iter().map(|file| self.entry(file)).collect()
+        self.scan()
+            .files
+            .into_iter()
+            .map(|file| self.entry(file))
+            .collect()
     }
 
     fn entry(&self, file: ListedFile) -> OutputEntry {
         let icon = self.thumbnail(&file.path, &file.fingerprint);
-        OutputEntry { name: file.name, size: file.fingerprint.size, modified: file.fingerprint.modified, icon }
+        OutputEntry {
+            name: file.name,
+            size: file.fingerprint.size,
+            modified: file.fingerprint.modified,
+            icon,
+        }
     }
 
     fn scan(&self) -> Listing {
-        let mut listing = Listing { files: Vec::new(), total: 0, partial: false, available: false };
+        let mut listing = Listing {
+            files: Vec::new(),
+            total: 0,
+            partial: false,
+            available: false,
+        };
         // Do not follow a redirected output root or offer links as files.
-        if !fs::symlink_metadata(&self.dir).is_ok_and(|m| m.is_dir()) { return listing; }
-        let Ok(read) = fs::read_dir(&self.dir) else { return listing };
+        if !fs::symlink_metadata(&self.dir).is_ok_and(|m| m.is_dir()) {
+            return listing;
+        }
+        let Ok(read) = fs::read_dir(&self.dir) else {
+            return listing;
+        };
         listing.available = true;
         for (index, entry) in read.take(MAX_SCAN + 1).enumerate() {
-            if index == MAX_SCAN { listing.partial = true; break; }
-            let Ok(entry) = entry else { listing.partial = true; continue };
-            let Ok(name) = entry.file_name().into_string() else { continue };
-            if name.starts_with('.') { continue; }
-            let Ok(meta) = fs::symlink_metadata(entry.path()) else { continue };
-            if !meta.is_file() { continue; }
-            listing.files.push(ListedFile { name, path: entry.path(), fingerprint: Fingerprint::of(&meta) });
+            if index == MAX_SCAN {
+                listing.partial = true;
+                break;
+            }
+            let Ok(entry) = entry else {
+                listing.partial = true;
+                continue;
+            };
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+            let Ok(meta) = fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if !meta.is_file() {
+                continue;
+            }
+            listing.files.push(ListedFile {
+                name,
+                path: entry.path(),
+                fingerprint: Fingerprint::of(&meta),
+            });
         }
-        listing.files.sort_by(|a, b| b.fingerprint.modified.cmp(&a.fingerprint.modified).then_with(|| a.name.cmp(&b.name)));
+        listing.files.sort_by(|a, b| {
+            b.fingerprint
+                .modified
+                .cmp(&a.fingerprint.modified)
+                .then_with(|| a.name.cmp(&b.name))
+        });
         listing.total = listing.files.len();
         listing.files.truncate(self.limit);
         listing
@@ -134,7 +190,9 @@ impl OutputsSection {
         let mut offered = HashMap::new();
         let mut nodes = Vec::new();
         if !listing.available {
-            if let Ok(mut old) = self.offered.lock() { old.clear(); }
+            if let Ok(mut old) = self.offered.lock() {
+                old.clear();
+            }
             return vec![MenuNode::disabled("Outputs folder unavailable")];
         }
         if listing.files.is_empty() {
@@ -151,15 +209,25 @@ impl OutputsSection {
             offered.insert(key.clone(), (file.path.clone(), file.fingerprint.clone()));
             let entry = self.entry(file);
             let mut item = MenuItem::action(format!("{OPEN_PREFIX}{key}"), label_of(&entry.name))
-                .with_symbol(if is_image(&entry.name) { Symbol::ItemImage } else { Symbol::ItemFile })
+                .with_symbol(if is_image(&entry.name) {
+                    Symbol::ItemImage
+                } else {
+                    Symbol::ItemFile
+                })
                 .with_badge(file_kind(&entry.name))
                 .with_subtitle(file_detail(entry.size, entry.modified, now))
                 .with_alternate(
-                    Alternate::new(format!("{REVEAL_PREFIX}{key}"), reveal_label()).with_symbol(Symbol::ActionFolder),
+                    Alternate::new(format!("{REVEAL_PREFIX}{key}"), reveal_label())
+                        .with_symbol(Symbol::ActionFolder),
                 );
-            if let Some(icon) = entry.icon { item = item.with_icon(icon); }
+            if let Some(icon) = entry.icon {
+                item = item.with_icon(icon);
+            }
             if !cfg!(target_os = "macos") {
-                reveal.push(MenuNode::item(format!("{REVEAL_PREFIX}{key}"), item.title.clone()));
+                reveal.push(MenuNode::item(
+                    format!("{REVEAL_PREFIX}{key}"),
+                    item.title.clone(),
+                ));
             }
             nodes.push(MenuNode::interactive(item));
         }
@@ -169,9 +237,15 @@ impl OutputsSection {
         if listing.partial {
             nodes.push(MenuNode::disabled("Some outputs couldn't be listed"));
         }
-        if let Ok(mut old) = self.offered.lock() { *old = offered; }
+        if let Ok(mut old) = self.offered.lock() {
+            *old = offered;
+        }
         let folder = if listing.total > shown {
-            let more = if listing.partial { format!("{}+", listing.total) } else { listing.total.to_string() };
+            let more = if listing.partial {
+                format!("{}+", listing.total)
+            } else {
+                listing.total.to_string()
+            };
             MenuItem::action(FOLDER_ID, format!("Show all {more} outputs"))
         } else {
             MenuItem::action(FOLDER_ID, "Open outputs folder").with_symbol(Symbol::ActionFolder)
@@ -183,7 +257,9 @@ impl OutputsSection {
     /// Handles this section's action ids. Returns true when the id was ours.
     pub fn dispatch(&self, id: &str) -> bool {
         if id == FOLDER_ID {
-            if fs::symlink_metadata(&self.dir).is_ok_and(|m| m.is_dir()) { self.open_path(&self.dir, false); }
+            if fs::symlink_metadata(&self.dir).is_ok_and(|m| m.is_dir()) {
+                self.open_path(&self.dir, false);
+            }
             return true;
         }
         let (prefix, reveal) = if let Some(key) = id.strip_prefix(REVEAL_PREFIX) {
@@ -212,15 +288,35 @@ impl OutputsSection {
             if reveal {
                 command.arg("-R");
             }
-            command.arg(path).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-            if let Ok(mut child) = command.spawn() { std::thread::spawn(move || { let _ = child.wait(); }); }
+            command
+                .arg(path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            if let Ok(mut child) = command.spawn() {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {
-            let target = if reveal { path.parent().unwrap_or(path) } else { path };
+            let target = if reveal {
+                path.parent().unwrap_or(path)
+            } else {
+                path
+            };
             let mut command = std::process::Command::new("xdg-open");
-            command.arg(target).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-            if let Ok(mut child) = command.spawn() { std::thread::spawn(move || { let _ = child.wait(); }); }
+            command
+                .arg(target)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            if let Ok(mut child) = command.spawn() {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
         }
         #[cfg(windows)]
         {
@@ -231,20 +327,37 @@ impl OutputsSection {
                     selection.push(path.as_os_str());
                     let _ = std::process::Command::new("explorer.exe")
                         .arg(selection)
-                        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
                         .status();
                 } else {
                     use std::os::windows::ffi::OsStrExt;
                     #[link(name = "shell32")]
                     extern "system" {
-                        fn ShellExecuteW(window: *mut std::ffi::c_void, operation: *const u16, file: *const u16,
-                            parameters: *const u16, directory: *const u16, show: i32) -> *mut std::ffi::c_void;
+                        fn ShellExecuteW(
+                            window: *mut std::ffi::c_void,
+                            operation: *const u16,
+                            file: *const u16,
+                            parameters: *const u16,
+                            directory: *const u16,
+                            show: i32,
+                        ) -> *mut std::ffi::c_void;
                     }
                     let file: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
                     let open: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
                     // An OS file association open, never cmd.exe or a shell
                     // command constructed from an output filename.
-                    unsafe { ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), 1); }
+                    unsafe {
+                        ShellExecuteW(
+                            std::ptr::null_mut(),
+                            open.as_ptr(),
+                            file.as_ptr(),
+                            std::ptr::null(),
+                            std::ptr::null(),
+                            1,
+                        );
+                    }
                 }
             });
         }
@@ -252,7 +365,10 @@ impl OutputsSection {
 
     fn thumbnail(&self, path: &Path, expected: &Fingerprint) -> Option<RgbaIcon> {
         let ext = path.extension()?.to_string_lossy().to_lowercase();
-        if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico") {
+        if !matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico"
+        ) {
             return None;
         }
         let name = path.file_name()?.to_string_lossy().into_owned();
@@ -293,13 +409,20 @@ impl OutputsSection {
         let bytes = {
             let file = OpenOptions::new().read(true).open(path).ok()?;
             let meta = file.metadata().ok()?;
-            if !meta.is_file() || Fingerprint::of(&meta) != *expected || meta.len() > MAX_DECODE_BYTES { return None; }
+            if !meta.is_file()
+                || Fingerprint::of(&meta) != *expected
+                || meta.len() > MAX_DECODE_BYTES
+            {
+                return None;
+            }
             if let Some(icon) = self.cached_thumbnail(&name, expected) {
                 return Some(icon);
             }
             read_image(file, expected)?
         };
-        let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
+        let mut reader = image::ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .ok()?;
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(MAX_PIXELS_PER_AXIS);
         limits.max_image_height = Some(MAX_PIXELS_PER_AXIS);
@@ -308,7 +431,11 @@ impl OutputsSection {
         let image = reader.decode().ok()?;
         let thumb = image.thumbnail(THUMB_SIZE, THUMB_SIZE).to_rgba8();
         let (width, height) = (thumb.width(), thumb.height());
-        let icon = RgbaIcon { rgba: thumb.into_raw(), width, height };
+        let icon = RgbaIcon {
+            rgba: thumb.into_raw(),
+            width,
+            height,
+        };
         if let Ok(mut cache) = self.thumbs.lock() {
             if cache.len() > self.limit * 2 {
                 cache.clear();
@@ -328,34 +455,71 @@ impl OutputsSection {
 }
 
 fn reveal_label() -> &'static str {
-    if cfg!(target_os = "macos") { "Show in Finder" } else { "Show in folder" }
+    if cfg!(target_os = "macos") {
+        "Show in Finder"
+    } else {
+        "Show in folder"
+    }
 }
 
 #[cfg(not(unix))]
 fn read_image(mut file: File, expected: &Fingerprint) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
-    (&mut file).take(MAX_DECODE_BYTES + 1).read_to_end(&mut bytes).ok()?;
-    if bytes.len() as u64 > MAX_DECODE_BYTES || Fingerprint::of(&file.metadata().ok()?) != *expected { return None; }
+    (&mut file)
+        .take(MAX_DECODE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_DECODE_BYTES || Fingerprint::of(&file.metadata().ok()?) != *expected
+    {
+        return None;
+    }
     Some(bytes)
 }
 
 fn is_image(name: &str) -> bool {
-    Path::new(name).extension().and_then(|s| s.to_str())
-        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "heic" | "svg"))
+    Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "heic" | "svg"
+            )
+        })
 }
 
 /// The file type as a short badge: `PNG`, `PDF`, `MD`, or `FILE`.
 fn file_kind(name: &str) -> String {
-    let ext = Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("");
-    let kind: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect::<String>().to_uppercase();
-    if kind.is_empty() { "FILE".into() } else { kind }
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let kind: String = ext
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect::<String>()
+        .to_uppercase();
+    if kind.is_empty() {
+        "FILE".into()
+    } else {
+        kind
+    }
 }
 
 /// Size and age in days, for example `42 KB · today`. Days, not minutes,
 /// so an unchanged folder does not rebuild the menu every minute.
 fn file_detail(size: u64, modified: Option<SystemTime>, now: SystemTime) -> String {
-    let size = if size < 1024 { format!("{size} B") } else if size < 1024 * 1024 { format!("{} KB", size / 1024) } else { format!("{} MB", size / (1024 * 1024)) };
-    let Some(age) = modified.and_then(|modified| now.duration_since(modified).ok()) else { return size };
+    let size = if size < 1024 {
+        format!("{size} B")
+    } else if size < 1024 * 1024 {
+        format!("{} KB", size / 1024)
+    } else {
+        format!("{} MB", size / (1024 * 1024))
+    };
+    let Some(age) = modified.and_then(|modified| now.duration_since(modified).ok()) else {
+        return size;
+    };
     let age = match age.as_secs() / 86_400 {
         0 => "today".to_owned(),
         1 => "yesterday".to_owned(),
@@ -365,13 +529,25 @@ fn file_detail(size: u64, modified: Option<SystemTime>, now: SystemTime) -> Stri
 }
 
 fn label_of(name: &str) -> String {
-    let stem = Path::new(name).file_stem().unwrap_or_default().to_string_lossy();
-    let safe: String = stem.chars().filter(|c| !c.is_control() && !matches!(*c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')).collect();
+    let stem = Path::new(name)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let safe: String = stem
+        .chars()
+        .filter(|c| {
+            !c.is_control() && !matches!(*c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        .collect();
     let mut label: String = safe.chars().take(MAX_LABEL).collect();
     if label.len() < safe.len() {
         label.push('…');
     }
-    if label.is_empty() { "Untitled output".into() } else { label }
+    if label.is_empty() {
+        "Untitled output".into()
+    } else {
+        label
+    }
 }
 
 fn file_key(name: &str, fingerprint: &Fingerprint) -> String {
@@ -431,21 +607,38 @@ mod tests {
         let section = OutputsSection::new(&dir);
         let nodes = section.nodes();
         assert_eq!(nodes.len(), if cfg!(target_os = "macos") { 2 } else { 3 });
-        let MenuNode::Interactive { item } = &nodes[0] else { panic!("file row") };
+        let MenuNode::Interactive { item } = &nodes[0] else {
+            panic!("file row")
+        };
         assert_eq!(item.title, "chart of options");
         assert!(item.icon.is_some());
         assert_eq!(item.symbol, Some(Symbol::ItemImage));
         assert_eq!(item.badge.as_deref(), Some("PNG"));
-        assert!(item.subtitle.as_deref().is_some_and(|s| s.ends_with(" B · today")), "{:?}", item.subtitle);
+        assert!(
+            item.subtitle
+                .as_deref()
+                .is_some_and(|s| s.ends_with(" B · today")),
+            "{:?}",
+            item.subtitle
+        );
         let alternate = item.alternate.as_ref().unwrap();
         assert!(alternate.id.starts_with(REVEAL_PREFIX));
         assert_eq!(alternate.title, reveal_label());
-        let folder = if cfg!(target_os = "macos") { 1 } else {
-            assert!(matches!(&nodes[1], MenuNode::Submenu { title, items, .. } if title == reveal_label() && items.len() == 1));
+        let folder = if cfg!(target_os = "macos") {
+            1
+        } else {
+            assert!(
+                matches!(&nodes[1], MenuNode::Submenu { title, items, .. } if title == reveal_label() && items.len() == 1)
+            );
             2
         };
-        let MenuNode::Interactive { item } = &nodes[folder] else { panic!("folder row") };
-        assert_eq!((item.id.as_deref(), item.title.as_str()), (Some(FOLDER_ID), "Open outputs folder"));
+        let MenuNode::Interactive { item } = &nodes[folder] else {
+            panic!("folder row")
+        };
+        assert_eq!(
+            (item.id.as_deref(), item.title.as_str()),
+            (Some(FOLDER_ID), "Open outputs folder")
+        );
         assert_eq!(item.opens, Some(Opens::Finder));
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -453,14 +646,25 @@ mod tests {
     #[test]
     fn more_files_than_the_limit_end_in_show_all() {
         let dir = fixture();
-        for index in 0..8 { fs::write(dir.join(format!("report {index}.md")), b"x").unwrap(); }
+        for index in 0..8 {
+            fs::write(dir.join(format!("report {index}.md")), b"x").unwrap();
+        }
         let nodes = OutputsSection::new(&dir).nodes();
         let last = nodes.len() - 1;
-        assert_eq!(last, if cfg!(target_os = "macos") { 5 } else { 6 }, "five newest files, a reveal submenu off macOS, one folder row");
-        let MenuNode::Interactive { item } = &nodes[last] else { panic!("folder row") };
+        assert_eq!(
+            last,
+            if cfg!(target_os = "macos") { 5 } else { 6 },
+            "five newest files, a reveal submenu off macOS, one folder row"
+        );
+        let MenuNode::Interactive { item } = &nodes[last] else {
+            panic!("folder row")
+        };
         assert_eq!(item.title, "Show all 8 outputs");
         assert_eq!(item.id.as_deref(), Some(FOLDER_ID));
-        let mut model = crate::MenuModel { nodes, ..Default::default() };
+        let mut model = crate::MenuModel {
+            nodes,
+            ..Default::default()
+        };
         model.nodes.push(MenuNode::quit("Quit"));
         assert!(model.validate().is_ok());
         fs::remove_dir_all(&dir).unwrap();
@@ -470,12 +674,25 @@ mod tests {
     fn empty_dir_explains_itself_and_keeps_the_folder_row() {
         let dir = fixture();
         let nodes = OutputsSection::new(&dir).nodes();
-        assert_eq!(nodes, vec![
-            MenuNode::interactive(MenuItem::inert("No outputs yet").with_subtitle("Agents save finished files here")),
-            MenuNode::interactive(MenuItem::action(FOLDER_ID, "Open outputs folder").with_symbol(Symbol::ActionFolder).opens(Opens::Finder)),
-        ]);
+        assert_eq!(
+            nodes,
+            vec![
+                MenuNode::interactive(
+                    MenuItem::inert("No outputs yet")
+                        .with_subtitle("Agents save finished files here")
+                ),
+                MenuNode::interactive(
+                    MenuItem::action(FOLDER_ID, "Open outputs folder")
+                        .with_symbol(Symbol::ActionFolder)
+                        .opens(Opens::Finder)
+                ),
+            ]
+        );
         fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(OutputsSection::new(&dir).nodes(), vec![MenuNode::disabled("Outputs folder unavailable")]);
+        assert_eq!(
+            OutputsSection::new(&dir).nodes(),
+            vec![MenuNode::disabled("Outputs folder unavailable")]
+        );
     }
 
     #[test]
@@ -505,10 +722,17 @@ mod tests {
     #[test]
     fn newest_file_is_selected_beyond_the_old_four_times_limit() {
         let dir = fixture();
-        for i in 0..120 { fs::write(dir.join(format!("older-{i}.txt")), b"old").unwrap(); }
+        for i in 0..120 {
+            fs::write(dir.join(format!("older-{i}.txt")), b"old").unwrap();
+        }
         let newest = dir.join("newest.txt");
         fs::write(&newest, b"new").unwrap();
-        OpenOptions::new().write(true).open(&newest).unwrap().set_modified(SystemTime::now() + std::time::Duration::from_secs(60)).unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&newest)
+            .unwrap()
+            .set_modified(SystemTime::now() + std::time::Duration::from_secs(60))
+            .unwrap();
         let entries = OutputsSection::new(&dir).with_limit(1).entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "newest.txt");
@@ -521,7 +745,10 @@ mod tests {
         let path = dir.join("report.txt");
         fs::write(&path, b"old").unwrap();
         let section = OutputsSection::new(&dir);
-        let key = file_key("report.txt", &Fingerprint::of(&fs::metadata(&path).unwrap()));
+        let key = file_key(
+            "report.txt",
+            &Fingerprint::of(&fs::metadata(&path).unwrap()),
+        );
         assert!(section.find_by_key(&key).is_none());
         section.nodes();
         assert_eq!(section.find_by_key(&key), Some(path.clone()));
@@ -531,7 +758,10 @@ mod tests {
         // Its new fingerprint must never make an old action target new content.
         section.nodes();
         assert!(section.find_by_key(&key).is_none());
-        let replacement_key = file_key("report.txt", &Fingerprint::of(&fs::metadata(&path).unwrap()));
+        let replacement_key = file_key(
+            "report.txt",
+            &Fingerprint::of(&fs::metadata(&path).unwrap()),
+        );
         assert_ne!(key, replacement_key);
         assert_eq!(section.find_by_key(&replacement_key), Some(path.clone()));
         section.nodes();
@@ -551,7 +781,10 @@ mod tests {
         let section = OutputsSection::new(&dir);
         assert_eq!(section.entries().len(), 1);
         section.nodes();
-        let key = file_key("private.txt", &Fingerprint::of(&fs::metadata(dir.join("private.txt")).unwrap()));
+        let key = file_key(
+            "private.txt",
+            &Fingerprint::of(&fs::metadata(dir.join("private.txt")).unwrap()),
+        );
         fs::remove_file(dir.join("private.txt")).unwrap();
         symlink("linked.txt", dir.join("private.txt")).unwrap();
         assert!(section.find_by_key(&key).is_none());
@@ -567,7 +800,8 @@ mod tests {
         assert!(section.entries()[0].icon.is_some());
         let mut data = Cursor::new(Vec::new());
         image::RgbaImage::from_pixel(MAX_PIXELS_PER_AXIS + 1, 1, image::Rgba([0, 0, 0, 255]))
-            .write_to(&mut data, image::ImageFormat::Png).unwrap();
+            .write_to(&mut data, image::ImageFormat::Png)
+            .unwrap();
         fs::write(dir.join("replacement.png"), data.into_inner()).unwrap();
         fs::rename(dir.join("replacement.png"), &path).unwrap();
         assert!(section.entries()[0].icon.is_none());

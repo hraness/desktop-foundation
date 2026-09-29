@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::protocol::valid_app_id;
+use crate::wire::valid_app_id;
 
 /// Exit code for "already running", distinct from success and failure, so
 /// scripts can tell a second launch from an error.
@@ -618,7 +618,8 @@ mod tests {
     fn unsafe_items_are_rejected() {
         let home = PathBuf::from("/Users/example");
         let good = item(&home);
-        let cases: Vec<Box<dyn Fn(&mut LoginItem)>> = vec![
+        type Edit = Box<dyn Fn(&mut LoginItem)>;
+        let cases: Vec<Edit> = vec![
             Box::new(|item| item.app_id = "AI Charts".into()),
             Box::new(|item| item.program = PathBuf::from("relative/aicharts")),
             Box::new(|item| item.args.push("line\nbreak".into())),

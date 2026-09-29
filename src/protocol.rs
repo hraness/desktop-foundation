@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 pub use crate::protocol_v2 as v2;
 use crate::{MenuItem, MenuItemKind, MenuModel, MenuNode, RgbaIcon};
 
-pub const VERSION: u8 = 1;
-pub const MAX_FRAME_BYTES: usize = 256 * 1024;
+/// Shared with the one-shot helper modes in `hraness-local-app`.
+pub use hraness_local_app::wire::{valid_app_id, ProtocolError, MAX_FRAME_BYTES, VERSION};
 pub const MAX_ITEMS: usize = 256;
 pub const MAX_DEPTH: usize = 8;
 pub const MAX_REVISION: u64 = 9_007_199_254_740_991;
@@ -80,7 +80,9 @@ fn parse_frame(bytes: &[u8]) -> Result<Frame, ProtocolError> {
         "quit" => {
             let frame: QuitFrame = serde_json::from_slice(bytes).map_err(invalid)?;
             debug_assert_eq!(frame.kind, "quit");
-            Ok(Frame::Quit { version: frame.version })
+            Ok(Frame::Quit {
+                version: frame.version,
+            })
         }
         "snapshot" if head.version == v2::VERSION => serde_json::from_slice(bytes)
             .map(|frame| Frame::SnapshotV2(Box::new(frame)))
@@ -187,10 +189,6 @@ impl Event {
     }
 }
 
-/// Safe machine-readable categories: never copy input into an error message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProtocolError(pub &'static str);
-
 /// Limits allocation even if stdin never supplies a newline. Oversized and
 /// partial frames are rejected; the caller must close rather than resync.
 pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Frame>, ProtocolError> {
@@ -268,16 +266,6 @@ pub(crate) fn safe_text(value: &str, max: usize) -> bool {
         })
 }
 
-pub fn valid_app_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && !value.contains("..")
-        && value.as_bytes()[0].is_ascii_lowercase()
-        && value
-            .bytes()
-            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || b".-".contains(&ch))
-}
-
 pub(crate) fn valid_action_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 256
@@ -291,10 +279,7 @@ pub(crate) fn valid_action_id(value: &str) -> bool {
 /// presentation selector). Multi-scalar sequences such as ZWJ chains and flag
 /// pairs are rejected so every platform can bound the rendered mark.
 fn valid_title(title: &str) -> bool {
-    if !title.is_empty()
-        && title.len() <= 2
-        && title.bytes().all(|ch| ch.is_ascii_alphanumeric())
-    {
+    if !title.is_empty() && title.len() <= 2 && title.bytes().all(|ch| ch.is_ascii_alphanumeric()) {
         return true;
     }
     let mut chars = title.chars();
@@ -610,11 +595,23 @@ pub(crate) mod tests_support {
             b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut encoded = String::new();
         for chunk in bytes.chunks(3) {
-            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
             encoded.push(ALPHABET[(b[0] >> 2) as usize] as char);
             encoded.push(ALPHABET[((b[0] << 4 | b[1] >> 4) & 0x3f) as usize] as char);
-            encoded.push(if chunk.len() > 1 { ALPHABET[((b[1] << 2 | b[2] >> 6) & 0x3f) as usize] as char } else { '=' });
-            encoded.push(if chunk.len() > 2 { ALPHABET[(b[2] & 0x3f) as usize] as char } else { '=' });
+            encoded.push(if chunk.len() > 1 {
+                ALPHABET[((b[1] << 2 | b[2] >> 6) & 0x3f) as usize] as char
+            } else {
+                '='
+            });
+            encoded.push(if chunk.len() > 2 {
+                ALPHABET[(b[2] & 0x3f) as usize] as char
+            } else {
+                '='
+            });
         }
         encoded
     }
@@ -769,11 +766,16 @@ mod tests {
     fn a_malformed_frame_still_reports_its_declared_version() {
         let mut seen = None;
         let bad = b"{\"type\":\"snapshot\",\"version\":2,\"title\":\"old\"}\n";
-        let result = read_frame_noting_version(&mut std::io::Cursor::new(&bad[..]), |version| seen = Some(version));
+        let result = read_frame_noting_version(&mut std::io::Cursor::new(&bad[..]), |version| {
+            seen = Some(version)
+        });
         assert_eq!(result.unwrap_err(), ProtocolError("invalid-frame"));
         assert_eq!(seen, Some(2));
         let mut seen = None;
-        let _ = read_frame_noting_version(&mut std::io::Cursor::new(&b"not json\n"[..]), |version| seen = Some(version));
+        let _ =
+            read_frame_noting_version(&mut std::io::Cursor::new(&b"not json\n"[..]), |version| {
+                seen = Some(version)
+            });
         assert_eq!(seen, None);
     }
 
@@ -899,7 +901,18 @@ mod tests {
 
     #[test]
     fn titles_accept_a_badge_or_one_emoji_grapheme() {
-        for title in ["Gg", "A", "7x", "👻", "🧽", "🟠", "🤖", "📷", "⚔\u{fe0f}", "📸"] {
+        for title in [
+            "Gg",
+            "A",
+            "7x",
+            "👻",
+            "🧽",
+            "🟠",
+            "🤖",
+            "📷",
+            "⚔\u{fe0f}",
+            "📸",
+        ] {
             assert!(valid_title(title), "{title}");
         }
         for title in [
@@ -926,25 +939,37 @@ mod tests {
 
     #[test]
     fn icons_decode_strict_base64_within_side_and_length_bounds() {
-        let rgba = |pixels: usize| {
-            let bytes = vec![7u8; pixels * 4];
-            let mut encoded = String::new();
-            const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-            for quad in bytes.chunks(3) {
-                encoded.push(ALPHABET[(quad[0] >> 2) as usize] as char);
-                encoded.push(ALPHABET[((quad[0] << 4 | quad.get(1).copied().unwrap_or(0) >> 4) & 0x3f) as usize] as char);
-                encoded.push(match quad.get(1) {
-                    Some(&b) => ALPHABET[((b << 2 | quad.get(2).copied().unwrap_or(0) >> 6) & 0x3f) as usize] as char,
-                    None => '=',
-                });
-                encoded.push(match quad.get(2) {
-                    Some(&b) => ALPHABET[(b & 0x3f) as usize] as char,
-                    None => '=',
-                });
-            }
-            encoded
+        let rgba =
+            |pixels: usize| {
+                let bytes = vec![7u8; pixels * 4];
+                let mut encoded = String::new();
+                const ALPHABET: &[u8; 64] =
+                    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                for quad in bytes.chunks(3) {
+                    encoded.push(ALPHABET[(quad[0] >> 2) as usize] as char);
+                    encoded.push(
+                        ALPHABET[((quad[0] << 4 | quad.get(1).copied().unwrap_or(0) >> 4) & 0x3f)
+                            as usize] as char,
+                    );
+                    encoded.push(match quad.get(1) {
+                        Some(&b) => {
+                            ALPHABET[((b << 2 | quad.get(2).copied().unwrap_or(0) >> 6) & 0x3f)
+                                as usize] as char
+                        }
+                        None => '=',
+                    });
+                    encoded.push(match quad.get(2) {
+                        Some(&b) => ALPHABET[(b & 0x3f) as usize] as char,
+                        None => '=',
+                    });
+                }
+                encoded
+            };
+        let valid = WireIcon {
+            width: 2,
+            height: 2,
+            rgba: rgba(4),
         };
-        let valid = WireIcon { width: 2, height: 2, rgba: rgba(4) };
         assert!(valid_icon(&valid));
         let mut next = frame(1);
         if let Frame::Snapshot { icon, .. } = &mut next {
@@ -952,15 +977,51 @@ mod tests {
         }
         assert!(Session::default().accept(next).is_ok());
         for icon in [
-            WireIcon { width: 0, height: 2, rgba: rgba(4) },
-            WireIcon { width: 2, height: 0, rgba: rgba(4) },
-            WireIcon { width: MAX_ICON_SIDE + 1, height: 1, rgba: rgba(65) },
-            WireIcon { width: 2, height: 2, rgba: rgba(3) },
-            WireIcon { width: 2, height: 2, rgba: rgba(5) },
-            WireIcon { width: 2, height: 2, rgba: "!!!!".into() },
-            WireIcon { width: 2, height: 2, rgba: "abc".into() },
-            WireIcon { width: 2, height: 2, rgba: "abcd=efg".into() },
-            WireIcon { width: 2, height: 2, rgba: String::new() },
+            WireIcon {
+                width: 0,
+                height: 2,
+                rgba: rgba(4),
+            },
+            WireIcon {
+                width: 2,
+                height: 0,
+                rgba: rgba(4),
+            },
+            WireIcon {
+                width: MAX_ICON_SIDE + 1,
+                height: 1,
+                rgba: rgba(65),
+            },
+            WireIcon {
+                width: 2,
+                height: 2,
+                rgba: rgba(3),
+            },
+            WireIcon {
+                width: 2,
+                height: 2,
+                rgba: rgba(5),
+            },
+            WireIcon {
+                width: 2,
+                height: 2,
+                rgba: "!!!!".into(),
+            },
+            WireIcon {
+                width: 2,
+                height: 2,
+                rgba: "abc".into(),
+            },
+            WireIcon {
+                width: 2,
+                height: 2,
+                rgba: "abcd=efg".into(),
+            },
+            WireIcon {
+                width: 2,
+                height: 2,
+                rgba: String::new(),
+            },
         ] {
             assert!(!valid_icon(&icon), "{icon:?}");
         }

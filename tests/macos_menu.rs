@@ -24,22 +24,37 @@ fn main() {
                 .with_subtitle("Reply waiting for approval")
                 .with_badge("2")
                 .with_tooltip("Last message 2 minutes ago")
-                .with_alternate(Alternate::new("chat.copy", "Copy chat ID").with_symbol(Symbol::ActionCopy)),
+                .with_alternate(
+                    Alternate::new("chat.copy", "Copy chat ID").with_symbol(Symbol::ActionCopy),
+                ),
         ),
-        MenuNode::interactive(MenuItem::state("pause", "Pause automatic replies", ItemState::Mixed)),
+        MenuNode::interactive(MenuItem::state(
+            "pause",
+            "Pause automatic replies",
+            ItemState::Mixed,
+        )),
         MenuNode::Submenu {
             title: "More".into(),
             symbol: Some(Symbol::ActionSettings),
-            items: vec![MenuNode::interactive(MenuItem::action("plain", "Plain row"))],
+            items: vec![MenuNode::interactive(MenuItem::action(
+                "plain",
+                "Plain row",
+            ))],
         },
         MenuNode::quit("Quit Textbutler"),
     ];
     let dump = native_menu_dump(&nodes).expect("the test binary runs on the main thread");
     print!("{dump}");
-    let version = std::process::Command::new("sw_vers").arg("-productVersion").output()
+    let version = std::process::Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
         .unwrap_or_default();
-    let major: u32 = version.split('.').next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let major: u32 = version
+        .split('.')
+        .next()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let lines: Vec<&str> = dump.lines().collect();
     if major >= 15 {
         // macOS 15 and later have every native API the pass uses.

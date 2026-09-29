@@ -13,7 +13,7 @@ use std::io::{BufRead, Write};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-use crate::protocol::{ProtocolError, MAX_FRAME_BYTES, VERSION};
+use crate::wire::{ProtocolError, MAX_FRAME_BYTES, VERSION};
 
 pub const MAX_TITLE: usize = 128;
 pub const MAX_MESSAGE: usize = 512;

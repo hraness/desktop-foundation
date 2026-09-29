@@ -28,7 +28,7 @@ checked local cache. Users need no Cargo, Swift or Xcode. A source checkout
 has no release manifest until all six binary artifacts have been assembled.
 
 ```sh
-npm install https://github.com/hraness/desktop-foundation/releases/download/v0.8.1/hraness-desktop-foundation-0.8.1.tgz
+npm install https://github.com/hraness/desktop-foundation/releases/download/v0.9.0/hraness-desktop-foundation-0.9.0.tgz
 ```
 
 The package is published only as GitHub Release assets, not on npm. Check the
@@ -209,6 +209,42 @@ with product state. The session also:
 - handles `foundation.login` ("Open at login") and
   `foundation.settings.<kind>` itself. The product never sees those actions.
 
+## Headless control (0.9.0)
+
+A product can now run without a menu bar: one owner process per product, and
+every other command is a short-lived client that prints JSON with `--json`.
+This release only adds the pieces; the tray, `./menu-kit` and the companion
+lifecycle calls keep working unchanged through 0.9.x.
+
+| Subpath | What it gives a product |
+|---|---|
+| `./registry` | Verbs with an operation class (`read`, `operate`, `decide`, `decide-legacy`), the JSON envelope, stable error codes and exit codes, and `commands --json`. |
+| `./control` | The owner process: agent and admin Unix sockets in a 0700 directory, `ensureOwner` to start it on demand, `controlStatus` that never sends a signal. |
+| `./human-gate` | The gate for `decide` verbs: a foreground terminal plus a one-time code typed at `/dev/tty`. |
+| `./tui` | Views that render as an interactive screen, a plain-text snapshot, or the same JSON `status --json` prints. |
+| `./login` | An opt-in login item that starts the owner. |
+| `./retire` | Moves a product's old menu bar login item aside, after checking it is the one the product installed. |
+| `./helper` | Finds the `hraness-helper` executable for one-shot dialogs and the macOS local app, falling back to `hraness-companion`. |
+
+Rust products use the `hraness-control-kit` crate (with the `tui` feature for
+ratatui views) and `hraness-local-app`, pinned by the same tag.
+
+To adopt it:
+
+1. Put every product action behind a registry verb and give each a class.
+   Anything a person owns is `decide` and declares a gate.
+2. Keep the product's state in one owner (`control serve`) and have the other
+   commands call it through `agentRequest` or `adminRequest`.
+3. Replace menu items with `status`, `tui` and the verbs. Show pending
+   decisions in `status` rather than a notification.
+4. On upgrade, call `retireLegacyLoginItem` so the old menu bar no longer
+   starts at login.
+
+Read [docs/control.md](docs/control.md) for the wire format and
+[docs/human-gate.md](docs/human-gate.md) for what the gate does and does not
+protect against. The migration plan for every product is in
+[docs/plans/menubar-retirement.md](docs/plans/menubar-retirement.md).
+
 ## Compared with Tauri, Electron, and tray libraries
 
 | Option | Choose it when |
@@ -257,7 +293,7 @@ Pin by immutable tag:
 
 ```toml
 [dependencies]
-desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.8.1" }
+desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.9.0" }
 ```
 
 Implement `Host`, then run the event loop with the product's own
@@ -415,7 +451,7 @@ use this package.
 
 ## Validation and releases
 
-Run `cargo test --locked` and `cargo build --locked` on macOS. Tests use
+Run `cargo test --locked`, `cargo build --locked` and `npm run check` on macOS. Tests use
 synthetic output files and do not open Finder or connect to product daemons.
 
 Release from the reviewed, validated tree by updating both Cargo version records

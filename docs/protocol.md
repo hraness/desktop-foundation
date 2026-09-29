@@ -238,7 +238,7 @@ before UI initialization, but the desktop must still provide a tray host.
 for example:
 
 ```text
-hraness-companion 0.8.1 protocol/1,2
+hraness-companion 0.9.0 protocol/1,2
 ```
 
 It lists every protocol the runner accepts. Runners up to 0.7.x print

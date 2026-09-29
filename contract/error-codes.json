@@ -1,0 +1,30 @@
+{
+  "schema": "hraness.error-codes/1",
+  "exitCodes": {
+    "0": "ok",
+    "1": "failure",
+    "2": "usage",
+    "3": "human-required: a decide verb ran without a satisfied human gate",
+    "4": "owner-unavailable",
+    "5": "conflict: a stale revision, digest or a second owner"
+  },
+  "codes": [
+    { "code": "usage", "exit": 2, "meaning": "The command line is malformed or names no verb." },
+    { "code": "not-found", "exit": 1, "meaning": "The named object does not exist." },
+    { "code": "permission-denied", "exit": 1, "meaning": "The caller may not do this, such as an admin action on the agent socket." },
+    { "code": "human-required", "exit": 3, "meaning": "A decide verb needs a person at the terminal. Nothing changed." },
+    { "code": "gate-failed", "exit": 3, "meaning": "The person's confirmation did not match. Nothing changed." },
+    { "code": "gate-expired", "exit": 3, "meaning": "The confirmation or challenge timed out. Nothing changed." },
+    { "code": "owner-unavailable", "exit": 4, "meaning": "The product's owner process is not running and could not be started." },
+    { "code": "control-already-running", "exit": 5, "meaning": "Another owner already holds the control lock." },
+    { "code": "conflict", "exit": 5, "meaning": "The expected revision is stale." },
+    { "code": "digest-mismatch", "exit": 5, "meaning": "The digest does not match what would be decided." },
+    { "code": "unsupported-platform", "exit": 1, "meaning": "This platform or tier is not supported." },
+    { "code": "internal", "exit": 1, "meaning": "An unexpected failure." }
+  ],
+  "productCodes": {
+    "pattern": "^[a-z][a-z0-9-]*\\.[a-z0-9][a-z0-9.-]*$",
+    "exit": 1,
+    "rule": "A product adds codes only under its own prefix, such as ghostget.policy-locked. The registry rejects any other code that is not listed above."
+  }
+}

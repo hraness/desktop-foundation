@@ -1,0 +1,1 @@
+{"ok":false,"schema":"hraness.error/1","generatedAt":"2026-09-28T00:00:00.000Z","error":{"code":"human-required","message":"approvals decide needs a person at the terminal. Nothing changed.","next":[{"command":"example approvals decide a1 --digest 3f2a allow-once","why":"A person runs this in a terminal and types the code it shows","audience":"human"}]}}

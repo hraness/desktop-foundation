@@ -1,0 +1,5 @@
+┌ Owner running ───────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ID     Waiting request                                                                                                │
+│a1     codex wants network access to api.github.com for a release check                                               │
+│b2     claude wants to read ~/Documents/notes                                                                         │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

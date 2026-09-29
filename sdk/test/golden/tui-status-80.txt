@@ -1,0 +1,6 @@
+== Status ==
+┌ Owner running ───────────────────────────────────────────────────────────────┐
+│ID  Waiting request                                                           │
+│a1  codex wants network access to api.example.com                             │
+│b2  claude wants to read ~/Documents/notes                                    │
+└──────────────────────────────────────────────────────────────────────────────┘

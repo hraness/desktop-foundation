@@ -1,0 +1,1 @@
+{"ok":false,"schema":"hraness.error/1","generatedAt":"2026-09-28T00:00:00.000Z","error":{"code":"example.policy-locked","message":"The policy is locked.","detail":"Unlock it in the example settings first."}}

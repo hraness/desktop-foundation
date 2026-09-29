@@ -19,8 +19,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::protocol::valid_app_id;
 use crate::service::LoginItem;
+use crate::wire::valid_app_id;
 
 pub const IDENTITY_NAME: &str = "Hraness Local Signing";
 pub const CODESIGN: &str = "/usr/bin/codesign";
@@ -1410,7 +1410,8 @@ mod tests {
     fn requests_are_validated() {
         let home = temp_home();
         let good = spec(&home);
-        let cases: Vec<Box<dyn Fn(&mut AppSpec)>> = vec![
+        type Edit = Box<dyn Fn(&mut AppSpec)>;
+        let cases: Vec<Edit> = vec![
             Box::new(|s| s.name = "../Evil".into()),
             Box::new(|s| s.name = ".Hidden".into()),
             Box::new(|s| s.name = "A/B".into()),

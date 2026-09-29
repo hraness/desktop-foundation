@@ -11,7 +11,7 @@ use std::io::{BufRead, Write};
 use serde::{Deserialize, Serialize};
 
 use crate::prompt::{read_single_frame, safe_display};
-use crate::protocol::{ProtocolError, VERSION};
+use crate::wire::{ProtocolError, VERSION};
 
 pub const MAX_TITLE: usize = 128;
 pub const MAX_MESSAGE: usize = 512;
@@ -23,23 +23,62 @@ pub const MAX_TIMEOUT_SECONDS: u64 = 600;
 /// allowlisted URL. `keychain` and `developer-tools` have no pane. The same
 /// table backs the `foundation.settings.<kind>` action IDs.
 pub const SETTINGS_PANES: &[(&str, &str)] = &[
-    ("full-disk-access", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"),
-    ("automation", "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"),
-    ("contacts", "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts"),
-    ("accessibility", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"),
-    ("screen-recording", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"),
-    ("camera", "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"),
-    ("microphone", "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"),
-    ("local-network", "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"),
-    ("incoming-connections", "x-apple.systempreferences:com.apple.Network-Settings.extension"),
-    ("notifications", "x-apple.systempreferences:com.apple.Notifications-Settings.extension"),
-    ("login-item", "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"),
-    ("gatekeeper", "x-apple.systempreferences:com.apple.preference.security?General"),
+    (
+        "full-disk-access",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+    ),
+    (
+        "automation",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+    ),
+    (
+        "contacts",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts",
+    ),
+    (
+        "accessibility",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    ),
+    (
+        "screen-recording",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    ),
+    (
+        "camera",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
+    ),
+    (
+        "microphone",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+    ),
+    (
+        "local-network",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork",
+    ),
+    (
+        "incoming-connections",
+        "x-apple.systempreferences:com.apple.Network-Settings.extension",
+    ),
+    (
+        "notifications",
+        "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+    ),
+    (
+        "login-item",
+        "x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
+    ),
+    (
+        "gatekeeper",
+        "x-apple.systempreferences:com.apple.preference.security?General",
+    ),
 ];
 
 /// The allowlisted System Settings URL for a permission kind.
 pub fn settings_url(kind: &str) -> Option<&'static str> {
-    SETTINGS_PANES.iter().find(|(name, _)| *name == kind).map(|(_, url)| *url)
+    SETTINGS_PANES
+        .iter()
+        .find(|(name, _)| *name == kind)
+        .map(|(_, url)| *url)
 }
 
 fn default_timeout() -> u64 {
@@ -120,7 +159,10 @@ fn validate(wire: WireRequest) -> Result<NoticeSpec, ProtocolError> {
     if !safe_display(&wire.title, MAX_TITLE)
         || !safe_display(&wire.message, MAX_MESSAGE)
         || !safe_display(&wire.primary, MAX_BUTTON)
-        || wire.secondary.as_deref().is_some_and(|label| !safe_display(label, MAX_BUTTON))
+        || wire
+            .secondary
+            .as_deref()
+            .is_some_and(|label| !safe_display(label, MAX_BUTTON))
         || wire.secondary.as_deref() == Some(wire.primary.as_str())
         || !(1..=MAX_TIMEOUT_SECONDS).contains(&wire.timeout_seconds)
     {
@@ -145,8 +187,13 @@ pub fn read_spec(reader: &mut impl BufRead) -> Result<NoticeSpec, ProtocolError>
 }
 
 pub fn emit_result(writer: &mut impl Write, status: NoticeStatus) -> Result<(), ProtocolError> {
-    let result = WireResult { kind: "notice-result", version: VERSION, status: status.wire() };
-    serde_json::to_writer(&mut *writer, &result).map_err(|_| ProtocolError("output-unavailable"))?;
+    let result = WireResult {
+        kind: "notice-result",
+        version: VERSION,
+        status: status.wire(),
+    };
+    serde_json::to_writer(&mut *writer, &result)
+        .map_err(|_| ProtocolError("output-unavailable"))?;
     writer
         .write_all(b"\n")
         .and_then(|()| writer.flush())
@@ -165,7 +212,11 @@ pub(crate) enum Choice {
 /// Maps a choice to the result, opening the Settings pane for a primary
 /// choice when the request named one. A pane that fails to open still
 /// reports `primary`, so the caller shows its own recovery copy.
-pub(crate) fn resolve(choice: Choice, spec: &NoticeSpec, open: impl FnOnce(&str) -> bool) -> NoticeStatus {
+pub(crate) fn resolve(
+    choice: Choice,
+    spec: &NoticeSpec,
+    open: impl FnOnce(&str) -> bool,
+) -> NoticeStatus {
     match choice {
         Choice::Primary => match spec.settings_url {
             Some(url) if open(url) => NoticeStatus::Settings,
@@ -198,7 +249,11 @@ mod platform {
 
     extern "C" {
         static _dispatch_main_q: c_void;
-        fn dispatch_async_f(queue: *const c_void, context: *mut c_void, work: extern "C" fn(*mut c_void));
+        fn dispatch_async_f(
+            queue: *const c_void,
+            context: *mut c_void,
+            work: extern "C" fn(*mut c_void),
+        );
     }
 
     extern "C" fn abort_modal(_context: *mut c_void) {
@@ -211,7 +266,9 @@ mod platform {
         if !crate::prompt::probe_capable() {
             return Choice::Unavailable;
         }
-        let Some(mtm) = MainThreadMarker::new() else { return Choice::Unavailable };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return Choice::Unavailable;
+        };
         let app = NSApplication::sharedApplication(mtm);
         app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
         NSRunningApplication::currentApplication()
@@ -249,7 +306,9 @@ mod platform {
     }
 
     pub fn open_settings(url: &str) -> bool {
-        let Some(url) = NSURL::URLWithString(&NSString::from_str(url)) else { return false };
+        let Some(url) = NSURL::URLWithString(&NSString::from_str(url)) else {
+            return false;
+        };
         NSWorkspace::sharedWorkspace().openURL(&url)
     }
 }
@@ -340,9 +399,15 @@ mod platform {
     ) -> windows::core::HRESULT {
         // For TDN_TIMER, `wparam` is the time since the dialog opened.
         let deadline = &*(data as *const Deadline);
-        if message == TDN_TIMER && !deadline.fired.get() && wparam.0 as u64 >= deadline.milliseconds {
+        if message == TDN_TIMER && !deadline.fired.get() && wparam.0 as u64 >= deadline.milliseconds
+        {
             deadline.fired.set(true);
-            let _ = SendMessageW(hwnd, TDM_CLICK_BUTTON.0 as u32, Some(WPARAM(IDCANCEL.0 as usize)), Some(LPARAM(0)));
+            let _ = SendMessageW(
+                hwnd,
+                TDM_CLICK_BUTTON.0 as u32,
+                Some(WPARAM(IDCANCEL.0 as usize)),
+                Some(LPARAM(0)),
+            );
         }
         S_OK
     }
@@ -357,11 +422,20 @@ mod platform {
         let message = wide(&spec.message);
         let primary = wide(&spec.primary);
         let secondary = spec.secondary.as_deref().map(wide);
-        let mut buttons = vec![TASKDIALOG_BUTTON { nButtonID: PRIMARY_ID, pszButtonText: PCWSTR(primary.as_ptr()) }];
+        let mut buttons = vec![TASKDIALOG_BUTTON {
+            nButtonID: PRIMARY_ID,
+            pszButtonText: PCWSTR(primary.as_ptr()),
+        }];
         if let Some(secondary) = &secondary {
-            buttons.push(TASKDIALOG_BUTTON { nButtonID: SECONDARY_ID, pszButtonText: PCWSTR(secondary.as_ptr()) });
+            buttons.push(TASKDIALOG_BUTTON {
+                nButtonID: SECONDARY_ID,
+                pszButtonText: PCWSTR(secondary.as_ptr()),
+            });
         }
-        let deadline = Deadline { milliseconds: spec.timeout_seconds * 1000, fired: Cell::new(false) };
+        let deadline = Deadline {
+            milliseconds: spec.timeout_seconds * 1000,
+            fired: Cell::new(false),
+        };
         let config = TASKDIALOGCONFIG {
             cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
             dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_CALLBACK_TIMER,
@@ -376,7 +450,8 @@ mod platform {
             ..Default::default()
         };
         let mut chosen = 0i32;
-        let result = unsafe { TaskDialogIndirect(&config, Some(&mut chosen as *mut i32), None, None) };
+        let result =
+            unsafe { TaskDialogIndirect(&config, Some(&mut chosen as *mut i32), None, None) };
         if result.is_err() {
             return Choice::Unavailable;
         }
@@ -387,7 +462,11 @@ mod platform {
             PRIMARY_ID => Choice::Primary,
             // Escape or the close box mean "not now" when there is a choice.
             id if id == SECONDARY_ID || id == IDCANCEL.0 => {
-                if spec.secondary.is_some() { Choice::Secondary } else { Choice::Primary }
+                if spec.secondary.is_some() {
+                    Choice::Secondary
+                } else {
+                    Choice::Primary
+                }
             }
             _ => Choice::Unavailable,
         }
@@ -412,7 +491,7 @@ mod tests {
 
     #[test]
     fn the_documented_request_is_accepted() {
-        assert!(include_str!("../docs/protocol-v2.md").contains(DOC));
+        assert!(include_str!("../../../docs/protocol-v2.md").contains(DOC));
         let spec = parse(DOC).unwrap();
         assert_eq!(spec.primary, "Continue");
         assert_eq!(spec.secondary.as_deref(), Some("Not now"));
@@ -422,20 +501,31 @@ mod tests {
 
     #[test]
     fn settings_kinds_map_to_the_allowlisted_panes() {
-        let json = DOC.replace("\"timeoutSeconds\":120", "\"settings\":\"full-disk-access\"");
+        let json = DOC.replace(
+            "\"timeoutSeconds\":120",
+            "\"settings\":\"full-disk-access\"",
+        );
         let spec = parse(&json).unwrap();
-        assert_eq!(spec.settings_url, Some("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"));
+        assert_eq!(
+            spec.settings_url,
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        );
         assert_eq!(spec.timeout_seconds, DEFAULT_TIMEOUT_SECONDS);
         for kind in ["keychain", "developer-tools", "https://example.com", ""] {
-            let json = DOC.replace("\"timeoutSeconds\":120", &format!("\"settings\":\"{kind}\""));
+            let json = DOC.replace(
+                "\"timeoutSeconds\":120",
+                &format!("\"settings\":\"{kind}\""),
+            );
             assert_eq!(parse(&json), Err(ProtocolError("invalid-notice")), "{kind}");
         }
-        // The same kinds back the foundation.settings.<kind> menu actions.
-        let kinds: Vec<&str> = SETTINGS_PANES.iter().map(|(kind, _)| *kind).collect();
-        assert_eq!(kinds, crate::protocol_v2::SETTINGS_KINDS);
-        let doc = include_str!("../docs/permissions.md");
+        // desktop-foundation's protocol_v2 tests check that the same kinds
+        // back the foundation.settings.<kind> menu actions.
+        let doc = include_str!("../../../docs/permissions.md");
         for (kind, url) in SETTINGS_PANES {
-            assert!(doc.contains(&format!("| `{kind}` |")) && doc.contains(url), "{kind}");
+            assert!(
+                doc.contains(&format!("| `{kind}` |")) && doc.contains(url),
+                "{kind}"
+            );
         }
     }
 
@@ -444,11 +534,17 @@ mod tests {
         let cases = [
             DOC.replace("notice-request", "prompt-request"),
             DOC.replace("\"primary\":\"Continue\"", "\"primary\":\"\""),
-            DOC.replace("\"primary\":\"Continue\"", &format!("\"primary\":\"{}\"", "x".repeat(33))),
+            DOC.replace(
+                "\"primary\":\"Continue\"",
+                &format!("\"primary\":\"{}\"", "x".repeat(33)),
+            ),
             DOC.replace("\"secondary\":\"Not now\"", "\"secondary\":\"Continue\""),
             DOC.replace("\"timeoutSeconds\":120", "\"timeoutSeconds\":0"),
             DOC.replace("\"timeoutSeconds\":120", "\"timeoutSeconds\":601"),
-            DOC.replace("\"timeoutSeconds\":120", "\"timeoutSeconds\":120,\"secret\":true"),
+            DOC.replace(
+                "\"timeoutSeconds\":120",
+                "\"timeoutSeconds\":120,\"secret\":true",
+            ),
             DOC.replace("Textbutler needs access", "Textbutler\\u0007needs access"),
         ];
         for json in cases {
@@ -458,7 +554,10 @@ mod tests {
             parse(&DOC.replace("\"version\":1", "\"version\":2")),
             Err(ProtocolError("unsupported-version"))
         );
-        assert_eq!(read_spec(&mut Cursor::new("")), Err(ProtocolError("notice-required")));
+        assert_eq!(
+            read_spec(&mut Cursor::new("")),
+            Err(ProtocolError("notice-required"))
+        );
         assert_eq!(
             read_spec(&mut Cursor::new(format!("{DOC}\n{DOC}\n"))),
             Err(ProtocolError("trailing-input"))
@@ -469,18 +568,45 @@ mod tests {
     fn choices_resolve_and_open_only_the_named_pane() {
         let mut spec = parse(DOC).unwrap();
         let never = |_: &str| -> bool { panic!("no pane requested") };
-        assert_eq!(resolve(Choice::Primary, &spec, never), NoticeStatus::Primary);
-        assert_eq!(resolve(Choice::Secondary, &spec, never), NoticeStatus::Secondary);
-        assert_eq!(resolve(Choice::Timeout, &spec, never), NoticeStatus::Timeout);
-        assert_eq!(resolve(Choice::Unavailable, &spec, never), NoticeStatus::Unavailable);
+        assert_eq!(
+            resolve(Choice::Primary, &spec, never),
+            NoticeStatus::Primary
+        );
+        assert_eq!(
+            resolve(Choice::Secondary, &spec, never),
+            NoticeStatus::Secondary
+        );
+        assert_eq!(
+            resolve(Choice::Timeout, &spec, never),
+            NoticeStatus::Timeout
+        );
+        assert_eq!(
+            resolve(Choice::Unavailable, &spec, never),
+            NoticeStatus::Unavailable
+        );
         spec.settings_url = settings_url("automation");
         let mut opened = None;
-        assert_eq!(resolve(Choice::Primary, &spec, |url| { opened = Some(url.to_owned()); true }), NoticeStatus::Settings);
+        assert_eq!(
+            resolve(Choice::Primary, &spec, |url| {
+                opened = Some(url.to_owned());
+                true
+            }),
+            NoticeStatus::Settings
+        );
         assert_eq!(opened.as_deref(), settings_url("automation"));
-        assert_eq!(resolve(Choice::Primary, &spec, |_| false), NoticeStatus::Primary);
-        assert_eq!(resolve(Choice::Secondary, &spec, |_| panic!("not chosen")), NoticeStatus::Secondary);
+        assert_eq!(
+            resolve(Choice::Primary, &spec, |_| false),
+            NoticeStatus::Primary
+        );
+        assert_eq!(
+            resolve(Choice::Secondary, &spec, |_| panic!("not chosen")),
+            NoticeStatus::Secondary
+        );
         let mut out = Vec::new();
         emit_result(&mut out, NoticeStatus::Settings).unwrap();
-        assert_eq!(String::from_utf8(out).unwrap(), "{\"type\":\"notice-result\",\"version\":1,\"status\":\"settings\"}\n");
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "{\"type\":\"notice-result\",\"version\":1,\"status\":\"settings\"}\n"
+        );
     }
 }

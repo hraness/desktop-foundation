@@ -1,0 +1,1 @@
+{"ok":true,"schema":"example.status/1","generatedAt":"2026-09-28T00:00:00.000Z","data":{"owner":"running","pending":2},"next":[{"command":"example approvals list --json","why":"2 approvals are waiting","audience":"agent"}]}

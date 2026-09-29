@@ -11,11 +11,12 @@
 //! product helpers retain their own OS permission boundaries.
 
 pub mod browser;
-pub mod identity;
-pub mod notice;
 pub mod outputs;
-pub mod prompt;
-pub mod service;
+pub use hraness_local_app as local_app;
+/// Local app assembly, `--launch`, login items and the one-shot notice and
+/// prompt dialogs live in `crates/hraness-local-app`, which has no Tauri
+/// dependency. These re-exports keep the v0.8 paths working.
+pub use hraness_local_app::{identity, notice, prompt, service};
 pub mod protocol;
 pub mod protocol_v2;
 pub mod symbols;
@@ -24,9 +25,9 @@ pub mod symbols;
 /// don't need the menu bar depend on `hraness-cli-kit` directly.
 pub use hraness_cli_kit as cli_kit;
 pub use hraness_cli_kit::{audience, permissions};
-mod menu_plan;
 #[cfg(target_os = "macos")]
 mod macos_menu;
+mod menu_plan;
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub use macos_menu::native_menu_dump;
@@ -37,7 +38,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem as TauriMenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{
+    CheckMenuItem, IsMenuItem, Menu, MenuItem as TauriMenuItem, PredefinedMenuItem, Submenu,
+};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager};
 
@@ -105,36 +108,68 @@ const MAX_TEMPLATE_ICON_SIDE: u32 = 64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)] // Boxing `Interactive` would break adapters that match on it.
 pub enum MenuNode {
-    Item { id: Option<String>, title: String, enabled: bool, icon: Option<RgbaIcon> },
+    Item {
+        id: Option<String>,
+        title: String,
+        enabled: bool,
+        icon: Option<RgbaIcon>,
+    },
     /// An interactive item with native check semantics and richer presentation
     /// metadata. This additive variant keeps the original `Item` shape source
     /// compatible for existing product adapters.
-    Interactive { item: MenuItem },
+    Interactive {
+        item: MenuItem,
+    },
     Separator,
     /// `symbol` is an `action.*` or `item.*` name shown beside the title
     /// where the platform can draw it.
-    Submenu { title: String, items: Vec<MenuNode>, symbol: Option<Symbol> },
+    Submenu {
+        title: String,
+        items: Vec<MenuNode>,
+        symbol: Option<Symbol>,
+    },
     /// A section title: the product name at the top of the menu, or a group
     /// name. Rendered as a native section header on macOS 14 and later.
-    Header { title: String },
+    Header {
+        title: String,
+    },
     /// An inert status row: a tone symbol (a `status.*` name), plain words,
     /// and optional detail shown as a subtitle.
-    Status { symbol: Symbol, title: String, detail: Option<String> },
+    Status {
+        symbol: Symbol,
+        title: String,
+        detail: Option<String>,
+    },
 }
 
 impl MenuNode {
     pub fn item(id: impl Into<String>, title: impl Into<String>) -> Self {
-        MenuNode::Item { id: Some(id.into()), title: title.into(), enabled: true, icon: None }
+        MenuNode::Item {
+            id: Some(id.into()),
+            title: title.into(),
+            enabled: true,
+            icon: None,
+        }
     }
 
     /// A menu item with a full-color icon rendered beside the title — used for
     /// file previews such as output thumbnails.
     pub fn item_with_icon(id: impl Into<String>, title: impl Into<String>, icon: RgbaIcon) -> Self {
-        MenuNode::Item { id: Some(id.into()), title: title.into(), enabled: true, icon: Some(icon) }
+        MenuNode::Item {
+            id: Some(id.into()),
+            title: title.into(),
+            enabled: true,
+            icon: Some(icon),
+        }
     }
 
     pub fn disabled(title: impl Into<String>) -> Self {
-        MenuNode::Item { id: None, title: title.into(), enabled: false, icon: None }
+        MenuNode::Item {
+            id: None,
+            title: title.into(),
+            enabled: false,
+            icon: None,
+        }
     }
 
     /// A menu item that shows and focuses the companion window.
@@ -151,16 +186,26 @@ impl MenuNode {
     }
 
     pub fn submenu(title: impl Into<String>, items: Vec<MenuNode>) -> Self {
-        MenuNode::Submenu { title: title.into(), items, symbol: None }
+        MenuNode::Submenu {
+            title: title.into(),
+            items,
+            symbol: None,
+        }
     }
 
     pub fn header(title: impl Into<String>) -> Self {
-        MenuNode::Header { title: title.into() }
+        MenuNode::Header {
+            title: title.into(),
+        }
     }
 
     /// A status row. `symbol` should be a `status.*` name.
     pub fn status(symbol: Symbol, title: impl Into<String>, detail: Option<String>) -> Self {
-        MenuNode::Status { symbol, title: title.into(), detail }
+        MenuNode::Status {
+            symbol,
+            title: title.into(),
+            detail,
+        }
     }
 }
 
@@ -172,12 +217,21 @@ impl MenuNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuItemKind {
     Action,
-    Toggle { checked: bool },
-    Check { checked: bool },
-    Radio { selected: bool, group: Option<String> },
+    Toggle {
+        checked: bool,
+    },
+    Check {
+        checked: bool,
+    },
+    Radio {
+        selected: bool,
+        group: Option<String>,
+    },
     /// Protocol v2 three-state toggle. Like the other kinds, a click never
     /// commits the state; the host sends the confirmed state next.
-    State { state: ItemState },
+    State {
+        state: ItemState,
+    },
 }
 
 /// A v2 toggle state, including the mixed dash.
@@ -230,7 +284,11 @@ pub struct Alternate {
 
 impl Alternate {
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
-        Self { id: id.into(), title: title.into(), symbol: None }
+        Self {
+            id: id.into(),
+            title: title.into(),
+            symbol: None,
+        }
     }
 
     pub fn with_symbol(mut self, symbol: Symbol) -> Self {
@@ -253,9 +311,18 @@ pub struct AccessibilityMetadata {
 impl AccessibilityMetadata {
     pub fn bounded(&self) -> Self {
         Self {
-            label: self.label.as_deref().map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
-            value: self.value.as_deref().map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
-            hint: self.hint.as_deref().map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
+            label: self
+                .label
+                .as_deref()
+                .map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
+            value: self
+                .value
+                .as_deref()
+                .map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
+            hint: self
+                .hint
+                .as_deref()
+                .map(|v| bounded_text(v, MAX_ACCESSIBILITY_CHARS)),
         }
     }
 }
@@ -268,7 +335,9 @@ pub struct ProgressValue {
 
 impl ProgressValue {
     pub fn new(percent: u8) -> Self {
-        Self { percent: percent.min(100) }
+        Self {
+            percent: percent.min(100),
+        }
     }
 }
 
@@ -305,10 +374,21 @@ pub struct MenuItem {
 impl MenuItem {
     pub fn action(id: impl Into<String>, title: impl Into<String>) -> Self {
         Self {
-            id: Some(id.into()), title: title.into(), enabled: true, icon: None,
-            kind: MenuItemKind::Action, shortcut: None, badge: None, progress: None,
+            id: Some(id.into()),
+            title: title.into(),
+            enabled: true,
+            icon: None,
+            kind: MenuItemKind::Action,
+            shortcut: None,
+            badge: None,
+            progress: None,
             accessibility: AccessibilityMetadata::default(),
-            symbol: None, subtitle: None, tooltip: None, alternate: None, opens: None, role: None,
+            symbol: None,
+            subtitle: None,
+            tooltip: None,
+            alternate: None,
+            opens: None,
+            role: None,
         }
     }
 
@@ -339,25 +419,72 @@ impl MenuItem {
         item
     }
 
-    pub fn radio(id: impl Into<String>, title: impl Into<String>, group: impl Into<String>, selected: bool) -> Self {
+    pub fn radio(
+        id: impl Into<String>,
+        title: impl Into<String>,
+        group: impl Into<String>,
+        selected: bool,
+    ) -> Self {
         let mut item = Self::action(id, title);
-        item.kind = MenuItemKind::Radio { selected, group: Some(group.into()) };
+        item.kind = MenuItemKind::Radio {
+            selected,
+            group: Some(group.into()),
+        };
         item
     }
 
-    pub fn disabled(mut self) -> Self { self.enabled = false; self }
-    pub fn with_shortcut(mut self, shortcut: impl Into<String>) -> Self { self.shortcut = Some(shortcut.into()); self }
-    pub fn with_badge(mut self, badge: impl Into<String>) -> Self { self.badge = Some(badge.into()); self }
-    pub fn with_progress(mut self, percent: u8) -> Self { self.progress = Some(ProgressValue::new(percent)); self }
-    pub fn with_icon(mut self, icon: RgbaIcon) -> Self { self.icon = Some(icon); self }
-    pub fn with_accessibility(mut self, metadata: AccessibilityMetadata) -> Self { self.accessibility = metadata.bounded(); self }
-    pub fn with_symbol(mut self, symbol: Symbol) -> Self { self.symbol = Some(symbol); self }
-    pub fn with_subtitle(mut self, subtitle: impl Into<String>) -> Self { self.subtitle = Some(subtitle.into()); self }
-    pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self { self.tooltip = Some(tooltip.into()); self }
-    pub fn with_alternate(mut self, alternate: Alternate) -> Self { self.alternate = Some(alternate); self }
-    pub fn opens(mut self, opens: Opens) -> Self { self.opens = Some(opens); self }
-    pub fn primary(mut self) -> Self { self.role = Some(Role::Primary); self }
-    pub fn destructive(mut self) -> Self { self.role = Some(Role::Destructive); self }
+    pub fn disabled(mut self) -> Self {
+        self.enabled = false;
+        self
+    }
+    pub fn with_shortcut(mut self, shortcut: impl Into<String>) -> Self {
+        self.shortcut = Some(shortcut.into());
+        self
+    }
+    pub fn with_badge(mut self, badge: impl Into<String>) -> Self {
+        self.badge = Some(badge.into());
+        self
+    }
+    pub fn with_progress(mut self, percent: u8) -> Self {
+        self.progress = Some(ProgressValue::new(percent));
+        self
+    }
+    pub fn with_icon(mut self, icon: RgbaIcon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+    pub fn with_accessibility(mut self, metadata: AccessibilityMetadata) -> Self {
+        self.accessibility = metadata.bounded();
+        self
+    }
+    pub fn with_symbol(mut self, symbol: Symbol) -> Self {
+        self.symbol = Some(symbol);
+        self
+    }
+    pub fn with_subtitle(mut self, subtitle: impl Into<String>) -> Self {
+        self.subtitle = Some(subtitle.into());
+        self
+    }
+    pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+    pub fn with_alternate(mut self, alternate: Alternate) -> Self {
+        self.alternate = Some(alternate);
+        self
+    }
+    pub fn opens(mut self, opens: Opens) -> Self {
+        self.opens = Some(opens);
+        self
+    }
+    pub fn primary(mut self) -> Self {
+        self.role = Some(Role::Primary);
+        self
+    }
+    pub fn destructive(mut self) -> Self {
+        self.role = Some(Role::Destructive);
+        self
+    }
 }
 
 /// A full-color status-item icon. `rgba` is straight (non-premultiplied)
@@ -409,14 +536,27 @@ pub struct StatusMark {
 impl StatusMark {
     pub fn new(symbol: Symbol, letters: impl Into<String>) -> Self {
         Self {
-            symbol, template_icon: None, letters: letters.into(), tone: MarkTone::Normal,
-            text: None, accessibility_label: None,
+            symbol,
+            template_icon: None,
+            letters: letters.into(),
+            tone: MarkTone::Normal,
+            text: None,
+            accessibility_label: None,
         }
     }
 
-    pub fn with_tone(mut self, tone: MarkTone) -> Self { self.tone = tone; self }
-    pub fn with_text(mut self, text: impl Into<String>) -> Self { self.text = Some(text.into()); self }
-    pub fn with_template_icon(mut self, icon: AlphaIcon) -> Self { self.template_icon = Some(icon); self }
+    pub fn with_tone(mut self, tone: MarkTone) -> Self {
+        self.tone = tone;
+        self
+    }
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
+    }
+    pub fn with_template_icon(mut self, icon: AlphaIcon) -> Self {
+        self.template_icon = Some(icon);
+        self
+    }
 }
 
 /// One complete rendered state of the status item and its menu.
@@ -476,7 +616,10 @@ struct RenderFailure {
 
 impl RenderFailure {
     fn native(operation: RenderOperation) -> Self {
-        Self { error: RenderError::Native, operation }
+        Self {
+            error: RenderError::Native,
+            operation,
+        }
     }
 }
 
@@ -486,32 +629,48 @@ impl MenuModel {
     /// Invalid snapshots leave the last rendered menu and its routes intact.
     pub fn validate(&self) -> Result<(), ModelError> {
         fn icon_valid(icon: &RgbaIcon) -> bool {
-            icon.width > 0 && icon.height > 0
-                && icon.width <= MAX_ICON_DIMENSION && icon.height <= MAX_ICON_DIMENSION
+            icon.width > 0
+                && icon.height > 0
+                && icon.width <= MAX_ICON_DIMENSION
+                && icon.height <= MAX_ICON_DIMENSION
                 && u64::from(icon.width) * u64::from(icon.height) * 4 == icon.rgba.len() as u64
         }
         fn id_valid(id: &str) -> bool {
             !id.is_empty() && id.len() <= MAX_ACTION_ID_BYTES && !id.chars().any(char::is_control)
         }
         fn walk(
-            nodes: &[MenuNode], depth: usize, count: &mut usize,
+            nodes: &[MenuNode],
+            depth: usize,
+            count: &mut usize,
             selected_groups: &mut HashSet<String>,
         ) -> Result<(), ModelError> {
-            if depth > MAX_MENU_DEPTH { return Err(ModelError::TooDeep); }
+            if depth > MAX_MENU_DEPTH {
+                return Err(ModelError::TooDeep);
+            }
             for node in nodes {
                 *count += 1;
-                if *count > MAX_MENU_NODES { return Err(ModelError::TooManyNodes); }
+                if *count > MAX_MENU_NODES {
+                    return Err(ModelError::TooManyNodes);
+                }
                 let (id, icon) = match node {
                     MenuNode::Item { id, icon, .. } => (id, icon),
                     MenuNode::Interactive { item } => {
-                        if let MenuItemKind::Radio { selected: true, group: Some(group) } = &item.kind {
+                        if let MenuItemKind::Radio {
+                            selected: true,
+                            group: Some(group),
+                        } = &item.kind
+                        {
                             if !selected_groups.insert(group.clone()) {
                                 return Err(ModelError::AmbiguousRadioGroup);
                             }
                         }
                         // Alternates share their item's slot in the node
                         // budget, as on the wire.
-                        if item.alternate.as_ref().is_some_and(|alternate| !id_valid(&alternate.id)) {
+                        if item
+                            .alternate
+                            .as_ref()
+                            .is_some_and(|alternate| !id_valid(&alternate.id))
+                        {
                             return Err(ModelError::InvalidActionId);
                         }
                         (&item.id, &item.icon)
@@ -520,7 +679,9 @@ impl MenuModel {
                         walk(items, depth + 1, count, selected_groups)?;
                         continue;
                     }
-                    MenuNode::Separator | MenuNode::Header { .. } | MenuNode::Status { .. } => continue,
+                    MenuNode::Separator | MenuNode::Header { .. } | MenuNode::Status { .. } => {
+                        continue
+                    }
                 };
                 if let Some(id) = id {
                     if !id_valid(id) {
@@ -552,10 +713,13 @@ impl MenuModel {
     /// item's row and are not counted.
     pub fn node_count(&self) -> usize {
         fn count(nodes: &[MenuNode]) -> usize {
-            nodes.iter().map(|node| match node {
-                MenuNode::Submenu { items, .. } => 1 + count(items),
-                _ => 1,
-            }).sum()
+            nodes
+                .iter()
+                .map(|node| match node {
+                    MenuNode::Submenu { items, .. } => 1 + count(items),
+                    _ => 1,
+                })
+                .sum()
         }
         count(&self.nodes)
     }
@@ -567,28 +731,47 @@ impl MenuModel {
     /// shown, so an oversized menu is visible instead of frozen.
     pub fn fit_to_budget(&self) -> Option<MenuModel> {
         fn total(nodes: &[MenuNode]) -> usize {
-            nodes.iter().map(|node| match node {
-                MenuNode::Submenu { items, .. } => 1 + total(items),
-                _ => 1,
-            }).sum()
+            nodes
+                .iter()
+                .map(|node| match node {
+                    MenuNode::Submenu { items, .. } => 1 + total(items),
+                    _ => 1,
+                })
+                .sum()
         }
         fn deepest(nodes: &[MenuNode], depth: usize) -> usize {
-            nodes.iter().map(|node| match node {
-                MenuNode::Submenu { items, .. } => deepest(items, depth + 1),
-                _ => depth,
-            }).max().unwrap_or(depth)
+            nodes
+                .iter()
+                .map(|node| match node {
+                    MenuNode::Submenu { items, .. } => deepest(items, depth + 1),
+                    _ => depth,
+                })
+                .max()
+                .unwrap_or(depth)
         }
         fn take(nodes: &[MenuNode], depth: usize, budget: &mut usize) -> Vec<MenuNode> {
             let mut kept = Vec::new();
             for node in nodes {
-                if *budget == 0 { break; }
+                if *budget == 0 {
+                    break;
+                }
                 match node {
-                    MenuNode::Submenu { title, items, symbol } => {
-                        if depth + 1 > MAX_MENU_DEPTH { continue; }
+                    MenuNode::Submenu {
+                        title,
+                        items,
+                        symbol,
+                    } => {
+                        if depth + 1 > MAX_MENU_DEPTH {
+                            continue;
+                        }
                         *budget -= 1;
                         let items = take(items, depth + 1, budget);
                         if !items.is_empty() {
-                            kept.push(MenuNode::Submenu { title: title.clone(), items, symbol: *symbol });
+                            kept.push(MenuNode::Submenu {
+                                title: title.clone(),
+                                items,
+                                symbol: *symbol,
+                            });
                         } else {
                             *budget += 1;
                         }
@@ -610,10 +793,16 @@ impl MenuModel {
             return None;
         }
         let quit = match self.nodes.last() {
-            Some(node @ MenuNode::Item { id: Some(id), .. }) if id == QUIT_ACTION_ID => Some(node.clone()),
+            Some(node @ MenuNode::Item { id: Some(id), .. }) if id == QUIT_ACTION_ID => {
+                Some(node.clone())
+            }
             _ => None,
         };
-        let body = if quit.is_some() { &self.nodes[..self.nodes.len() - 1] } else { &self.nodes[..] };
+        let body = if quit.is_some() {
+            &self.nodes[..self.nodes.len() - 1]
+        } else {
+            &self.nodes[..]
+        };
         let (header, body) = match body.first() {
             Some(node @ MenuNode::Header { .. }) => (Some(node.clone()), &body[1..]),
             _ => (None, body),
@@ -627,16 +816,24 @@ impl MenuModel {
         let warning = nodes.len();
         nodes.extend(kept);
         if let Some(quit) = quit {
-            if !matches!(nodes.last(), Some(MenuNode::Separator)) { nodes.push(MenuNode::Separator); }
+            if !matches!(nodes.last(), Some(MenuNode::Separator)) {
+                nodes.push(MenuNode::Separator);
+            }
             nodes.push(quit);
         }
         let shown = total(&nodes);
-        nodes.insert(warning, MenuNode::status(
-            Symbol::StatusAttention,
-            "Menu too large",
-            Some(format!("Showing {shown} of {rows} rows")),
-        ));
-        Some(MenuModel { nodes, ..self.clone() })
+        nodes.insert(
+            warning,
+            MenuNode::status(
+                Symbol::StatusAttention,
+                "Menu too large",
+                Some(format!("Showing {shown} of {rows} rows")),
+            ),
+        );
+        Some(MenuModel {
+            nodes,
+            ..self.clone()
+        })
     }
 
     /// Set the v2 mark. Replaces any v1 `title`.
@@ -671,7 +868,9 @@ pub trait Host: Send + Sync + 'static {
     /// that use the same internal tray ID. Hosts own path validation and must
     /// retain the directory for the lifetime of the companion. Other platforms
     /// ignore the directory. The default preserves existing Rust consumers.
-    fn tray_icon_directory(&self) -> Option<std::path::PathBuf> { None }
+    fn tray_icon_directory(&self) -> Option<std::path::PathBuf> {
+        None
+    }
     /// Fallible snapshot hook used by the refresh coordinator. Existing hosts
     /// keep their infallible implementation; new hosts can return a typed
     /// error and optionally provide a safe degraded model.
@@ -772,12 +971,17 @@ struct RefreshState {
 
 impl RefreshState {
     fn new() -> Self {
-        Self { pending: Mutex::new(PendingRefresh::default()), cv: Condvar::new() }
+        Self {
+            pending: Mutex::new(PendingRefresh::default()),
+            cv: Condvar::new(),
+        }
     }
 
     fn request(&self) {
         let mut pending = self.pending.lock().expect("refresh state lock poisoned");
-        if pending.stopping { return; }
+        if pending.stopping {
+            return;
+        }
         pending.generation = pending.generation.wrapping_add(1);
         pending.requested = true;
         self.cv.notify_one();
@@ -797,16 +1001,24 @@ impl RefreshState {
     fn report_render_error(&self, error: RenderFailure) {
         // Wake the worker to report the error, without requesting a new render.
         // A persistent failure must not cause an immediate snapshot/retry loop.
-        self.pending.lock().expect("refresh state lock poisoned").render_error = Some(error);
+        self.pending
+            .lock()
+            .expect("refresh state lock poisoned")
+            .render_error = Some(error);
         self.cv.notify_one();
     }
 
     fn next(&self, interval: Duration) -> Option<(u64, Option<RenderFailure>)> {
         let pending = self.pending.lock().expect("refresh state lock poisoned");
-        let (mut pending, timeout) = self.cv.wait_timeout_while(pending, interval, |pending| {
-            !pending.requested && !pending.stopping && pending.render_error.is_none()
-        }).expect("refresh state lock poisoned");
-        if pending.stopping { return None; }
+        let (mut pending, timeout) = self
+            .cv
+            .wait_timeout_while(pending, interval, |pending| {
+                !pending.requested && !pending.stopping && pending.render_error.is_none()
+            })
+            .expect("refresh state lock poisoned");
+        if pending.stopping {
+            return None;
+        }
         // Error delivery does not consume a real pending invalidation. The
         // worker reports it first, then waits or handles that queued snapshot.
         if let Some(failure) = pending.render_error.take() {
@@ -846,12 +1058,16 @@ impl RefreshController {
     }
 
     fn handle(&self) -> RefreshHandle {
-        RefreshHandle { state: self.state.clone() }
+        RefreshHandle {
+            state: self.state.clone(),
+        }
     }
 
     fn start(&self, app: AppHandle, rendered: Arc<Mutex<RenderedMenu>>) {
         let mut owned_worker = self.worker.lock().expect("refresh worker lock poisoned");
-        if owned_worker.is_some() { return; }
+        if owned_worker.is_some() {
+            return;
+        }
         let host = self.host.clone();
         let state = self.state.clone();
         let interval = self.interval.max(Duration::from_secs(1));
@@ -866,27 +1082,46 @@ impl RefreshController {
                     host.render_failed_at(failure.error, failure.operation);
                     continue;
                 }
-                let context = SnapshotContext { state: state.clone(), generation };
+                let context = SnapshotContext {
+                    state: state.clone(),
+                    generation,
+                };
                 let result = host.snapshot_with_context(&context);
-                if context.is_cancelled() { continue; }
+                if context.is_cancelled() {
+                    continue;
+                }
                 // Error fallbacks can themselves do IO; keep them here, never
                 // inside the queued main-thread closure.
                 let model = match result {
                     Ok(model) => Some(model),
                     Err(error) => host.snapshot_failed(&error),
                 };
-                if context.is_cancelled() { continue; }
-                let Some(mut model) = model else { continue; };
+                if context.is_cancelled() {
+                    continue;
+                }
+                let Some(mut model) = model else {
+                    continue;
+                };
                 match model.validate() {
                     Ok(()) => shortened = false,
                     Err(error) => {
                         // An oversized menu renders cut down with a visible
                         // warning row instead of freezing on the last good one.
-                        let fitted = model.fit_to_budget().filter(|fitted| fitted.validate().is_ok());
+                        let fitted = model
+                            .fit_to_budget()
+                            .filter(|fitted| fitted.validate().is_ok());
                         match fitted {
-                            Some(fitted) if matches!(error, ModelError::TooManyNodes | ModelError::TooDeep) => {
+                            Some(fitted)
+                                if matches!(
+                                    error,
+                                    ModelError::TooManyNodes | ModelError::TooDeep
+                                ) =>
+                            {
                                 if !shortened {
-                                    host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
+                                    host.render_failed_at(
+                                        RenderError::Model(error),
+                                        RenderOperation::Validate,
+                                    );
                                     eprintln!(
                                         "desktop-foundation: the menu has more than {MAX_MENU_NODES} rows or {MAX_MENU_DEPTH} levels; showing a shortened menu"
                                     );
@@ -895,7 +1130,10 @@ impl RefreshController {
                                 model = fitted;
                             }
                             _ => {
-                                host.render_failed_at(RenderError::Model(error), RenderOperation::Validate);
+                                host.render_failed_at(
+                                    RenderError::Model(error),
+                                    RenderOperation::Validate,
+                                );
                                 continue;
                             }
                         }
@@ -904,7 +1142,9 @@ impl RefreshController {
                 {
                     let mut pending = mailbox.lock().expect("render mailbox lock poisoned");
                     pending.latest = Some((generation, model));
-                    if pending.scheduled { continue; }
+                    if pending.scheduled {
+                        continue;
+                    }
                     pending.scheduled = true;
                 }
                 let target = app.clone();
@@ -912,19 +1152,27 @@ impl RefreshController {
                 let mailbox_for_ui = mailbox.clone();
                 let rendered = rendered.clone();
                 let rendered_host = host.clone();
-                if app.run_on_main_thread(move || {
-                    let next = {
-                        let mut pending = mailbox_for_ui.lock().expect("render mailbox lock poisoned");
-                        pending.scheduled = false;
-                        pending.latest.take()
-                    };
-                    let Some((generation, model)) = next else { return; };
-                    if !state_for_ui.is_current(generation) { return; }
-                    match apply_model(&target, &model, &rendered) {
-                        Ok(()) => rendered_host.model_rendered(&target),
-                        Err(error) => state_for_ui.report_render_error(error),
-                    }
-                }).is_err() {
+                if app
+                    .run_on_main_thread(move || {
+                        let next = {
+                            let mut pending =
+                                mailbox_for_ui.lock().expect("render mailbox lock poisoned");
+                            pending.scheduled = false;
+                            pending.latest.take()
+                        };
+                        let Some((generation, model)) = next else {
+                            return;
+                        };
+                        if !state_for_ui.is_current(generation) {
+                            return;
+                        }
+                        match apply_model(&target, &model, &rendered) {
+                            Ok(()) => rendered_host.model_rendered(&target),
+                            Err(error) => state_for_ui.report_render_error(error),
+                        }
+                    })
+                    .is_err()
+                {
                     let mut pending = mailbox.lock().expect("render mailbox lock poisoned");
                     pending.scheduled = false;
                     pending.latest = None;
@@ -937,7 +1185,12 @@ impl RefreshController {
     fn stop(&self) {
         self.state.stop();
         self.host.cancel_snapshot();
-        if let Some(worker) = self.worker.lock().expect("refresh worker lock poisoned").take() {
+        if let Some(worker) = self
+            .worker
+            .lock()
+            .expect("refresh worker lock poisoned")
+            .take()
+        {
             if worker.thread().id() != std::thread::current().id() {
                 let _ = worker.join();
             }
@@ -958,7 +1211,10 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Options { refresh: Duration::from_secs(10), companion_window: false }
+        Options {
+            refresh: Duration::from_secs(10),
+            companion_window: false,
+        }
     }
 }
 
@@ -986,7 +1242,11 @@ struct MenuBuild {
 
 impl MenuBuild {
     fn new(serial: u64) -> Self {
-        Self { serial, sequence: 0, routes: HashMap::new() }
+        Self {
+            serial,
+            sequence: 0,
+            routes: HashMap::new(),
+        }
     }
 
     fn route(&mut self, command: Option<&String>, enabled: bool) -> String {
@@ -995,11 +1255,14 @@ impl MenuBuild {
         // identity remains stable. Queued events from a replaced menu cannot
         // trigger a command belonging to its replacement.
         let native_id = format!("foundation.menu.{}.{}", self.serial, self.sequence);
-        self.routes.insert(native_id.clone(), MenuRoute {
-            command: command.filter(|_| enabled).cloned(),
-            check: None,
-            mixed: false,
-        });
+        self.routes.insert(
+            native_id.clone(),
+            MenuRoute {
+                command: command.filter(|_| enabled).cloned(),
+                check: None,
+                mixed: false,
+            },
+        );
         native_id
     }
 }
@@ -1015,31 +1278,55 @@ fn build_items(
             MenuNode::Separator => {
                 items.push(Box::new(PredefinedMenuItem::separator(handle)?));
             }
-            MenuNode::Item { id, title, enabled, icon } => {
+            MenuNode::Item {
+                id,
+                title,
+                enabled,
+                icon,
+            } => {
                 let enabled = *enabled && id.is_some();
                 let item_id = build.route(id.as_ref(), enabled);
                 let title = bounded_text(title, MAX_MENU_TITLE_CHARS);
                 match icon {
                     Some(icon) => {
                         let image = tauri::image::Image::new_owned(
-                            icon.rgba.clone(), icon.width, icon.height,
+                            icon.rgba.clone(),
+                            icon.width,
+                            icon.height,
                         );
                         items.push(Box::new(tauri::menu::IconMenuItem::with_id(
-                            handle, item_id, title, enabled, Some(image), None::<&str>,
+                            handle,
+                            item_id,
+                            title,
+                            enabled,
+                            Some(image),
+                            None::<&str>,
                         )?));
                     }
                     None => items.push(Box::new(TauriMenuItem::with_id(
-                        handle, item_id, title, enabled, None::<&str>,
+                        handle,
+                        item_id,
+                        title,
+                        enabled,
+                        None::<&str>,
                     )?)),
                 }
             }
             MenuNode::Header { title } => {
                 let item_id = build.route(None, false);
                 items.push(Box::new(TauriMenuItem::with_id(
-                    handle, item_id, bounded_text(title, MAX_MENU_TITLE_CHARS), false, None::<&str>,
+                    handle,
+                    item_id,
+                    bounded_text(title, MAX_MENU_TITLE_CHARS),
+                    false,
+                    None::<&str>,
                 )?));
             }
-            MenuNode::Status { symbol, title, detail } => {
+            MenuNode::Status {
+                symbol,
+                title,
+                detail,
+            } => {
                 let item_id = build.route(None, false);
                 let text = compose_title(TitleParts {
                     prefix: symbol.fallback(),
@@ -1047,7 +1334,13 @@ fn build_items(
                     subtitle: detail.as_deref(),
                     ..TitleParts::default()
                 });
-                items.push(Box::new(TauriMenuItem::with_id(handle, item_id, text, false, None::<&str>)?));
+                items.push(Box::new(TauriMenuItem::with_id(
+                    handle,
+                    item_id,
+                    text,
+                    false,
+                    None::<&str>,
+                )?));
             }
             MenuNode::Interactive { item } => {
                 let enabled = item.enabled && item.id.is_some();
@@ -1055,23 +1348,40 @@ fn build_items(
                 let title = render_item_title(item);
                 // Never truncate into a different shortcut. Tauri ignores an
                 // invalid accelerator; drop oversized values before parsing.
-                let accelerator = item.shortcut.as_deref()
+                let accelerator = item
+                    .shortcut
+                    .as_deref()
                     .filter(|value| value.len() <= MAX_MENU_SHORTCUT_CHARS);
                 let checked = match &item.kind {
                     MenuItemKind::Toggle { checked }
                     | MenuItemKind::Check { checked }
-                    | MenuItemKind::Radio { selected: checked, .. } => Some(*checked),
+                    | MenuItemKind::Radio {
+                        selected: checked, ..
+                    } => Some(*checked),
                     MenuItemKind::State { state } => Some(*state == ItemState::On),
                     MenuItemKind::Action => None,
                 };
                 match checked {
                     Some(checked) => {
                         let check = CheckMenuItem::with_id(
-                            handle, item_id.clone(), title, enabled, checked, accelerator,
+                            handle,
+                            item_id.clone(),
+                            title,
+                            enabled,
+                            checked,
+                            accelerator,
                         )?;
-                        let route = build.routes.get_mut(&item_id).expect("registered menu route");
+                        let route = build
+                            .routes
+                            .get_mut(&item_id)
+                            .expect("registered menu route");
                         route.check = Some((check.clone(), checked));
-                        route.mixed = matches!(item.kind, MenuItemKind::State { state: ItemState::Mixed });
+                        route.mixed = matches!(
+                            item.kind,
+                            MenuItemKind::State {
+                                state: ItemState::Mixed
+                            }
+                        );
                         if matches!(item.kind, MenuItemKind::Radio { selected: true, .. }) {
                             // Choosing the selected radio is a no-op, never a
                             // request to deselect the group's current value.
@@ -1082,20 +1392,35 @@ fn build_items(
                     None => match &item.icon {
                         Some(icon) => {
                             let image = tauri::image::Image::new_owned(
-                                icon.rgba.clone(), icon.width, icon.height,
+                                icon.rgba.clone(),
+                                icon.width,
+                                icon.height,
                             );
                             items.push(Box::new(tauri::menu::IconMenuItem::with_id(
-                                handle, item_id, title, enabled, Some(image), accelerator,
+                                handle,
+                                item_id,
+                                title,
+                                enabled,
+                                Some(image),
+                                accelerator,
                             )?));
                         }
                         None => items.push(Box::new(TauriMenuItem::with_id(
-                            handle, item_id, title, enabled, accelerator,
+                            handle,
+                            item_id,
+                            title,
+                            enabled,
+                            accelerator,
                         )?)),
                     },
                 }
                 // macOS shows an alternate in place of its item while ⌥ is
                 // held; the post-pass pairs them. Other platforms drop it.
-                if let Some(alternate) = item.alternate.as_ref().filter(|_| menu_plan::BUILDS_ALTERNATES) {
+                if let Some(alternate) = item
+                    .alternate
+                    .as_ref()
+                    .filter(|_| menu_plan::BUILDS_ALTERNATES)
+                {
                     let alternate_id = build.route(Some(&alternate.id), enabled);
                     let title = compose_title(TitleParts {
                         prefix: alternate.symbol.and_then(Symbol::fallback),
@@ -1103,16 +1428,29 @@ fn build_items(
                         ..TitleParts::default()
                     });
                     items.push(Box::new(TauriMenuItem::with_id(
-                        handle, alternate_id, title, enabled, None::<&str>,
+                        handle,
+                        alternate_id,
+                        title,
+                        enabled,
+                        None::<&str>,
                     )?));
                 }
             }
-            MenuNode::Submenu { title, items: children, .. } => {
+            MenuNode::Submenu {
+                title,
+                items: children,
+                ..
+            } => {
                 let built = build_items(handle, children, build)?;
-                let refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
-                    built.iter().map(|item| item.as_ref() as &dyn IsMenuItem<tauri::Wry>).collect();
+                let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = built
+                    .iter()
+                    .map(|item| item.as_ref() as &dyn IsMenuItem<tauri::Wry>)
+                    .collect();
                 items.push(Box::new(Submenu::with_items(
-                    handle, bounded_text(title, MAX_MENU_TITLE_CHARS), true, &refs,
+                    handle,
+                    bounded_text(title, MAX_MENU_TITLE_CHARS),
+                    true,
+                    &refs,
                 )?));
             }
         }
@@ -1170,7 +1508,13 @@ fn compose_title(parts: TitleParts<'_>) -> String {
 
 fn render_item_title(item: &MenuItem) -> String {
     compose_title(TitleParts {
-        state: matches!(item.kind, MenuItemKind::State { state: ItemState::Mixed }).then_some("–"),
+        state: matches!(
+            item.kind,
+            MenuItemKind::State {
+                state: ItemState::Mixed
+            }
+        )
+        .then_some("–"),
         prefix: item.symbol.and_then(Symbol::fallback),
         title: &item.title,
         subtitle: item.subtitle.as_deref(),
@@ -1183,34 +1527,48 @@ fn render_item_title(item: &MenuItem) -> String {
 fn bounded_text(value: &str, max_chars: usize) -> String {
     // Labels are one line. Remove control characters that could alter native
     // menu layout or present misleading shortcut text.
-    value.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).take(max_chars).collect()
+    value
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .take(max_chars)
+        .collect()
 }
 
-fn build_menu(handle: &AppHandle, nodes: &[MenuNode], serial: u64)
-    -> tauri::Result<(Menu<tauri::Wry>, HashMap<String, MenuRoute>)>
-{
+fn build_menu(
+    handle: &AppHandle,
+    nodes: &[MenuNode],
+    serial: u64,
+) -> tauri::Result<(Menu<tauri::Wry>, HashMap<String, MenuRoute>)> {
     let mut build = MenuBuild::new(serial);
     let items = build_items(handle, nodes, &mut build)?;
-    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
-        items.iter().map(|item| item.as_ref() as &dyn IsMenuItem<tauri::Wry>).collect();
+    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items
+        .iter()
+        .map(|item| item.as_ref() as &dyn IsMenuItem<tauri::Wry>)
+        .collect();
     Ok((Menu::with_items(handle, &refs)?, build.routes))
 }
 
 fn apply_model(
-    handle: &AppHandle, model: &MenuModel, rendered: &Mutex<RenderedMenu>,
+    handle: &AppHandle,
+    model: &MenuModel,
+    rendered: &Mutex<RenderedMenu>,
 ) -> Result<(), RenderFailure> {
     let serial = {
         let mut rendered = rendered.lock().expect("rendered menu lock poisoned");
-        if rendered.model.as_ref() == Some(model) { return Ok(()); }
+        if rendered.model.as_ref() == Some(model) {
+            return Ok(());
+        }
         rendered.serial = rendered.serial.wrapping_add(1);
         rendered.serial
     };
     // Models are validated on the worker before they reach the UI thread.
-    let tray = handle.tray_by_id(TRAY_ID)
+    let tray = handle
+        .tray_by_id(TRAY_ID)
         .ok_or(RenderFailure::native(RenderOperation::LookupTray))?;
     let (menu, routes) = build_menu(handle, &model.nodes, serial)
         .map_err(|_| RenderFailure::native(RenderOperation::BuildMenu))?;
-    tray.set_menu(Some(menu)).map_err(|_| RenderFailure::native(RenderOperation::SetMenu))?;
+    tray.set_menu(Some(menu))
+        .map_err(|_| RenderFailure::native(RenderOperation::SetMenu))?;
     {
         let mut rendered = rendered.lock().expect("rendered menu lock poisoned");
         rendered.routes = routes;
@@ -1219,14 +1577,24 @@ fn apply_model(
         rendered.model = None;
     }
     let (title, icon) = mark_presentation(model);
-    tray.set_title(title.as_deref().map(|title| bounded_text(title, MAX_MENU_TITLE_CHARS)))
-        .map_err(|_| RenderFailure::native(RenderOperation::SetTitle))?;
-    tray.set_tooltip(model.tooltip.as_deref().map(|tip| bounded_text(tip, MAX_MENU_TITLE_CHARS)))
-        .map_err(|_| RenderFailure::native(RenderOperation::SetTooltip))?;
-    let image = icon.as_ref().map(|icon|
-        tauri::image::Image::new_owned(icon.rgba.clone(), icon.width, icon.height)
-    );
-    tray.set_icon(image).map_err(|_| RenderFailure::native(RenderOperation::SetIcon))?;
+    tray.set_title(
+        title
+            .as_deref()
+            .map(|title| bounded_text(title, MAX_MENU_TITLE_CHARS)),
+    )
+    .map_err(|_| RenderFailure::native(RenderOperation::SetTitle))?;
+    tray.set_tooltip(
+        model
+            .tooltip
+            .as_deref()
+            .map(|tip| bounded_text(tip, MAX_MENU_TITLE_CHARS)),
+    )
+    .map_err(|_| RenderFailure::native(RenderOperation::SetTooltip))?;
+    let image = icon
+        .as_ref()
+        .map(|icon| tauri::image::Image::new_owned(icon.rgba.clone(), icon.width, icon.height));
+    tray.set_icon(image)
+        .map_err(|_| RenderFailure::native(RenderOperation::SetIcon))?;
     #[cfg(target_os = "macos")]
     decorate_macos(&tray, model);
     rendered.lock().expect("rendered menu lock poisoned").model = Some(model.clone());
@@ -1237,13 +1605,23 @@ fn apply_model(
 /// the text forms muda already shows, so they are not render errors.
 #[cfg(target_os = "macos")]
 fn decorate_macos(tray: &tauri::tray::TrayIcon<tauri::Wry>, model: &MenuModel) {
-    let plan = menu_plan::plan(&model.nodes, macos_menu::capabilities(), menu_plan::BUILDS_ALTERNATES);
+    let plan = menu_plan::plan(
+        &model.nodes,
+        macos_menu::capabilities(),
+        menu_plan::BUILDS_ALTERNATES,
+    );
     let mark = model.status_mark.clone();
-    let label = mark.as_ref().and_then(|mark| mark.accessibility_label.clone())
+    let label = mark
+        .as_ref()
+        .and_then(|mark| mark.accessibility_label.clone())
         .or_else(|| model.tooltip.clone());
     let _ = tray.with_inner_tray_icon(move |inner| {
-        let Some(mtm) = objc2::MainThreadMarker::new() else { return };
-        let Some(status) = inner.ns_status_item() else { return };
+        let Some(mtm) = objc2::MainThreadMarker::new() else {
+            return;
+        };
+        let Some(status) = inner.ns_status_item() else {
+            return;
+        };
         macos_menu::decorate_status_menu(&status, &plan, mtm);
         macos_menu::apply_mark(&status, mark.as_ref(), label.as_deref(), mtm);
     });
@@ -1281,7 +1659,11 @@ pub fn mark_icon(mark: &StatusMark, art: Option<&RgbaIcon>) -> RgbaIcon {
     let (width, height) = (icon.width as i64, icon.height as i64);
     match mark.tone {
         MarkTone::Attention | MarkTone::Error => {
-            let color = if mark.tone == MarkTone::Error { [255, 59, 48] } else { [255, 149, 0] };
+            let color = if mark.tone == MarkTone::Error {
+                [255, 59, 48]
+            } else {
+                [255, 149, 0]
+            };
             let radius = (width.min(height) / 5).max(2);
             let (cx, cy) = (width - radius - 1, height - radius - 1);
             for y in 0..height {
@@ -1347,15 +1729,27 @@ fn loading_model(default_icon: Option<&tauri::image::Image<'_>>) -> MenuModel {
     // later icon update. This alone does not establish registration success:
     // tray-icon defers NIM_ADD failures, so readiness still awaits full render.
     #[cfg(target_os = "windows")]
-    let icon = Some(default_icon.map(|image| RgbaIcon {
-        rgba: image.rgba().to_vec(), width: image.width(), height: image.height(),
-    }).unwrap_or_else(|| protocol::monogram("Hr")));
+    let icon = Some(
+        default_icon
+            .map(|image| RgbaIcon {
+                rgba: image.rgba().to_vec(),
+                width: image.width(),
+                height: image.height(),
+            })
+            .unwrap_or_else(|| protocol::monogram("Hr")),
+    );
     #[cfg(not(target_os = "windows"))]
-    let icon = { let _ = default_icon; None };
+    let icon = {
+        let _ = default_icon;
+        None
+    };
     MenuModel {
         title: Some("…".into()),
         icon,
-        nodes: vec![MenuNode::disabled("Loading status…"), MenuNode::quit("Quit")],
+        nodes: vec![
+            MenuNode::disabled("Loading status…"),
+            MenuNode::quit("Quit"),
+        ],
         ..MenuModel::default()
     }
 }
@@ -1409,7 +1803,9 @@ pub fn run(
             }
             tray.build(app)?;
             *rendered.lock().expect("rendered menu lock poisoned") = RenderedMenu {
-                serial: 1, model: Some(model), routes,
+                serial: 1,
+                model: Some(model),
+                routes,
             };
             host.started_with_refresh(app.handle(), refresh_handle.clone());
             controller.start(app.handle().clone(), rendered.clone());
@@ -1418,22 +1814,35 @@ pub fn run(
         .on_menu_event(move |app, event| {
             // Only events issued by the currently rendered tray may dispatch.
             // App/window menus and delayed events from replaced trays are ignored.
-            let route = event_rendered.lock().expect("rendered menu lock poisoned")
-                .routes.get(event.id.0.as_str()).cloned();
-            let Some(route) = route else { return; };
+            let route = event_rendered
+                .lock()
+                .expect("rendered menu lock poisoned")
+                .routes
+                .get(event.id.0.as_str())
+                .cloned();
+            let Some(route) = route else {
+                return;
+            };
             if route.mixed {
-                event_rendered.lock().expect("rendered menu lock poisoned").model = None;
+                event_rendered
+                    .lock()
+                    .expect("rendered menu lock poisoned")
+                    .model = None;
             }
             if let Some((check, checked)) = route.check {
                 // Native check items auto-toggle even when the command fails.
                 // The next daemon snapshot, not this click, owns the mark.
                 if check.set_checked(checked).is_err() {
-                    event_controller.state.report_render_error(RenderFailure::native(RenderOperation::SetChecked));
+                    event_controller
+                        .state
+                        .report_render_error(RenderFailure::native(RenderOperation::SetChecked));
                     event_controller.handle().request();
                     return;
                 }
             }
-            let Some(id) = route.command else { return; };
+            let Some(id) = route.command else {
+                return;
+            };
             if id == QUIT_ACTION_ID {
                 app.exit(0);
                 return;
@@ -1459,7 +1868,7 @@ pub fn run(
                 }
             }
         })
-    .build(context)?;
+        .build(context)?;
     app.run(move |_app, event| {
         if matches!(event, tauri::RunEvent::Exit) {
             exit_controller.stop();
@@ -1483,7 +1892,14 @@ mod tests {
         #[cfg(target_os = "windows")]
         {
             assert_eq!(fallback.icon, Some(protocol::monogram("Hr")));
-            assert_eq!(configured.icon, Some(RgbaIcon { rgba: vec![255; 16], width: 2, height: 2 }));
+            assert_eq!(
+                configured.icon,
+                Some(RgbaIcon {
+                    rgba: vec![255; 16],
+                    width: 2,
+                    height: 2
+                })
+            );
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -1508,7 +1924,9 @@ mod tests {
     #[test]
     fn stopped_refresh_handle_ignores_late_requests() {
         let state = Arc::new(RefreshState::new());
-        let handle = RefreshHandle { state: state.clone() };
+        let handle = RefreshHandle {
+            state: state.clone(),
+        };
         handle.stop();
         handle.request();
         assert!(state.pending.lock().unwrap().stopping);
@@ -1534,12 +1952,18 @@ mod tests {
         let state = Arc::new(RefreshState::new());
         state.request();
         let (generation, _) = state.next(Duration::ZERO).unwrap();
-        let context = SnapshotContext { state: state.clone(), generation };
+        let context = SnapshotContext {
+            state: state.clone(),
+            generation,
+        };
         assert!(!context.is_cancelled());
         state.request();
         assert!(context.is_cancelled());
         let (generation, _) = state.next(Duration::ZERO).unwrap();
-        let context = SnapshotContext { state: state.clone(), generation };
+        let context = SnapshotContext {
+            state: state.clone(),
+            generation,
+        };
         state.stop();
         assert!(context.is_cancelled());
     }
@@ -1577,7 +2001,10 @@ mod tests {
         });
         let failure = RenderFailure::native(RenderOperation::SetTooltip);
         state.report_render_error(failure);
-        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), Some((0, Some(failure))));
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Some((0, Some(failure)))
+        );
         assert!(!state.pending.lock().unwrap().requested);
         worker.join().unwrap();
     }
@@ -1586,8 +2013,12 @@ mod tests {
     fn operation_reports_preserve_legacy_host_failure_callback() {
         struct LegacyHost(Mutex<Option<RenderError>>);
         impl Host for LegacyHost {
-            fn snapshot(&self) -> MenuModel { MenuModel::default() }
-            fn render_failed(&self, error: RenderError) { *self.0.lock().unwrap() = Some(error); }
+            fn snapshot(&self) -> MenuModel {
+                MenuModel::default()
+            }
+            fn render_failed(&self, error: RenderError) {
+                *self.0.lock().unwrap() = Some(error);
+            }
         }
         let host = LegacyHost(Mutex::new(None));
         host.render_failed_at(RenderError::Native, RenderOperation::SetTooltip);
@@ -1616,7 +2047,10 @@ mod tests {
     #[test]
     fn menu_validation_allows_repeated_commands_but_bounds_native_work() {
         let mut model = MenuModel {
-            nodes: vec![MenuNode::show_window("Approvals"), MenuNode::show_window("Open")],
+            nodes: vec![
+                MenuNode::show_window("Approvals"),
+                MenuNode::show_window("Open"),
+            ],
             ..MenuModel::default()
         };
         assert_eq!(model.validate(), Ok(()));
@@ -1636,16 +2070,24 @@ mod tests {
     #[test]
     fn invalid_icon_and_contradictory_radio_selection_are_rejected() {
         let mut model = MenuModel {
-            icon: Some(RgbaIcon { width: u32::MAX, height: u32::MAX, rgba: vec![] }),
+            icon: Some(RgbaIcon {
+                width: u32::MAX,
+                height: u32::MAX,
+                rgba: vec![],
+            }),
             ..MenuModel::default()
         };
         assert_eq!(model.validate(), Err(ModelError::InvalidIcon));
         model.icon = None;
         model.nodes = vec![
             MenuNode::interactive(MenuItem::radio("one", "One", "mode", true)),
-            MenuNode::Submenu { title: "More".into(), symbol: None, items: vec![
-                MenuNode::interactive(MenuItem::radio("two", "Two", "mode", true)),
-            ] },
+            MenuNode::Submenu {
+                title: "More".into(),
+                symbol: None,
+                items: vec![MenuNode::interactive(MenuItem::radio(
+                    "two", "Two", "mode", true,
+                ))],
+            },
         ];
         assert_eq!(model.validate(), Err(ModelError::AmbiguousRadioGroup));
     }
@@ -1659,7 +2101,10 @@ mod tests {
         assert_eq!(title.chars().count(), MAX_MENU_TITLE_CHARS);
         assert!(title.ends_with("  12  100%"));
         assert!(title.trim_end_matches("  12  100%").ends_with('…'));
-        assert_eq!(bounded_text("first\nsecond\tthird\0", 30), "first second third ");
+        assert_eq!(
+            bounded_text("first\nsecond\tthird\0", 30),
+            "first second third "
+        );
     }
 
     #[test]
@@ -1674,7 +2119,10 @@ mod tests {
             .with_symbol(Symbol::ActionPermission)
             .opens(Opens::Settings);
         // `action.permission` has no fallback glyph.
-        assert_eq!(render_item_title(&settings), "Open Full Disk Access settings…");
+        assert_eq!(
+            render_item_title(&settings),
+            "Open Full Disk Access settings…"
+        );
         let status = compose_title(TitleParts {
             prefix: Symbol::StatusRunning.fallback(),
             title: "Running",
@@ -1685,7 +2133,10 @@ mod tests {
         let long = MenuItem::action("x", "y".repeat(300)).opens(Opens::Dialog);
         let title = render_item_title(&long);
         assert_eq!(title.chars().count(), MAX_MENU_TITLE_CHARS);
-        assert!(title.ends_with("……"), "the cut mark and the dialog glyph both stay");
+        assert!(
+            title.ends_with("……"),
+            "the cut mark and the dialog glyph both stay"
+        );
     }
 
     #[test]
@@ -1707,7 +2158,11 @@ mod tests {
         assert_eq!(fitted.nodes[0], MenuNode::header("Ghostget"));
         assert_eq!(
             fitted.nodes[1],
-            MenuNode::status(Symbol::StatusAttention, "Menu too large", Some("Showing 255 of 303 rows".into()))
+            MenuNode::status(
+                Symbol::StatusAttention,
+                "Menu too large",
+                Some("Showing 255 of 303 rows".into())
+            )
         );
         assert_eq!(fitted.nodes.len(), MAX_MENU_NODES);
         assert_eq!(fitted.nodes.last(), Some(&MenuNode::quit("Quit Ghostget")));
@@ -1723,14 +2178,18 @@ mod tests {
         for level in 0..=MAX_MENU_DEPTH {
             nested = vec![MenuNode::submenu(format!("Level {level}"), nested)];
         }
-        let mut model = MenuModel::default();
-        model.nodes = vec![MenuNode::item("top", "Top row")];
+        let mut model = MenuModel {
+            nodes: vec![MenuNode::item("top", "Top row")],
+            ..Default::default()
+        };
         model.nodes.extend(nested);
         model.nodes.push(MenuNode::quit("Quit"));
         assert_eq!(model.validate(), Err(ModelError::TooDeep));
         let fitted = model.fit_to_budget().unwrap();
         assert!(fitted.validate().is_ok());
-        assert!(matches!(&fitted.nodes[0], MenuNode::Status { title, .. } if title == "Menu too large"));
+        assert!(
+            matches!(&fitted.nodes[0], MenuNode::Status { title, .. } if title == "Menu too large")
+        );
         assert_eq!(fitted.nodes[1], MenuNode::item("top", "Top row"));
         assert_eq!(fitted.nodes.last(), Some(&MenuNode::quit("Quit")));
     }
@@ -1749,15 +2208,24 @@ mod tests {
         let error = mark_icon(&base.clone().with_tone(MarkTone::Error), None);
         assert_eq!(corner(&error), vec![255, 59, 48, 255]);
         let paused = mark_icon(&base.clone().with_tone(MarkTone::Paused), None);
-        assert!(paused.rgba.chunks_exact(4).zip(normal.rgba.chunks_exact(4))
+        assert!(paused
+            .rgba
+            .chunks_exact(4)
+            .zip(normal.rgba.chunks_exact(4))
             .all(|(dim, full)| dim[3] == full[3] / 2));
-        let glyph = AlphaIcon { alpha: vec![255; 16], width: 4, height: 4 };
+        let glyph = AlphaIcon {
+            alpha: vec![255; 16],
+            width: 4,
+            height: 4,
+        };
         let custom = mark_icon(&base.clone().with_template_icon(glyph), None);
         assert_eq!((custom.width, custom.height), (32, 32));
         let centre = ((16 * 32 + 16) * 4) as usize;
         assert_eq!(&custom.rgba[centre..centre + 3], &[255, 255, 255]);
-        let mut model = MenuModel::default();
-        model.title = Some("Tb".into());
+        let mut model = MenuModel {
+            title: Some("Tb".into()),
+            ..Default::default()
+        };
         model.set_mark(base);
         assert_eq!(model.title, None);
         let (title, icon) = mark_presentation(&model);
@@ -1785,7 +2253,10 @@ mod tests {
         assert_eq!(item.kind, MenuItemKind::Toggle { checked: true });
         assert_eq!(item.progress, Some(ProgressValue { percent: 100 }));
         assert_eq!(render_item_title(&item), "Pause daemon  3  100%");
-        assert!(matches!(MenuNode::interactive(item), MenuNode::Interactive { .. }));
+        assert!(matches!(
+            MenuNode::interactive(item),
+            MenuNode::Interactive { .. }
+        ));
     }
 
     #[test]
@@ -1811,6 +2282,9 @@ mod tests {
             .with_badge(long)
             .with_accessibility(metadata);
         assert!(render_item_title(&item).chars().count() <= MAX_MENU_TITLE_CHARS);
-        assert_eq!(item.accessibility.label.as_ref().map(|v| v.chars().count()), Some(MAX_ACCESSIBILITY_CHARS));
+        assert_eq!(
+            item.accessibility.label.as_ref().map(|v| v.chars().count()),
+            Some(MAX_ACCESSIBILITY_CHARS)
+        );
     }
 }

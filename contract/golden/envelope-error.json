@@ -1,0 +1,1 @@
+{"ok":false,"schema":"hraness.error/1","generatedAt":"2026-09-28T00:00:00.000Z","error":{"code":"owner-unavailable","message":"The example owner is not running.","next":[{"command":"example control serve","why":"Start the owner","audience":"agent"}]}}

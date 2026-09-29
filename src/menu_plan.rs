@@ -25,8 +25,12 @@ pub(crate) struct Capabilities {
 
 impl Capabilities {
     #[cfg(test)]
-    pub const ALL: Capabilities =
-        Capabilities { symbols: true, subtitle: true, badge: true, section_header: true };
+    pub const ALL: Capabilities = Capabilities {
+        symbols: true,
+        subtitle: true,
+        badge: true,
+        section_header: true,
+    };
 }
 
 /// One native row, in the order muda built it.
@@ -67,7 +71,10 @@ impl RowPlan {
 pub(crate) const BUILDS_ALTERNATES: bool = cfg!(target_os = "macos");
 
 fn shortened(value: &str, max: usize) -> String {
-    let value: String = value.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).collect();
+    let value: String = value
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect();
     if value.chars().count() <= max {
         return value;
     }
@@ -88,24 +95,45 @@ pub(crate) fn plan(nodes: &[MenuNode], caps: Capabilities, alternates: bool) -> 
                 header: caps.section_header.then(|| shortened(title, 256)),
                 ..RowPlan::default()
             })),
-            MenuNode::Status { symbol, title, detail } => {
+            MenuNode::Status {
+                symbol,
+                title,
+                detail,
+            } => {
                 let native_image = caps.symbols;
                 let native_subtitle = caps.subtitle && detail.is_some();
                 rows.push(PlanRow::Row(RowPlan {
                     title: Some(compose_title(TitleParts {
-                        prefix: if native_image { None } else { symbol.fallback() },
+                        prefix: if native_image {
+                            None
+                        } else {
+                            symbol.fallback()
+                        },
                         title,
-                        subtitle: if native_subtitle { None } else { detail.as_deref() },
+                        subtitle: if native_subtitle {
+                            None
+                        } else {
+                            detail.as_deref()
+                        },
                         ..TitleParts::default()
                     })),
                     image: native_image.then_some(*symbol),
                     tint: native_image.then(|| symbol.tint()),
-                    subtitle: if native_subtitle { detail.as_deref().map(|d| shortened(d, 80)) } else { None },
+                    subtitle: if native_subtitle {
+                        detail.as_deref().map(|d| shortened(d, 80))
+                    } else {
+                        None
+                    },
                     ..RowPlan::default()
                 }));
             }
             MenuNode::Interactive { item } => {
-                let mixed = matches!(item.kind, MenuItemKind::State { state: ItemState::Mixed });
+                let mixed = matches!(
+                    item.kind,
+                    MenuItemKind::State {
+                        state: ItemState::Mixed
+                    }
+                );
                 // A preview thumbnail from muda wins over the symbol.
                 let image = item.symbol.filter(|_| caps.symbols && item.icon.is_none());
                 let subtitle = item.subtitle.as_deref().filter(|_| caps.subtitle);
@@ -121,10 +149,22 @@ pub(crate) fn plan(nodes: &[MenuNode], caps: Capabilities, alternates: bool) -> 
                         // fallback glyph; native subtitle and badge leave the title.
                         title: Some(compose_title(TitleParts {
                             state: None,
-                            prefix: if image.is_some() { None } else { item.symbol.and_then(Symbol::fallback) },
+                            prefix: if image.is_some() {
+                                None
+                            } else {
+                                item.symbol.and_then(Symbol::fallback)
+                            },
                             title: &item.title,
-                            subtitle: if subtitle.is_some() { None } else { item.subtitle.as_deref() },
-                            badge: if badge.is_some() { None } else { item.badge.as_deref() },
+                            subtitle: if subtitle.is_some() {
+                                None
+                            } else {
+                                item.subtitle.as_deref()
+                            },
+                            badge: if badge.is_some() {
+                                None
+                            } else {
+                                item.badge.as_deref()
+                            },
                             progress: item.progress.map(|progress| progress.percent),
                             opens: item.opens,
                         })),
@@ -143,7 +183,11 @@ pub(crate) fn plan(nodes: &[MenuNode], caps: Capabilities, alternates: bool) -> 
                         let image = alternate.symbol.filter(|_| caps.symbols);
                         rows.push(PlanRow::Row(RowPlan {
                             title: Some(compose_title(TitleParts {
-                                prefix: if image.is_some() { None } else { alternate.symbol.and_then(Symbol::fallback) },
+                                prefix: if image.is_some() {
+                                    None
+                                } else {
+                                    alternate.symbol.and_then(Symbol::fallback)
+                                },
                                 title: &alternate.title,
                                 ..TitleParts::default()
                             })),
@@ -155,7 +199,10 @@ pub(crate) fn plan(nodes: &[MenuNode], caps: Capabilities, alternates: bool) -> 
                 }
             }
             MenuNode::Submenu { items, symbol, .. } => rows.push(PlanRow::Submenu {
-                row: RowPlan { image: symbol.filter(|_| caps.symbols), ..RowPlan::default() },
+                row: RowPlan {
+                    image: symbol.filter(|_| caps.symbols),
+                    ..RowPlan::default()
+                },
                 items: plan(items, caps, alternates),
             }),
         }
@@ -185,7 +232,10 @@ mod tests {
             MenuNode::status(Symbol::StatusRunning, "Running", Some("3 chats on".into())),
             MenuNode::Separator,
             MenuNode::interactive(
-                MenuItem::action("open", "Open dashboard").with_symbol(Symbol::ActionOpen).opens(Opens::Browser).primary(),
+                MenuItem::action("open", "Open dashboard")
+                    .with_symbol(Symbol::ActionOpen)
+                    .opens(Opens::Browser)
+                    .primary(),
             ),
             MenuNode::interactive(
                 MenuItem::action("chat", "Mom")
@@ -193,9 +243,15 @@ mod tests {
                     .with_subtitle("Reply waiting for approval")
                     .with_badge("2")
                     .with_tooltip("Last message 2 minutes ago")
-                    .with_alternate(Alternate::new("chat.copy", "Copy chat ID").with_symbol(Symbol::ActionCopy)),
+                    .with_alternate(
+                        Alternate::new("chat.copy", "Copy chat ID").with_symbol(Symbol::ActionCopy),
+                    ),
             ),
-            MenuNode::interactive(MenuItem::state("pause", "Pause automatic replies", ItemState::Mixed)),
+            MenuNode::interactive(MenuItem::state(
+                "pause",
+                "Pause automatic replies",
+                ItemState::Mixed,
+            )),
             MenuNode::interactive(MenuItem::action("plain", "Plain v1 row")),
             MenuNode::quit("Quit Textbutler"),
         ]
@@ -213,9 +269,15 @@ mod tests {
         assert_eq!(rows[3].title.as_deref(), Some("Open dashboard ↗"));
         assert_eq!(rows[3].image, Some(Symbol::ActionOpen));
         assert_eq!(rows[4].title.as_deref(), Some("Mom"));
-        assert_eq!(rows[4].subtitle.as_deref(), Some("Reply waiting for approval"));
+        assert_eq!(
+            rows[4].subtitle.as_deref(),
+            Some("Reply waiting for approval")
+        );
         assert_eq!(rows[4].badge.as_deref(), Some("2"));
-        assert_eq!(rows[4].tooltip.as_deref(), Some("Last message 2 minutes ago"));
+        assert_eq!(
+            rows[4].tooltip.as_deref(),
+            Some("Last message 2 minutes ago")
+        );
         assert!(rows[5].alternate);
         assert_eq!(rows[5].title.as_deref(), Some("Copy chat ID"));
         assert_eq!(rows[5].image, Some(Symbol::ActionCopy));
@@ -227,15 +289,23 @@ mod tests {
 
     #[test]
     fn older_macos_keeps_the_text_forms() {
-        let caps = Capabilities { symbols: true, ..Capabilities::default() };
+        let caps = Capabilities {
+            symbols: true,
+            ..Capabilities::default()
+        };
         let rows = rows(&sample(), caps);
         assert_eq!(rows[0].header, None);
         assert_eq!(rows[1].title.as_deref(), Some("Running · 3 chats on"));
         assert_eq!(rows[1].subtitle, None);
-        assert_eq!(rows[4].title.as_deref(), Some("Mom · Reply waiting for approval  2"));
+        assert_eq!(
+            rows[4].title.as_deref(),
+            Some("Mom · Reply waiting for approval  2")
+        );
         assert_eq!(rows[4].badge, None);
         let bare = plan(&sample(), Capabilities::default(), true);
-        let PlanRow::Row(status) = &bare[1] else { panic!("status row") };
+        let PlanRow::Row(status) = &bare[1] else {
+            panic!("status row")
+        };
         assert_eq!(status.title.as_deref(), Some("● Running · 3 chats on"));
         assert_eq!(status.image, None);
     }
@@ -250,7 +320,9 @@ mod tests {
             items: sample(),
         }];
         let built = plan(&nested, Capabilities::ALL, true);
-        let PlanRow::Submenu { row, items } = &built[0] else { panic!("submenu") };
+        let PlanRow::Submenu { row, items } = &built[0] else {
+            panic!("submenu")
+        };
         assert_eq!(row.image, Some(Symbol::ActionSettings));
         assert_eq!(items.len(), 9);
     }

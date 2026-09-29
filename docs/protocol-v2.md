@@ -24,7 +24,7 @@ Everything below is additive. A v1 snapshot stays valid on a v2 runner.
 `hraness-companion --version` prints every protocol the runner accepts:
 
 ```text
-hraness-companion 0.8.1 protocol/1,2
+hraness-companion 0.9.0 protocol/1,2
 ```
 
 The first snapshot's `version` fixes the session version. A later frame with a

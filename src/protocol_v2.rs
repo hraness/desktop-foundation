@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use serde::Deserialize;
 
 use crate::protocol::{
-    decode_base64, safe_text, valid_action_id, valid_app_id, valid_icon, ProtocolError,
-    WireIcon, MAX_DEPTH, MAX_ITEMS, MAX_REVISION,
+    decode_base64, safe_text, valid_action_id, valid_app_id, valid_icon, ProtocolError, WireIcon,
+    MAX_DEPTH, MAX_ITEMS, MAX_REVISION,
 };
 use crate::symbols::{Symbol, SymbolFamily};
 use crate::{
@@ -175,7 +175,11 @@ fn symbol_of(name: &str, allowed: impl Fn(SymbolFamily) -> bool) -> Result<Symbo
 
 fn item_symbol(name: &Option<String>) -> Result<Option<Symbol>, ProtocolError> {
     name.as_deref()
-        .map(|name| symbol_of(name, |family| matches!(family, SymbolFamily::Action | SymbolFamily::Item)))
+        .map(|name| {
+            symbol_of(name, |family| {
+                matches!(family, SymbolFamily::Action | SymbolFamily::Item)
+            })
+        })
         .transpose()
 }
 
@@ -199,12 +203,13 @@ fn mark(wire: &WireMark) -> Result<StatusMark, ProtocolError> {
     let symbol = symbol_of(&wire.symbol, |family| family == SymbolFamily::Mark)?;
     let tone = tone(wire.tone.as_deref()).ok_or(ProtocolError("invalid-mark"))?;
     let letters_ok = (1..=2).contains(&wire.letters.len())
-        && wire.letters.bytes().all(|byte| byte.is_ascii_alphanumeric());
+        && wire
+            .letters
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric());
     let text_ok = match &wire.text {
         None => true,
-        Some(text) => {
-            safe_text(text, 4) && matches!(tone, MarkTone::Attention | MarkTone::Error)
-        }
+        Some(text) => safe_text(text, 4) && matches!(tone, MarkTone::Attention | MarkTone::Error),
     };
     if !letters_ok || !text_ok || !optional_text(&wire.accessibility_label, 128) {
         return Err(ProtocolError("invalid-mark"));
@@ -217,7 +222,11 @@ fn mark(wire: &WireMark) -> Result<StatusMark, ProtocolError> {
             let alpha = decode_base64(&icon.alpha)
                 .filter(|alpha| sides && alpha.len() == icon.width as usize * icon.height as usize)
                 .ok_or(ProtocolError("invalid-mark"))?;
-            Some(AlphaIcon { alpha, width: icon.width, height: icon.height })
+            Some(AlphaIcon {
+                alpha,
+                width: icon.width,
+                height: icon.height,
+            })
         }
     };
     Ok(StatusMark {
@@ -274,10 +283,17 @@ impl SnapshotFrame {
     pub fn offers(&self, target: &str) -> bool {
         fn offered(items: &[WireItem], target: &str) -> bool {
             items.iter().any(|item| match item {
-                WireItem::Action { id, enabled, alternate, .. } => {
+                WireItem::Action {
+                    id,
+                    enabled,
+                    alternate,
+                    ..
+                } => {
                     *enabled
                         && (id == target
-                            || alternate.as_ref().is_some_and(|alternate| alternate.id == target))
+                            || alternate
+                                .as_ref()
+                                .is_some_and(|alternate| alternate.id == target))
                 }
                 WireItem::Submenu { items, .. } => offered(items, target),
                 _ => false,
@@ -303,7 +319,11 @@ fn walk(
         }
         let label_ok = match item {
             WireItem::Header { label } => safe_text(label, 48),
-            WireItem::Status { symbol, label, detail } => {
+            WireItem::Status {
+                symbol,
+                label,
+                detail,
+            } => {
                 symbol_of(symbol, |family| family == SymbolFamily::Status)?;
                 safe_text(label, 48) && optional_text(detail, 80)
             }
@@ -327,14 +347,20 @@ fn walk(
                 if !valid_action_id(id) || !reserved_id_allowed(id) || !ids.insert(id.clone()) {
                     return Err(ProtocolError("invalid-action"));
                 }
-                if item_state.as_deref().is_some_and(|value| state(value).is_none()) {
+                if item_state
+                    .as_deref()
+                    .is_some_and(|value| state(value).is_none())
+                {
                     return Err(ProtocolError("invalid-state"));
                 }
                 item_symbol(symbol)?;
                 if badge.as_deref().is_some_and(|value| !safe_text(value, 4)) {
                     return Err(ProtocolError("invalid-badge"));
                 }
-                if shortcut.as_deref().is_some_and(|value| !safe_text(value, 64)) {
+                if shortcut
+                    .as_deref()
+                    .is_some_and(|value| !safe_text(value, 64))
+                {
                     return Err(ProtocolError("invalid-shortcut"));
                 }
                 if let Some(alternate) = alternate {
@@ -347,15 +373,25 @@ fn walk(
                     }
                     item_symbol(&alternate.symbol)?;
                 }
-                if item_role.as_deref().is_some_and(|value| role(value).is_none()) {
+                if item_role
+                    .as_deref()
+                    .is_some_and(|value| role(value).is_none())
+                {
                     return Err(ProtocolError("invalid-role"));
                 }
-                if item_opens.as_deref().is_some_and(|value| opens(value).is_none()) {
+                if item_opens
+                    .as_deref()
+                    .is_some_and(|value| opens(value).is_none())
+                {
                     return Err(ProtocolError("invalid-opens"));
                 }
                 safe_text(label, 256) && optional_text(subtitle, 80) && optional_text(tooltip, 160)
             }
-            WireItem::Submenu { label, symbol, items } => {
+            WireItem::Submenu {
+                label,
+                symbol,
+                items,
+            } => {
                 item_symbol(symbol)?;
                 walk(items, depth + 1, count, ids)?;
                 safe_text(label, 256)
@@ -379,9 +415,11 @@ fn nodes(items: &[WireItem], revision: u64) -> Vec<MenuNode> {
         .filter_map(|item| {
             Some(match item {
                 WireItem::Header { label } => MenuNode::header(label),
-                WireItem::Status { symbol, label, detail } => {
-                    MenuNode::status(Symbol::from_name(symbol)?, label, detail.clone())
-                }
+                WireItem::Status {
+                    symbol,
+                    label,
+                    detail,
+                } => MenuNode::status(Symbol::from_name(symbol)?, label, detail.clone()),
                 WireItem::Label { label, subtitle } => {
                     let mut row = MenuItem::inert(label);
                     row.subtitle = subtitle.clone();
@@ -421,7 +459,11 @@ fn nodes(items: &[WireItem], revision: u64) -> Vec<MenuNode> {
                     MenuNode::interactive(row)
                 }
                 WireItem::Separator => MenuNode::Separator,
-                WireItem::Submenu { label, symbol, items } => MenuNode::Submenu {
+                WireItem::Submenu {
+                    label,
+                    symbol,
+                    items,
+                } => MenuNode::Submenu {
                     title: label.clone(),
                     items: nodes(items, revision),
                     symbol: symbol.as_deref().and_then(Symbol::from_name),
@@ -434,6 +476,24 @@ fn nodes(items: &[WireItem], revision: u64) -> Vec<MenuNode> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settings_kinds_match_the_notice_panes() {
+        let kinds: Vec<&str> = crate::notice::SETTINGS_PANES
+            .iter()
+            .map(|(kind, _)| *kind)
+            .collect();
+        assert_eq!(kinds, SETTINGS_KINDS);
+    }
+
+    #[test]
+    fn helper_reports_the_runner_protocols() {
+        let versions: Vec<String> = crate::protocol::SUPPORTED_VERSIONS
+            .iter()
+            .map(u8::to_string)
+            .collect();
+        assert_eq!(versions.join(","), crate::local_app::wire::RUNNER_PROTOCOLS);
+    }
+
     use super::*;
     use crate::protocol::{read_frame, Frame, Session};
     use crate::MenuItemKind;
@@ -466,7 +526,10 @@ mod tests {
     #[test]
     fn the_documented_example_is_accepted() {
         let doc = include_str!("../docs/protocol-v2.md");
-        assert!(doc.contains(EXAMPLE), "the doc example changed; update this test");
+        assert!(
+            doc.contains(EXAMPLE),
+            "the doc example changed; update this test"
+        );
         assert_eq!(accept(EXAMPLE), Ok(true));
     }
 
@@ -480,19 +543,31 @@ mod tests {
         assert_eq!(mark.tone, MarkTone::Attention);
         assert_eq!(mark.text.as_deref(), Some("3"));
         assert_eq!(model.title, None);
-        assert_eq!(model.tooltip.as_deref(), Some("Textbutler · 3 replies waiting"));
+        assert_eq!(
+            model.tooltip.as_deref(),
+            Some("Textbutler · 3 replies waiting")
+        );
         assert_eq!(model.nodes[0], MenuNode::header("Textbutler"));
         assert_eq!(
             model.nodes[1],
             MenuNode::status(Symbol::StatusRunning, "Running", Some("3 chats on".into()))
         );
-        let MenuNode::Interactive { item } = &model.nodes[5] else { panic!("chat row") };
+        let MenuNode::Interactive { item } = &model.nodes[5] else {
+            panic!("chat row")
+        };
         assert_eq!(item.id.as_deref(), Some("7:chat.1"));
         assert_eq!(item.symbol, Some(Symbol::ItemChat));
         assert_eq!(item.badge.as_deref(), Some("2"));
         assert_eq!(item.alternate.as_ref().unwrap().id, "7:chat.1.copy");
-        let MenuNode::Interactive { item } = &model.nodes[9] else { panic!("login row") };
-        assert_eq!(item.kind, MenuItemKind::State { state: ItemState::On });
+        let MenuNode::Interactive { item } = &model.nodes[9] else {
+            panic!("login row")
+        };
+        assert_eq!(
+            item.kind,
+            MenuItemKind::State {
+                state: ItemState::On
+            }
+        );
         assert!(model.validate().is_ok());
         // 13 rows plus two Option-key alternates.
         assert_eq!(model.node_count(), 13, "alternates share their row");
@@ -503,7 +578,12 @@ mod tests {
         let mut session = Session::default();
         session.accept(parse(EXAMPLE).unwrap()).unwrap();
         let snapshot = session.latest().unwrap();
-        for id in ["chat.1.copy", "help.diagnostics", "foundation.login", "open"] {
+        for id in [
+            "chat.1.copy",
+            "help.diagnostics",
+            "foundation.login",
+            "open",
+        ] {
             let event = snapshot.action(&format!("7:{id}")).unwrap();
             assert_eq!(
                 serde_json::to_string(&event).unwrap(),
@@ -536,20 +616,71 @@ mod tests {
             (with("letters", "\"é\""), "invalid-mark"),
             (with("tone", "\"loud\""), "invalid-mark"),
             (with("text", "\"12345\""), "invalid-mark"),
-            (EXAMPLE.replace("\"tone\":\"attention\",", ""), "invalid-mark"),
-            (EXAMPLE.replace("\"status.running\"", "\"action.open\""), "invalid-symbol"),
-            (EXAMPLE.replace("\"item.chat\"", "\"status.ok\""), "invalid-symbol"),
-            (EXAMPLE.replace("\"state\":\"off\"", "\"state\":\"maybe\""), "invalid-state"),
-            (EXAMPLE.replace("\"badge\":\"2\"", "\"badge\":\"12345\""), "invalid-badge"),
-            (EXAMPLE.replace("\"role\":\"primary\"", "\"role\":\"main\""), "invalid-role"),
-            (EXAMPLE.replace("\"opens\":\"browser\",\"shortcut\"", "\"opens\":\"web\",\"shortcut\""), "invalid-opens"),
-            (EXAMPLE.replace("\"chat.1.copy\"", "\"open\""), "invalid-alternate"),
-            (EXAMPLE.replace("\"chat.1.copy\"", "\"foundation.login.copy\""), "invalid-alternate"),
-            (EXAMPLE.replace("\"id\":\"open\"", "\"id\":\"foundation.quit\""), "invalid-action"),
-            (EXAMPLE.replace("\"id\":\"open\"", "\"id\":\"foundation.settings.keychain\""), "invalid-action"),
-            (EXAMPLE.replace("\"label\":\"Running\"", &format!("\"label\":\"{}\"", "x".repeat(49))), "invalid-label"),
-            (EXAMPLE.replace("\"3 chats on\"", &format!("\"{}\"", "x".repeat(81))), "invalid-label"),
-            (EXAMPLE.replace("\"Textbutler · 3 replies waiting\"", &format!("\"{}\"", "x".repeat(161))), "invalid-snapshot"),
+            (
+                EXAMPLE.replace("\"tone\":\"attention\",", ""),
+                "invalid-mark",
+            ),
+            (
+                EXAMPLE.replace("\"status.running\"", "\"action.open\""),
+                "invalid-symbol",
+            ),
+            (
+                EXAMPLE.replace("\"item.chat\"", "\"status.ok\""),
+                "invalid-symbol",
+            ),
+            (
+                EXAMPLE.replace("\"state\":\"off\"", "\"state\":\"maybe\""),
+                "invalid-state",
+            ),
+            (
+                EXAMPLE.replace("\"badge\":\"2\"", "\"badge\":\"12345\""),
+                "invalid-badge",
+            ),
+            (
+                EXAMPLE.replace("\"role\":\"primary\"", "\"role\":\"main\""),
+                "invalid-role",
+            ),
+            (
+                EXAMPLE.replace(
+                    "\"opens\":\"browser\",\"shortcut\"",
+                    "\"opens\":\"web\",\"shortcut\"",
+                ),
+                "invalid-opens",
+            ),
+            (
+                EXAMPLE.replace("\"chat.1.copy\"", "\"open\""),
+                "invalid-alternate",
+            ),
+            (
+                EXAMPLE.replace("\"chat.1.copy\"", "\"foundation.login.copy\""),
+                "invalid-alternate",
+            ),
+            (
+                EXAMPLE.replace("\"id\":\"open\"", "\"id\":\"foundation.quit\""),
+                "invalid-action",
+            ),
+            (
+                EXAMPLE.replace("\"id\":\"open\"", "\"id\":\"foundation.settings.keychain\""),
+                "invalid-action",
+            ),
+            (
+                EXAMPLE.replace(
+                    "\"label\":\"Running\"",
+                    &format!("\"label\":\"{}\"", "x".repeat(49)),
+                ),
+                "invalid-label",
+            ),
+            (
+                EXAMPLE.replace("\"3 chats on\"", &format!("\"{}\"", "x".repeat(81))),
+                "invalid-label",
+            ),
+            (
+                EXAMPLE.replace(
+                    "\"Textbutler · 3 replies waiting\"",
+                    &format!("\"{}\"", "x".repeat(161)),
+                ),
+                "invalid-snapshot",
+            ),
         ];
         for (json, code) in cases {
             assert_eq!(accept(&json), Err(ProtocolError(code)), "{json}");
@@ -559,12 +690,22 @@ mod tests {
     #[test]
     fn settings_actions_accept_only_kinds_with_a_pane() {
         for kind in SETTINGS_KINDS {
-            let json = EXAMPLE.replace("\"id\":\"open\"", &format!("\"id\":\"foundation.settings.{kind}\""));
+            let json = EXAMPLE.replace(
+                "\"id\":\"open\"",
+                &format!("\"id\":\"foundation.settings.{kind}\""),
+            );
             assert_eq!(accept(&json), Ok(true), "{kind}");
         }
         for kind in ["keychain", "developer-tools", "", "made-up"] {
-            let json = EXAMPLE.replace("\"id\":\"open\"", &format!("\"id\":\"foundation.settings.{kind}\""));
-            assert_eq!(accept(&json), Err(ProtocolError("invalid-action")), "{kind}");
+            let json = EXAMPLE.replace(
+                "\"id\":\"open\"",
+                &format!("\"id\":\"foundation.settings.{kind}\""),
+            );
+            assert_eq!(
+                accept(&json),
+                Err(ProtocolError("invalid-action")),
+                "{kind}"
+            );
         }
     }
 
@@ -583,7 +724,11 @@ mod tests {
         let mark = session.latest().unwrap().model().status_mark.unwrap();
         assert_eq!(mark.template_icon.unwrap().alpha, vec![200u8; 6]);
         for (w, h, bytes) in [(2, 3, 5), (2, 3, 24), (0, 1, 0), (65, 1, 65)] {
-            assert_eq!(accept(&icon(w, h, bytes)), Err(ProtocolError("invalid-mark")), "{w}x{h}");
+            assert_eq!(
+                accept(&icon(w, h, bytes)),
+                Err(ProtocolError("invalid-mark")),
+                "{w}x{h}"
+            );
         }
     }
 
@@ -592,17 +737,26 @@ mod tests {
         let mut session = Session::default();
         session.accept(parse(EXAMPLE).unwrap()).unwrap();
         let v1 = r#"{"version":1,"type":"snapshot","appId":"textbutler","name":"Textbutler","title":"Tb","revision":8,"items":[]}"#;
-        assert_eq!(session.accept(parse(v1).unwrap()), Err(ProtocolError("version-changed")));
+        assert_eq!(
+            session.accept(parse(v1).unwrap()),
+            Err(ProtocolError("version-changed"))
+        );
         assert_eq!(
             session.accept(parse(r#"{"version":1,"type":"quit"}"#).unwrap()),
             Err(ProtocolError("version-changed"))
         );
-        assert_eq!(session.accept(parse(r#"{"version":2,"type":"quit"}"#).unwrap()), Ok(false));
+        assert_eq!(
+            session.accept(parse(r#"{"version":2,"type":"quit"}"#).unwrap()),
+            Ok(false)
+        );
         assert_eq!(session.version(), Some(2));
         let mut v1_session = Session::default();
         v1_session.accept(parse(v1).unwrap()).unwrap();
         let next = EXAMPLE.replace("\"revision\":7", "\"revision\":9");
-        assert_eq!(v1_session.accept(parse(&next).unwrap()), Err(ProtocolError("version-changed")));
+        assert_eq!(
+            v1_session.accept(parse(&next).unwrap()),
+            Err(ProtocolError("version-changed"))
+        );
         assert_eq!(
             parse(&EXAMPLE.replace("\"version\":2", "\"version\":3")).err(),
             Some(ProtocolError("unsupported-version"))

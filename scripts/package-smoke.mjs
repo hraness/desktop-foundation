@@ -92,10 +92,16 @@ try {
       'release-manifest.json', 'dist/src/index.js', 'dist/src/index.d.ts', 'dist/src/cli.js',
       'README.md', 'LICENSE', 'docs/installation.md', 'docs/platforms.md', 'skills/companion/SKILL.md',
       'docs/architecture.md', 'docs/adoption.md', 'docs/protocol.md',
-      'src/lib.rs', 'src/protocol.rs', 'src/bin/hraness-companion.rs', 'src/outputs.rs', 'src/prompt.rs',
+      'src/lib.rs', 'src/protocol.rs', 'src/bin/hraness-companion.rs', 'src/bin/hraness-helper.rs', 'src/outputs.rs',
       'sdk/src/protocol.ts', 'sdk/src/client.ts', 'sdk/src/commands.ts', 'sdk/src/prompt.ts',
       'docs/protocol-v2.md', 'docs/permissions.md', 'docs/identity.md',
-      'src/protocol_v2.rs', 'src/symbols.rs', 'src/identity.rs', 'src/service.rs', 'src/notice.rs',
+      'src/protocol_v2.rs', 'src/symbols.rs',
+      'crates/hraness-local-app/src/identity.rs', 'crates/hraness-local-app/src/service.rs',
+      'crates/hraness-local-app/src/notice.rs', 'crates/hraness-local-app/src/prompt.rs',
+      'crates/hraness-control-kit/src/lib.rs', 'contract/helper-argv.v0.8.1.json', 'contract/error-codes.json',
+      'docs/control.md', 'docs/human-gate.md',
+      'dist/src/registry.js', 'dist/src/control.js', 'dist/src/human-gate.js', 'dist/src/tui.js',
+      'dist/src/login.js', 'dist/src/retire.js', 'dist/src/helper.js',
       'dist/src/menu-kit.js', 'dist/src/permissions.js', 'dist/src/audience.js', 'dist/src/cli-style.js',
     ]) await access(join(root, file));
     const sdk = await import(${JSON.stringify(packageName)});
@@ -115,6 +121,7 @@ try {
       'x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc',
       'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu',
     ].sort());
+    if (manifest.helperAssets) assert.deepEqual(manifest.helperAssets.map(asset => asset.target).sort(), manifest.assets.map(asset => asset.target).sort());
     assert.equal(pkg.bin.companion, './dist/src/cli.js');
     const skill = await readFile(join(root, 'skills/companion/SKILL.md'), 'utf8');
     assert.match(skill, /^---\\nname: companion\\n/);
@@ -125,11 +132,21 @@ try {
     const permissions = await import(${JSON.stringify(packageName + '/permissions')});
     const audience = await import(${JSON.stringify(packageName + '/audience')});
     const style = await import(${JSON.stringify(packageName + '/cli-style')});
+    const sub = async name => import(${JSON.stringify(packageName + '/')} + name);
+    const [registry, control, gate, tui, login, retire, helper] = await Promise.all(
+      ['registry', 'control', 'human-gate', 'tui', 'login', 'retire', 'helper'].map(sub));
     for (const [module, names] of [
       [kit, ['layout', 'lintMenu', 'assertMenuFixture', 'renderMenuTree', 'openAtLoginItem', 'degradedMenu', 'actionErrorItem']],
       [permissions, ['prePrompt', 'renderPrePrompt', 'renderRecovery', 'permissionMenuItems', 'permissionErrorJson', 'LOCAL_SIGNING', 'MESSAGES_FDA']],
       [audience, ['detectAudience']],
       [style, ['createCliOutput', 'cliStyle', 'exitQuietlyOnBrokenPipe']],
+      [registry, ['defineRegistry', 'runCli', 'commandsJson', 'okEnvelope', 'errorEnvelope', 'isErrorCode']],
+      [control, ['serveControl', 'agentRequest', 'adminRequest', 'controlStatus', 'ensureOwner', 'ownerPaths']],
+      [gate, ['requireHuman', 'detectAgent', 'oneTimeCode', 'ownerAuthorize']],
+      [tui, ['runTui', 'renderSnapshot', 'chooseMode', 'box', 'table']],
+      [login, ['planLoginItem', 'installLoginItem', 'uninstallLoginItem']],
+      [retire, ['retireLegacyLoginItem', 'launches']],
+      [helper, ['resolveHelper']],
       [sdk, ['validateSnapshotV2', 'downlevelSnapshot', 'parseRunnerProtocols', 'runnerProtocols', 'layout', 'lintMenu', 'MenuActionError']],
     ]) for (const name of names) assert.equal(typeof module[name], 'function', name);
     const items = kit.layout({

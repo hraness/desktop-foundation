@@ -167,9 +167,19 @@ mod tests {
                 .find(|line| line.starts_with(&format!("| `{}` |", symbol.name())))
                 .expect("documented row");
             let cells: Vec<_> = row.split('|').map(str::trim).collect();
-            assert_eq!(cells[2], format!("`{}`", symbol.sf_symbol()), "{}", symbol.name());
+            assert_eq!(
+                cells[2],
+                format!("`{}`", symbol.sf_symbol()),
+                "{}",
+                symbol.name()
+            );
             if symbol.family() != SymbolFamily::Mark {
-                assert_eq!(cells[3], symbol.fallback().unwrap_or("-"), "{}", symbol.name());
+                assert_eq!(
+                    cells[3],
+                    symbol.fallback().unwrap_or("-"),
+                    "{}",
+                    symbol.name()
+                );
             }
         }
     }

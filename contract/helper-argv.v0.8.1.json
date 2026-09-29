@@ -1,0 +1,28 @@
+{
+  "schema": "hraness.helper-argv/1",
+  "frozenFrom": "v0.8.1",
+  "about": "Argv, stdin, stdout and exit status that hraness-helper and hraness-companion both keep for their one-shot modes. `stdout` is an exact line; `stdoutPattern` is a regular expression for the whole line, where {binary} is the binary's name. Cases with `platforms` run only there. Each case runs with HOME set to a fresh empty directory.",
+  "cases": [
+    { "name": "version", "argv": ["--version"], "stdin": "", "exit": 0, "stdoutPattern": "^{binary} [0-9]+\\.[0-9]+\\.[0-9]+ protocol/1,2$" },
+    { "name": "version with extra argument", "argv": ["--version", "extra"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}" },
+    { "name": "prompt probe", "argv": ["--prompt-probe"], "stdin": "", "exit": 0, "stdoutPattern": "^\\{\"type\":\"prompt-capability\",\"version\":1,\"capable\":(true|false)(,\"detail\":\"[a-z0-9-]+\")?\\}$" },
+    { "name": "assemble-app without a request", "argv": ["--assemble-app"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-app-request\"}" },
+    { "name": "assemble-app with the wrong frame type", "argv": ["--assemble-app"], "stdin": "{\"type\":\"x\"}\n", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-app-request\"}" },
+    { "name": "assemble-app with a future version", "argv": ["--assemble-app"], "stdin": "{\"type\":\"app-request\",\"version\":9,\"appId\":\"a\",\"name\":\"A\",\"productVersion\":\"1\"}\n", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"unsupported-version\"}" },
+    { "name": "signing-identity without an action", "argv": ["--signing-identity"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}" },
+    { "name": "signing-identity with an unknown action", "argv": ["--signing-identity", "bogus"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}" },
+    { "name": "launch without a file", "argv": ["--launch"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}" },
+    { "name": "launch with a relative file", "argv": ["--launch", "argv.json"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}" },
+    { "name": "launch outside an app", "argv": ["--launch", "/nonexistent/argv.json"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"launch-outside-app\"}", "platforms": ["unix"] },
+    { "name": "notice without a spec", "argv": ["--notice"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"notice-required\"}" },
+    { "name": "notice with the wrong frame type", "argv": ["--notice"], "stdin": "{\"type\":\"x\"}\n", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-notice\"}" },
+    { "name": "notice with malformed JSON", "argv": ["--notice"], "stdin": "not json\n", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-notice\"}" },
+    { "name": "prompt without a spec", "argv": ["--prompt"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"prompt-required\"}" },
+    { "name": "prompt with the wrong frame type", "argv": ["--prompt"], "stdin": "{\"type\":\"x\"}\n", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-prompt\"}" },
+    { "name": "unknown flag", "argv": ["--bogus"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}" },
+    { "name": "no arguments", "argv": [], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}" },
+    { "name": "state-dir without a path", "argv": ["--state-dir"], "stdin": "", "exit": 1, "stdout": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}" }
+  ],
+  "companionOnly": ["--check-protocol", "--state-dir <abs>"],
+  "helperAnswersCompanionOnlyWith": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}"
+}

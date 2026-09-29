@@ -12,7 +12,11 @@ export interface ReleaseManifest {
   repository: string;
   tag: string;
   assets: ReleaseAsset[];
+  /** `hraness-helper-<target>` binaries, from v0.9.0. Optional so older manifests still parse. */
+  helperAssets?: ReleaseAsset[];
 }
+/** Which binary to install: the companion (tray plus helper modes) or the helper (no tray). */
+export type BinaryKind = 'companion' | 'helper';
 const MAX_ASSET_BYTES = 256 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
@@ -29,23 +33,33 @@ export function parseReleaseManifest(bytes: string | Uint8Array): ReleaseManifes
 function validateManifest(value: unknown): ReleaseManifest {
   if (!value || typeof value !== 'object') return invalid('Missing release manifest.');
   const m = value as ReleaseManifest;
-  if (Object.keys(m).some(key => !['schemaVersion', 'version', 'repository', 'tag', 'assets'].includes(key))) return invalid('Release manifest contains unknown fields.');
+  if (Object.keys(m).some(key => !['schemaVersion', 'version', 'repository', 'tag', 'assets', 'helperAssets'].includes(key))) return invalid('Release manifest contains unknown fields.');
   if (m.schemaVersion !== 1 || typeof m.version !== 'string' || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(m.version)
       || m.tag !== `v${m.version}` || typeof m.repository !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*\/[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(m.repository)) {
     return invalid('Release manifest needs schemaVersion 1, a fixed version/tag, and an owner/repository.');
   }
-  if (!Array.isArray(m.assets) || m.assets.length === 0 || m.assets.length > TARGETS.length) return invalid('Release manifest has no assets or too many assets.');
+  const assets = validateAssets(m.assets, 'hraness-companion');
+  const helperAssets = m.helperAssets === undefined ? undefined : validateAssets(m.helperAssets, 'hraness-helper');
+  // Copy to prevent the caller mutating a manifest while an install awaits IO.
+  return { schemaVersion: 1, version: m.version, repository: m.repository, tag: m.tag, assets, ...(helperAssets ? { helperAssets } : {}) };
+}
+function validateAssets(list: unknown, stem: string): ReleaseAsset[] {
+  if (!Array.isArray(list) || list.length === 0 || list.length > TARGETS.length) return invalid('Release manifest has no assets or too many assets.');
   const targets = new Set<string>();
-  for (const asset of m.assets) {
-    if (!asset || !TARGETS.includes(asset.target) || targets.has(asset.target)) return invalid('Invalid or repeated release target.');
+  for (const asset of list as ReleaseAsset[]) {
+    if (!asset || typeof asset !== 'object' || !TARGETS.includes(asset.target) || targets.has(asset.target)) return invalid('Invalid or repeated release target.');
     if (Object.keys(asset).some(key => !['target', 'name', 'size', 'sha256'].includes(key))) return invalid('Release asset contains unknown fields.');
-    const expectedName = `hraness-companion-${asset.target}${asset.target.includes('windows') ? '.exe' : ''}`;
+    const expectedName = `${stem}-${asset.target}${asset.target.includes('windows') ? '.exe' : ''}`;
     if (asset.name !== expectedName || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ASSET_BYTES
         || typeof asset.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(asset.sha256)) return invalid('Invalid release asset name, size, or SHA-256.');
     targets.add(asset.target);
   }
   // Copy to prevent the caller mutating a manifest while an install awaits IO.
-  return { schemaVersion: 1, version: m.version, repository: m.repository, tag: m.tag, assets: m.assets.map(a => ({ ...a })) };
+  return (list as ReleaseAsset[]).map(a => ({ ...a }));
+}
+/** The asset for `target` of the given kind, if the release has one. */
+export function releaseAsset(manifest: ReleaseManifest, target: PlatformTarget, kind: BinaryKind = 'companion'): ReleaseAsset | undefined {
+  return (kind === 'helper' ? manifest.helperAssets ?? [] : manifest.assets).find(value => value.target === target);
 }
 
 export interface EnsureBinaryOptions {
@@ -54,14 +68,16 @@ export interface EnsureBinaryOptions {
   cacheDir?: string;
   fetch?: typeof globalThis.fetch;
   maxBytes?: number;
+  /** Defaults to the companion. */
+  kind?: BinaryKind;
 }
 export interface InstalledBinary { path: string; version: string; target: PlatformTarget; reused: boolean }
 /** Read-only identity and integrity evidence for agents helping a human approve an OS prompt. */
 export async function inspectBinary(options: Omit<EnsureBinaryOptions, 'fetch' | 'maxBytes'>) {
   const manifest = validateManifest(options.manifest);
   const target = options.target ?? resolveTarget();
-  const asset = manifest.assets.find(value => value.target === target);
-  if (!asset) throw new CompanionError('unsupported_target', `This release has no companion asset for ${target}.`);
+  const asset = releaseAsset(manifest, target, options.kind);
+  if (!asset) throw new CompanionError('unsupported_target', `This release has no ${options.kind ?? 'companion'} asset for ${target}.`);
   const path = join(options.cacheDir ?? userPaths().cacheDir, ...manifest.repository.split('/'), manifest.version, target, asset.name);
   await assertPhysicalPath(path);
   const installed = await verifyFile(path, asset);
@@ -159,8 +175,8 @@ async function download(asset: ReleaseAsset, url: URL, temp: string, fetcher: ty
 async function ensureBinaryImpl(options: EnsureBinaryOptions): Promise<InstalledBinary> {
   const manifest = validateManifest(options.manifest);
   const target = options.target ?? resolveTarget();
-  const asset = manifest.assets.find(a => a.target === target);
-  if (!asset) throw new CompanionError('unsupported_target', `This release has no companion asset for ${target}.`);
+  const asset = releaseAsset(manifest, target, options.kind);
+  if (!asset) throw new CompanionError('unsupported_target', `This release has no ${options.kind ?? 'companion'} asset for ${target}.`);
   if (options.maxBytes !== undefined && (!Number.isSafeInteger(options.maxBytes) || options.maxBytes <= 0 || asset.size > options.maxBytes)) throw new CompanionError('invalid_manifest', 'Release asset exceeds the caller download limit.');
   const cache = options.cacheDir ?? userPaths().cacheDir;
   if (!isAbsolute(cache)) throw new CompanionError('unsafe_path', 'The companion cache directory must be absolute.');

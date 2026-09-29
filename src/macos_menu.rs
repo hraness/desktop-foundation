@@ -57,8 +57,9 @@ fn symbol_image(symbol: Symbol, tint: Option<Tint>) -> Option<Retained<NSImage>>
         .responds_to(sel!(configurationWithPaletteColors:));
     match color {
         Some(color) if palette_ok => {
-            let config =
-                NSImageSymbolConfiguration::configurationWithPaletteColors(&NSArray::from_retained_slice(&[color]));
+            let config = NSImageSymbolConfiguration::configurationWithPaletteColors(
+                &NSArray::from_retained_slice(&[color]),
+            );
             let tinted = image.imageWithSymbolConfiguration(&config)?;
             tinted.setTemplate(false);
             Some(tinted)
@@ -70,7 +71,13 @@ fn symbol_image(symbol: Symbol, tint: Option<Tint>) -> Option<Retained<NSImage>>
     }
 }
 
-fn apply_row(menu: &NSMenu, item: &NSMenuItem, row: &RowPlan, previous: Option<&NSMenuItem>, mtm: MainThreadMarker) {
+fn apply_row(
+    menu: &NSMenu,
+    item: &NSMenuItem,
+    row: &RowPlan,
+    previous: Option<&NSMenuItem>,
+    mtm: MainThreadMarker,
+) {
     if row.is_empty() {
         return;
     }
@@ -97,7 +104,8 @@ fn apply_row(menu: &NSMenu, item: &NSMenuItem, row: &RowPlan, previous: Option<&
         item.setSubtitle(Some(&NSString::from_str(subtitle)));
     }
     if let Some(badge) = &row.badge {
-        let badge = NSMenuItemBadge::initWithString(NSMenuItemBadge::alloc(), &NSString::from_str(badge));
+        let badge =
+            NSMenuItemBadge::initWithString(NSMenuItemBadge::alloc(), &NSString::from_str(badge));
         item.setBadge(Some(&badge));
     }
     if let Some(tooltip) = &row.tooltip {
@@ -138,8 +146,13 @@ pub(crate) fn decorate(menu: &NSMenu, plan: &[PlanRow], mtm: MainThreadMarker) {
                 }
             }
             PlanRow::Row(row) => apply_row(menu, &item, row, previous.as_deref(), mtm),
-            PlanRow::Submenu { row, items: children } => {
-                let Some(submenu) = item.submenu() else { return };
+            PlanRow::Submenu {
+                row,
+                items: children,
+            } => {
+                let Some(submenu) = item.submenu() else {
+                    return;
+                };
                 apply_row(menu, &item, row, previous.as_deref(), mtm);
                 decorate(&submenu, children, mtm);
             }
@@ -204,13 +217,17 @@ pub(crate) fn apply_mark(
     accessibility: Option<&str>,
     mtm: MainThreadMarker,
 ) -> bool {
-    let Some(button) = status.button(mtm) else { return false };
+    let Some(button) = status.button(mtm) else {
+        return false;
+    };
     remove_dot(&button);
     let Some(mark) = mark else {
         button.setAppearsDisabled(false);
         return true;
     };
-    let Some(image) = mark_image(mark) else { return false };
+    let Some(image) = mark_image(mark) else {
+        return false;
+    };
     button.setImage(Some(&image));
     button.setImagePosition(NSCellImagePosition::ImageLeft);
     button.setTitle(&NSString::from_str(mark.text.as_deref().unwrap_or("")));
@@ -251,7 +268,10 @@ pub(crate) fn apply_mark(
             } else {
                 inset
             };
-            let frame = NSRect::new(NSPoint::new(x.max(0.0), y.max(0.0)), NSSize::new(DOT_SIZE, DOT_SIZE));
+            let frame = NSRect::new(
+                NSPoint::new(x.max(0.0), y.max(0.0)),
+                NSSize::new(DOT_SIZE, DOT_SIZE),
+            );
             let view = NSImageView::initWithFrame(NSImageView::alloc(mtm), frame);
             view.setImage(Some(&dot));
             view.setTag(DOT_TAG);
@@ -341,7 +361,12 @@ pub fn native_menu_dump(nodes: &[crate::MenuNode]) -> Option<String> {
             if let Some(subtitle) = caps.subtitle.then(|| item.subtitle()).flatten() {
                 out.push_str(&format!(" | subtitle: {subtitle}"));
             }
-            if let Some(badge) = caps.badge.then(|| item.badge()).flatten().and_then(|badge| badge.stringValue()) {
+            if let Some(badge) = caps
+                .badge
+                .then(|| item.badge())
+                .flatten()
+                .and_then(|badge| badge.stringValue())
+            {
                 out.push_str(&format!(" | badge: {badge}"));
             }
             if let Some(tip) = item.toolTip() {
@@ -350,8 +375,16 @@ pub fn native_menu_dump(nodes: &[crate::MenuNode]) -> Option<String> {
             let key = item.keyEquivalent().to_string();
             let mask = item.keyEquivalentModifierMask();
             if item.isAlternate() || !key.is_empty() {
-                let option = if mask.contains(NSEventModifierFlags::Option) { "⌥" } else { "" };
-                let command = if mask.contains(NSEventModifierFlags::Command) { "⌘" } else { "" };
+                let option = if mask.contains(NSEventModifierFlags::Option) {
+                    "⌥"
+                } else {
+                    ""
+                };
+                let command = if mask.contains(NSEventModifierFlags::Command) {
+                    "⌘"
+                } else {
+                    ""
+                };
                 out.push_str(&format!(" | key: {option}{command}{key}"));
             }
             out.push('\n');

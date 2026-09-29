@@ -212,6 +212,9 @@ test('boot and start identity do not depend on the caller\'s time zone', async (
   assert.equal(bootTimeKey('{ sec = 1790535348, usec = 479171 } Sun Sep 27 14:55:48 2026\n'), 'sec=1790535348,usec=479171');
   assert.equal(bootTimeKey('{ sec = 1790535348, usec = 479171 } Sun Sep 27 18:55:48 2026\n'), 'sec=1790535348,usec=479171');
   assert.notEqual(bootTimeKey('{ sec = 1790535349, usec = 479171 } Sun Sep 27 14:55:49 2026'), 'sec=1790535348,usec=479171');
+});
+
+test('a live process has the same identity under every caller time zone', unixOnly, async () => {
   // A checker under another TZ (Kolkata is UTC+5:30 all year) sees the same identity for this live process.
   const url = new URL('../src/control.js', import.meta.url).href;
   const script = `const m = await import(${JSON.stringify(url)}); console.log(JSON.stringify([await m.bootId(), await m.processStartId(${process.pid})]));`;

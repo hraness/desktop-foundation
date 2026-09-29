@@ -29,13 +29,13 @@ import { pathToFileURL } from 'node:url';
 
 // Documentation that code reads. Rust tests include_str! these (native legs
 // only), so an edit runs the subset rather than skipping native.
-const ASSERTED_DOCS = new Set(['docs/protocol-v2.md', 'docs/permissions.md']);
+const ASSERTED_DOCS = new Set(['docs/protocol.md', 'docs/permissions.md']);
 // Files scripts/package-smoke.mjs asserts in the installed package (existence,
 // and the skill's front matter). The package job runs only on `full`, so an
 // edit to the skill, or deleting any of these, runs every target.
 export const PACKAGED_DOCS = new Set([
   'README.md', 'LICENSE', 'docs/installation.md', 'docs/platforms.md', 'skills/companion/SKILL.md',
-  'docs/architecture.md', 'docs/adoption.md', 'docs/protocol.md', 'docs/protocol-v2.md',
+  'docs/architecture.md', 'docs/adoption.md', 'docs/protocol.md', 'docs/migration-1.0.md',
   'docs/permissions.md', 'docs/identity.md', 'docs/control.md', 'docs/human-gate.md',
 ]);
 // Documentation only.
@@ -67,7 +67,7 @@ const FULL = [
 // rests on OS facilities (ps, /dev/tty, drive-letter and UNC paths, .exe
 // resolution) that a marker scan can miss, so they always run every target.
 export const SECURITY = new Set([
-  'sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/client.ts', 'sdk/src/prompt.ts', 'sdk/src/login.ts',
+  'sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/prompt.ts', 'sdk/src/login.ts',
   'crates/hraness-control-kit/src/gate.rs', 'crates/hraness-control-kit/src/crypto.rs',
   'crates/hraness-local-app/src/helper.rs',
 ]);

@@ -5,7 +5,7 @@ import {
   AUTOMATION, CHROME_SAFE_STORAGE, CONTACTS, INCOMING_CONNECTIONS, LOCAL_NETWORK, LOCAL_SIGNING, LOGIN_ITEM,
   MESSAGES_FDA, PERMISSION_KINDS, SCREEN_RECORDING, XCODE_TOOLS,
   behaviorOf, classifyKeychainStatus, formatNotice, hasSettingsPane, isAllowedSettingsUrl, openPermissionSettings,
-  paneName, permissionError, permissionErrorJson, permissionMenuItems, permissionNoticeRequest, permissionStatus,
+  paneName, permissionError, permissionErrorJson, permissionNoticeRequest, permissionStatus,
   prePrompt, renderPrePrompt, renderRecovery, reportPermissionFailure, responsibleApp, settingsPath, settingsUrl,
   type PermissionIO, type PermissionNeed, type ProductRef, type RecoveryState,
 } from '../src/permissions.js';
@@ -76,12 +76,12 @@ test('responsibleApp names the terminal, then the product inside its local app',
 test('presets render the documented copy', () => {
   assert.equal(cli(LOGIN_ITEM(textbutler)),
     '🔐 macOS will show a notice that Textbutler can open at login.\n'
-    + '   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.\n');
+    + '   It starts in the background when you log in and shows no window or icon. Turn it off any time in System Settings › General › Login Items & Extensions.\n');
   // Login Items lists the program the login item runs, never the terminal.
   assert.match(cli(LOGIN_ITEM({ product: 'Textbutler', command: 'textbutler' })), /^🔐 macOS will show a notice that Textbutler can open at login\.\n/);
   assert.equal(cli(LOGIN_ITEM({ ...textbutler, requester: 'bun' })),
-    "🔐 macOS will show a notice that bun can open at login. That's Textbutler's menu bar.\n"
-    + '   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.\n');
+    "🔐 macOS will show a notice that bun can open at login. That's how Textbutler starts in the background.\n"
+    + '   It starts in the background when you log in and shows no window or icon. Turn it off any time in System Settings › General › Login Items & Extensions.\n');
   assert.equal(cli(CHROME_SAFE_STORAGE({ product: 'Ghostget', command: 'ghostget' }, { caller: 'security' })),
     '🔐 macOS will ask to let security use "Chrome Safe Storage" from your keychain for Ghostget.\n'
     + "   Ghostget uses it to read the Chrome sign-in you already have and never stores it. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.\n"
@@ -154,7 +154,7 @@ test('recovery copy follows the templates', () => {
     + '-> textbutler doctor\n');
 });
 
-test('dialogs, menu rows and JSON errors', () => {
+test('dialogs and JSON errors', () => {
   const automation = AUTOMATION(textbutler, 'Messages', 'Textbutler only sends replies in chats you turn on.');
   assert.deepEqual(permissionNoticeRequest(automation), {
     type: 'notice-request', version: 1, title: 'Textbutler needs access to Messages',
@@ -168,14 +168,6 @@ test('dialogs, menu rows and JSON errors', () => {
     primary: 'Open System Settings', secondary: 'Not now', settings: 'full-disk-access',
   });
   assert.equal(permissionNoticeRequest(LOGIN_ITEM(textbutler)), null);
-  assert.deepEqual(permissionMenuItems(fda, 'granted'), []);
-  assert.deepEqual(permissionMenuItems(fda, 'not-determined'), [
-    { kind: 'status', symbol: 'status.locked', label: 'Needs Full Disk Access', detail: 'To read your Messages' },
-    { kind: 'action', id: 'foundation.settings.full-disk-access', label: 'Open Full Disk Access settings', symbol: 'action.permission', opens: 'settings' },
-  ]);
-  assert.deepEqual(permissionMenuItems(fda, 'denied')[0], { kind: 'status', symbol: 'status.locked', label: 'Full Disk Access is off', detail: 'Turn on Textbutler to read your Messages' });
-  // Keychain has no pane, so no Settings action.
-  assert.equal(permissionMenuItems(CHROME_SAFE_STORAGE({ product: 'Ghostget', command: 'ghostget' }, { caller: 'security' }), 'unknown').length, 1);
   assert.deepEqual(permissionErrorJson(fda, 'denied'), JSON.parse(
     '{"ok":false,"error":{"code":"permission-denied","message":"Textbutler can\'t read your Messages: macOS access is off for Textbutler.","next":"textbutler doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}'));
   assert.equal(permissionError(fda, 'unknown').code, 'permission-unknown');
@@ -333,7 +325,6 @@ function golden(name: string, make: (ref: ProductRef) => PermissionNeed): string
       out.push(`## dialog recovery ${state}`, JSON.stringify(renderRecovery(need, state, 'dialog', env)));
       out.push(`## json ${state}`, JSON.stringify(permissionErrorJson(need, state, env)));
     }
-    for (const state of ['not-determined', 'denied'] as const) out.push(`## menu ${state}`, ...permissionMenuItems(need, state, env).map(item => JSON.stringify(item)));
     out.push('');
   }
   return out.join('\n');

@@ -163,17 +163,6 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      # The hosted Windows ARM64 image can prove its notification area
-      # incapable; that leg still builds and runs unit/headless gates while
-      # interactive tray qualification stays required on x64 Windows.
-      - name: Prepare same-session Windows tray host
-        if: runner.os == 'Windows'
-        id: tray_host
-        timeout-minutes: 3
-        shell: pwsh
-        run: |
-          if ('${{ runner.arch }}' -eq 'ARM64') { ./scripts/windows-desktop-fixture.ps1 -AllowUnsupported }
-          else { ./scripts/windows-desktop-fixture.ps1 }
       - uses: dtolnay/rust-toolchain@stable
         with:
           # fmt and clippy for the root crate run once, on the Linux x64 leg.
@@ -184,20 +173,14 @@ jobs:
           cache-on-failure: true
           # Only main writes the cache; pull requests and tags restore it.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # GTK for the one-shot dialogs; Xvfb and D-Bus give the prompt smoke a
+      # display. No WebKit or tray libraries since 1.0.
       - name: Install Linux build and runtime dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev xvfb dbus-x11
       - run: npm ci --ignore-scripts
-      - name: Build native stdout EOF fixture (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force target/test-fixtures | Out-Null
-          rustc --edition=2021 examples/stdio_fixture.rs -o target/test-fixtures/stdio-fixture.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "COMPANION_STDIO_FIXTURE=$((Resolve-Path target/test-fixtures/stdio-fixture.exe).Path)" >> $env:GITHUB_ENV
-      # The smoke scripts import dist/src, and the SDK tests branch on the
-      # host platform, so every leg builds and tests the SDK once.
+      # The SDK tests branch on the host platform, so every leg builds and
+      # tests the SDK once.
       - run: npm run check:sdk
       # One profile for the whole leg: the tests compile the same optimized
       # dependency tree the shipped binary uses, so nothing is built twice.
@@ -238,32 +221,18 @@ jobs:
           cargo build --locked --release --bin hraness-companion --bin hraness-helper 2> "$RUNNER_TEMP/build.log" || { cat "$RUNNER_TEMP/build.log"; exit 1; }
           grep -E 'dirty|Compiling|Finished' "$RUNNER_TEMP/build.log" | head -40 || true
           grep -E -A6 '^warning' "$RUNNER_TEMP/build.log" | head -80 || true
-      # The cache's post step retains reusable build inputs even if a later
-      # desktop integration test fails. Every gate still runs on every tree.
-      - name: Headless protocol probe
-        run: node scripts/native-smoke.mjs --headless && node scripts/native-smoke.mjs --headless --v2
-      # The one-shot prompt needs no tray, so it qualifies on every leg —
-      # including hosts that prove their notification area incapable.
+      # The alias answers every one-shot argv like the helper and refuses the
+      # removed menu-bar argv; nothing here opens a window.
+      - name: Companion alias smoke
+        run: node scripts/alias-smoke.mjs target/release
+      # The one-shot prompt and notice on hraness-helper. A host without a
+      # desktop must answer "unavailable" to match its capability probe.
       - name: Native prompt smoke (macOS and Windows)
         if: runner.os != 'Linux'
         run: node scripts/prompt-smoke.mjs
       - name: Native prompt smoke (Linux)
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a node scripts/prompt-smoke.mjs
-      - name: Native event loop smoke (macOS and Windows)
-        if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
-        run: node scripts/native-smoke.mjs && node scripts/native-smoke.mjs --v2
-      - name: Native event loop smoke (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          dbus-run-session -- xvfb-run -a node scripts/native-smoke.mjs
-          dbus-run-session -- xvfb-run -a node scripts/native-smoke.mjs --v2
-      - name: Detached CLI lifecycle smoke (macOS and Windows)
-        if: runner.os != 'Linux' && steps.tray_host.outputs.tray_capable != 'false'
-        run: node scripts/lifecycle-smoke.mjs
-      - name: Detached CLI lifecycle smoke (Linux)
-        if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a node scripts/lifecycle-smoke.mjs
       - name: Collect raw executable
         shell: bash
         env:
@@ -312,10 +281,10 @@ jobs:
           pattern: native-*
           path: artifacts
           merge-multiple: true
-      # The package smoke runs the Linux runner, which links WebKitGTK and
-      # the tray libraries at load time. Runtime packages only, no -dev.
+      # The package smoke runs the Linux binaries, which link GTK for the
+      # dialogs. Runtime packages only, no -dev.
       - name: Install runner runtime libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-0
       - run: npm ci --ignore-scripts
       # The SDK tests already ran on this tree in the sdk job and on every
       # native leg; packaging only needs the compiled dist.

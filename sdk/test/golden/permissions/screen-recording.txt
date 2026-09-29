@@ -32,12 +32,6 @@ NOTE macOS will ask to let Example record your screen.
 {"title":"Example can't record your screen","lines":["Example couldn't record your screen. macOS may be blocking Example. Check System Settings › Privacy & Security › Screen & System Audio Recording."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't record your screen. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"screen-recording","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Screen & System Audio Recording","detail":"To record your screen"}
-{"kind":"action","id":"foundation.settings.screen-recording","label":"Open Screen & System Audio Recording settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Screen & System Audio Recording is off","detail":"Turn on Example to record your screen"}
-{"kind":"action","id":"foundation.settings.screen-recording","label":"Open Screen & System Audio Recording settings","symbol":"action.permission","opens":"settings"}
 
 # screen-recording · requester: terminal
 ## cli pre-prompt, interactive
@@ -73,9 +67,3 @@ NOTE macOS will ask to let Terminal record your screen for Example.
 {"title":"Example can't record your screen","lines":["Example couldn't record your screen. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Screen & System Audio Recording."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't record your screen. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"screen-recording","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Screen & System Audio Recording","detail":"To record your screen"}
-{"kind":"action","id":"foundation.settings.screen-recording","label":"Open Screen & System Audio Recording settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Screen & System Audio Recording is off","detail":"Turn on Terminal to record your screen"}
-{"kind":"action","id":"foundation.settings.screen-recording","label":"Open Screen & System Audio Recording settings","symbol":"action.permission","opens":"settings"}

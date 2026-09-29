@@ -90,7 +90,6 @@ pub enum PrePromptOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
     Cli,
-    Menu,
     Dialog,
 }
 
@@ -267,8 +266,7 @@ impl PermissionKind {
         self.info().url
     }
 
-    /// True for kinds with a System Settings pane (and so a
-    /// `foundation.settings.<kind>` menu action).
+    /// True for kinds with a System Settings pane.
     pub fn has_settings_pane(self) -> bool {
         self.settings_url().is_some()
     }
@@ -483,7 +481,7 @@ pub fn render_pre_prompt(need: &PermissionNeed, surface: Surface, env: Env) -> R
         let thats = if requester == *product {
             String::new()
         } else {
-            format!(". That's {product}'s menu bar")
+            format!(". That's how {product} starts in the background")
         };
         (
             format!("macOS will show a notice that {requester} can open at login{thats}."),
@@ -658,7 +656,7 @@ pub fn format_notice(
     out.join("\n") + "\n"
 }
 
-/// The runner `--notice` dialog request (`docs/protocol-v2.md`).
+/// The helper `--notice` dialog request (`docs/protocol.md`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoticeRequest {
     pub title: String,
@@ -695,7 +693,7 @@ fn clip(text: &str, max: usize) -> String {
 }
 
 /// The `--notice` dialog request for a need, or `None` when no dialog
-/// applies (login items: the menu toggle is the consent).
+/// applies (login items: running the login-item command is the consent).
 pub fn notice_request(need: &PermissionNeed, env: Env) -> Option<NoticeRequest> {
     let behavior = need.kind.behavior();
     if behavior == PromptBehavior::Notifies {
@@ -715,83 +713,6 @@ pub fn notice_request(need: &PermissionNeed, env: Env) -> Option<NoticeRequest> 
         secondary: Some("Not now".to_owned()),
         settings,
     })
-}
-
-/// A menu row from [`permission_menu_items`], in the protocol v2 shape.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PermissionMenuRow {
-    /// `{"kind":"status","symbol":"status.locked","label","detail"}`
-    Status { label: String, detail: String },
-    /// `{"kind":"action","id":"foundation.settings.<kind>","label","symbol":"action.permission","opens":"settings"}`
-    OpenSettings { id: String, label: String },
-}
-
-impl PermissionMenuRow {
-    pub fn to_json(&self) -> String {
-        match self {
-            PermissionMenuRow::Status { label, detail } => json::Object::new()
-                .str("kind", "status")
-                .str("symbol", "status.locked")
-                .str("label", label)
-                .str("detail", detail)
-                .finish(),
-            PermissionMenuRow::OpenSettings { id, label } => json::Object::new()
-                .str("kind", "action")
-                .str("id", id)
-                .str("label", label)
-                .str("symbol", "action.permission")
-                .str("opens", "settings")
-                .finish(),
-        }
-    }
-}
-
-/// Menu rows: a `status.locked` row plus the `foundation.settings.<kind>`
-/// action when a pane exists. Nothing when granted.
-pub fn permission_menu_items(
-    need: &PermissionNeed,
-    state: PermissionState,
-    env: Env,
-) -> Vec<PermissionMenuRow> {
-    if state == PermissionState::Granted {
-        return vec![];
-    }
-    let name = need
-        .kind
-        .pane_name()
-        .unwrap_or("Apple's command line tools");
-    let requester = requester_of(need, env);
-    let status = if need.kind == PermissionKind::Keychain {
-        if state == PermissionState::Denied {
-            PermissionMenuRow::Status {
-                label: "Keychain access is off".to_owned(),
-                detail: "Choose Always Allow when macOS asks again".to_owned(),
-            }
-        } else {
-            PermissionMenuRow::Status {
-                label: "Needs keychain access".to_owned(),
-                detail: clip(&format!("To {}", need.ask), 80),
-            }
-        }
-    } else if state == PermissionState::Denied {
-        PermissionMenuRow::Status {
-            label: clip(&format!("{name} is off"), 48),
-            detail: clip(&format!("Turn on {requester} to {}", need.ask), 80),
-        }
-    } else {
-        PermissionMenuRow::Status {
-            label: clip(&format!("Needs {name}"), 48),
-            detail: clip(&format!("To {}", need.ask), 80),
-        }
-    };
-    let mut rows = vec![status];
-    if need.kind.has_settings_pane() {
-        rows.push(PermissionMenuRow::OpenSettings {
-            id: format!("foundation.settings.{}", need.kind.as_str()),
-            label: clip(&format!("Open {name} settings"), 48),
-        });
-    }
-    rows
 }
 
 /// The `--json` error fields for a permission failure.
@@ -1369,7 +1290,7 @@ pub mod presets {
             r,
             PermissionKind::LoginItem,
             "open at login",
-            "Its menu bar icon opens when you log in. Nothing else runs in the background.",
+            "It starts in the background when you log in and shows no window or icon.",
         )
         .with_unattended(Unattended::Proceed)
     }

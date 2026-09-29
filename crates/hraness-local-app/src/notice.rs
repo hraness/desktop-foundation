@@ -1,10 +1,10 @@
-//! One-shot native notice dialog (`hraness-companion --notice`).
+//! One-shot native notice dialog (`hraness-helper --notice`).
 //!
-//! A menu shows this before an action causes a macOS permission prompt, or
-//! to confirm a destructive action. It reads one `notice-request` frame from
-//! stdin, shows one alert with the product's own button labels, writes one
-//! `notice-result` frame and exits. Like `--prompt` it needs no state
-//! directory, lock or tray. See `docs/protocol-v2.md` § Notice dialog.
+//! A product shows this before an action causes a macOS permission prompt,
+//! or to confirm a destructive action. It reads one `notice-request` frame
+//! from stdin, shows one alert with the product's own button labels, writes
+//! one `notice-result` frame and exits. Like `--prompt` it needs no state
+//! directory or lock. See `docs/protocol.md` § Notice dialog.
 
 use std::io::{BufRead, Write};
 
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn the_documented_request_is_accepted() {
-        assert!(include_str!("../../../docs/protocol-v2.md").contains(DOC));
+        assert!(include_str!("../../../docs/protocol.md").contains(DOC));
         let spec = parse(DOC).unwrap();
         assert_eq!(spec.primary, "Continue");
         assert_eq!(spec.secondary.as_deref(), Some("Not now"));
@@ -518,8 +518,7 @@ mod tests {
             );
             assert_eq!(parse(&json), Err(ProtocolError("invalid-notice")), "{kind}");
         }
-        // desktop-foundation's protocol_v2 tests check that the same kinds
-        // back the foundation.settings.<kind> menu actions.
+        // docs/permissions.md lists the same kinds and panes.
         let doc = include_str!("../../../docs/permissions.md");
         for (kind, url) in SETTINGS_PANES {
             assert!(

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
-const binary = resolve(process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? `target/release/hraness-companion${process.platform === 'win32' ? '.exe' : ''}`);
+const binary = resolve(process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? `target/release/hraness-helper${process.platform === 'win32' ? '.exe' : ''}`);
 
 // One bounded one-shot invocation: JSON request on stdin, one JSON frame on
 // stdout, exit code collected. Output is capped so a misbehaving runner cannot

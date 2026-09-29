@@ -4,8 +4,8 @@
 //! - [`launch`] is `--launch`: the app runs the product as its child.
 //! - [`service`] plans and installs per-user login items.
 //! - [`notice`] and [`prompt`] are the one-shot native dialogs.
-//! - [`helper`] dispatches every non-tray mode of `hraness-helper` and
-//!   `hraness-companion`, so both binaries keep one argv contract
+//! - [`helper`] dispatches every one-shot mode of `hraness-helper` and its
+//!   `hraness-companion` alias, so both binaries keep one argv contract
 //!   (`contract/helper-argv.v0.8.1.json`).
 
 pub mod helper;

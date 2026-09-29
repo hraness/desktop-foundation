@@ -9,19 +9,19 @@ import { homedir } from 'node:os';
 import { posix } from 'node:path';
 import { detectAudience, type Audience } from './audience.js';
 import { cliStyle, cliSymbol, type CliStyle } from './cli-style.js';
-import type { MenuItemV2, NoticeRequest, NoticeResult, PermissionKind, SettingsPermissionKind } from './protocol-v2.js';
+import type { NoticeRequest, NoticeResult, PermissionKind, SettingsPermissionKind } from './notice.js';
 
 // Probe paths are macOS paths, so use POSIX rules on every host (CI runs these tests on Windows too).
 const { isAbsolute, join, normalize } = posix;
 
 export type { Audience } from './audience.js';
 export { detectAudience } from './audience.js';
-export type { PermissionKind, SettingsPermissionKind } from './protocol-v2.js';
+export type { PermissionKind, SettingsPermissionKind } from './notice.js';
 export type PromptBehavior = 'asks' | 'settings-only' | 'notifies';
 export type PermissionState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 export type RecoveryState = 'denied' | 'unknown' | 'missing';
 export type PrePromptOutcome = 'continue' | 'skip' | 'unattended-proceed' | 'unattended-stop';
-export type Surface = 'cli' | 'menu' | 'dialog';
+export type Surface = 'cli' | 'dialog';
 
 export interface ProductRef {
   /** Display name from the portfolio registry: "Textbutler". */
@@ -160,7 +160,7 @@ export function renderPrePrompt(need: PermissionNeed, surface: Surface, env: Nod
     detail = need.why;
     confirm = 'Press Enter to continue · s to skip';
   } else if (behavior === 'notifies') {
-    const thatsProduct = requester === need.product ? '' : `. That's ${need.product}'s menu bar`;
+    const thatsProduct = requester === need.product ? '' : `. That's how ${need.product} starts in the background`;
     title = `macOS will show a notice that ${requester} can open at login${thatsProduct}.`;
     detail = `${need.why} Turn it off any time in ${path}.`;
   } else if (behavior === 'settings-only') {
@@ -429,23 +429,6 @@ export function classifyKeychainStatus(status: number): RecoveryState | undefine
   return undefined;
 }
 
-/** Menu rows: a `status.locked` row plus the `foundation.settings.<kind>` action when a pane exists. */
-export function permissionMenuItems(need: PermissionNeed, state: PermissionState, env: NodeJS.ProcessEnv = process.env): MenuItemV2[] {
-  if (state === 'granted') return [];
-  const { pane } = info(need.kind);
-  const name = pane ?? "Apple's command line tools";
-  const requester = requesterOf(need, env);
-  const rows: MenuItemV2[] = [need.kind === 'keychain'
-    ? state === 'denied'
-      ? { kind: 'status', symbol: 'status.locked', label: 'Keychain access is off', detail: 'Choose Always Allow when macOS asks again' }
-      : { kind: 'status', symbol: 'status.locked', label: 'Needs keychain access', detail: clip(`To ${need.ask}`, 80) }
-    : state === 'denied'
-    ? { kind: 'status', symbol: 'status.locked', label: clip(`${name} is off`, 48), detail: clip(`Turn on ${requester} to ${need.ask}`, 80) }
-    : { kind: 'status', symbol: 'status.locked', label: clip(`Needs ${name}`, 48), detail: clip(`To ${need.ask}`, 80) }];
-  if (hasSettingsPane(need.kind)) rows.push({ kind: 'action', id: `foundation.settings.${need.kind}`, label: clip(`Open ${name} settings`, 48), symbol: 'action.permission', opens: 'settings' });
-  return rows;
-}
-
 export interface PermissionErrorInfo {
   code: 'permission-denied' | 'permission-unknown' | 'permission-missing';
   kind: PermissionKind;
@@ -467,7 +450,7 @@ export function permissionErrorJson(need: PermissionNeed, state: RecoveryState, 
 // Presets. Products pass their ProductRef and the parameters shown.
 
 export function LOGIN_ITEM(ref: ProductRef): PermissionNeed {
-  return { ...ref, kind: 'login-item', ask: 'open at login', why: 'Its menu bar icon opens when you log in. Nothing else runs in the background.', whenUnattended: 'proceed' };
+  return { ...ref, kind: 'login-item', ask: 'open at login', why: 'It starts in the background when you log in and shows no window or icon.', whenUnattended: 'proceed' };
 }
 export function CHROME_SAFE_STORAGE(ref: ProductRef, options: { browser?: string; caller: string; why?: string }): PermissionNeed {
   const browser = options.browser ?? 'Chrome';

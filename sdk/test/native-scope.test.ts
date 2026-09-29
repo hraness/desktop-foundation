@@ -71,7 +71,7 @@ test('a touched platform branch runs every target', async () => {
 
 test('security and process modules run every target, whatever their content', async () => {
   const { selectScope } = await load();
-  for (const path of ['sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/client.ts', 'sdk/src/prompt.ts', 'crates/hraness-control-kit/src/crypto.rs']) {
+  for (const path of ['sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/prompt.ts', 'crates/hraness-control-kit/src/crypto.rs']) {
     const read = files({ [path]: { base: neutral, head: neutral } });
     assert.equal(selectScope([{ status: 'M', path }], read, () => false).scope, 'full', path);
   }
@@ -95,7 +95,7 @@ test('an SDK module whose paired test branches on the platform runs every target
 test('documentation that code or the package reads is not docs-only', async () => {
   const { selectScope } = await load();
   // include_str! by Rust tests that run only on native legs.
-  for (const path of ['docs/protocol-v2.md', 'docs/permissions.md'])
+  for (const path of ['docs/protocol.md', 'docs/permissions.md'])
     assert.equal(selectScope([{ status: 'M', path }], files({})).scope, 'subset', path);
   // The packaged skill, and deleting any packaged doc, needs the package job.
   assert.equal(selectScope([{ status: 'M', path: 'skills/companion/SKILL.md' }], files({})).scope, 'full');
@@ -131,7 +131,7 @@ test('the doc lists match what the code reads', async (t) => {
 test('build, packaging, CI and selector changes run every target', async () => {
   const { selectScope } = await load();
   for (const path of [
-    '.github/workflows/companion.yml', 'scripts/native-scope.mjs', 'scripts/native-smoke.mjs', 'scripts/windows-desktop-fixture.ps1',
+    '.github/workflows/companion.yml', 'scripts/native-scope.mjs', 'scripts/alias-smoke.mjs', 'scripts/prompt-smoke.mjs',
     'Cargo.toml', 'Cargo.lock', 'crates/hraness-local-app/Cargo.toml', 'build.rs', 'tauri.conf.json', 'windows.manifest.xml',
     'capabilities/README.json', 'icons/icon.ico', 'examples/stdio_fixture.rs', 'package.json', 'package-lock.json',
     'sdk/tsconfig.json', '.gitattributes', 'crates/hraness-control-kit/tests/golden/tui-status-80.txt',

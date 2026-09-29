@@ -16,7 +16,7 @@ when the person asks.
 ## Rules every product follows
 
 - Before any system prompt, show the notice for that prompt: on stderr at a
-  terminal, or through the `--notice` dialog when a menu action causes it.
+  terminal, or through the `--notice` dialog when there is no terminal.
 - After a denial, say it was a denial (never "not found", "signed out" or a raw
   `EPERM`), name the exact pane and give one next step.
 - Name the product. `requester` is whatever macOS will actually show, so the
@@ -44,10 +44,9 @@ when the person asks.
 | `developer-tools` | asks to install Apple's command line tools | none | none | none |
 | `gatekeeper` | blocks a quarantined download | Privacy & Security | System Settings › Privacy & Security | `x-apple.systempreferences:com.apple.preference.security?General` |
 
-The URLs are the allowlist: `openPermissionSettings`, the
-`foundation.settings.<kind>` menu action and the notice dialog open only
-these. `keychain` and `developer-tools` have no pane, so they have no
-`foundation.settings.<kind>` action and cannot be a notice's `settings`. Verify the `incoming-connections` and `gatekeeper` URLs on macOS 26
+The URLs are the allowlist: `openPermissionSettings` and the notice dialog open only
+these. `keychain` and `developer-tools` have no pane, so they cannot be a
+notice's `settings`. Verify the `incoming-connections` and `gatekeeper` URLs on macOS 26
 when the kit lands; fall back to the Privacy & Security pane if either fails.
 
 ## TypeScript API
@@ -62,7 +61,7 @@ export type PermissionKind =
 export type PromptBehavior = 'asks' | 'settings-only' | 'notifies';
 export type PermissionState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 export type PrePromptOutcome = 'continue' | 'skip' | 'unattended-proceed' | 'unattended-stop';
-export type Surface = 'cli' | 'menu' | 'dialog';
+export type Surface = 'cli' | 'dialog';
 
 export interface ProductRef {
   product: string;      // display name from the portfolio registry: "Textbutler"
@@ -115,8 +114,6 @@ export function permissionStatus(kind: PermissionKind, target?: string, io?: Per
 /** Opens the pane for an explicit human action only. Returns false when the kind has no pane. */
 export function openPermissionSettings(kind: PermissionKind, io?: PermissionIO): Promise<boolean>;
 
-/** Menu rows: a status.locked row plus the foundation.settings.<kind> action when a pane exists. */
-export function permissionMenuItems(need: PermissionNeed, state: PermissionState): MenuItemV2[];
 /** The --json error object for a permission failure. */
 export function permissionError(need: PermissionNeed, state: 'denied' | 'unknown' | 'missing'): {
   code: 'permission-denied' | 'permission-unknown' | 'permission-missing';
@@ -124,9 +121,8 @@ export function permissionError(need: PermissionNeed, state: 'denied' | 'unknown
 };
 ```
 
-`MenuItemV2`, `NoticeRequest` and `NoticeResult` come from
-`sdk/src/protocol-v2.ts`. `PermissionKind` is defined there too, because the
-wire uses it.
+`NoticeRequest` and `NoticeResult` come from `sdk/src/notice.ts`.
+`PermissionKind` is defined there too, because the wire uses it.
 
 The shipped kit also exports these helpers. Every function that resolves a
 default requester takes an optional last `env` argument, and `responsibleApp`
@@ -154,10 +150,7 @@ export function defaultPermissionIO(): PermissionIO;
 `RenderedNotice` from `renderRecovery` also carries `next`, the one step
 printed after `→`; its `confirm` is the "press o to open Settings" hint.
 
-Keychain rows differ from the menu table below because Keychain Access has no
-pane: "Needs keychain access" (detail "To {ask}") and, after a denial,
-"Keychain access is off" (detail "Choose Always Allow when macOS asks again").
-A keychain `missing` recovery reads `✗ {product} can't find "{target}" in your
+Keychain Access has no pane, so keychain copy never offers Settings. A keychain `missing` recovery reads `✗ {product} can't find "{target}" in your
 keychain.`
 
 `sdk/test/golden/permissions/*.txt` holds the rendered copy for every preset,
@@ -174,7 +167,7 @@ them with `UPDATE_GOLDEN=1 npm run check:sdk` and review the diff.
 | --- | --- |
 | `keychain` | The executable that calls the keychain. The preset takes it as a parameter (`security` today; the signed helper later). |
 | `incoming-connections` | The listening executable's name. |
-| `login-item` | The product. Login Items lists the program the login item runs, never the terminal; `menubar install` passes that program's name until the local app exists. |
+| `login-item` | The product. Login Items lists the program the login item runs, never the terminal; `install` passes that program's name until the local app exists. |
 | everything else | `responsibleApp(env)` |
 
 `responsibleApp(env)` returns the product name when `HRANESS_APP_BUNDLE_ID`
@@ -267,7 +260,7 @@ notifies (no confirm line):
 ```
 
 `{thatsProduct}` is empty when the requester is the product, otherwise
-`. That's {product}'s menu bar`.
+`. That's how {product} starts in the background`.
 
 The third line appears only when stdin and stderr are both terminals. Enter
 continues, `s` skips, and for settings-only Enter opens the pane first. With no
@@ -306,28 +299,13 @@ missing, `developer-tools`:
 and the kind has a pane. The symbols follow the CLI style contract, including
 its ASCII fallback (`🔐` → `NOTE`, `✗` → `FAIL`, `→` → `->`).
 
-### Menu
-
-`permissionMenuItems` returns a `status` row with `status.locked` and, when
-the kind has a pane, an action with `symbol: action.permission`,
-`opens: settings` and ID `foundation.settings.{kind}`:
-
-| State | Status row | Action |
-| --- | --- | --- |
-| not-determined, unknown | "Needs {pane}", detail "To {ask}" | "Open {pane} settings" |
-| denied | "{pane} is off", detail "Turn on {requester} to {ask}" | "Open {pane} settings" |
-| granted | no rows | none |
-
-When the product is signed out or stopped, the permission rows follow the
-status row that explains that.
-
-### Dialog (`--notice`, when a menu action is about to cause a prompt)
+### Dialog (`--notice`, when a prompt is coming and there is no terminal)
 
 | Behavior | Title | Message | Buttons |
 | --- | --- | --- | --- |
 | asks | `{product} needs access to {target or pane}` | the CLI notice's first two lines as one paragraph, without the symbol | primary "Continue", secondary "Not now" |
 | settings-only | `{product} needs {pane}` | the CLI notice's first two lines | primary "Open System Settings" with `settings: {kind}` (choosing it opens the pane), secondary "Not now" |
-| notifies | no dialog: turning on "Open at login" is the consent. The toggle's subtitle reads "macOS shows a notice when you turn this on". | | |
+| notifies | no dialog: running the product's login-item command is the consent. | | |
 
 ## Presets
 
@@ -340,18 +318,18 @@ installed). Before that, the requester is the terminal app or executable and
 
 ### `LOGIN_ITEM(ref)`
 
-kind `login-item`; `why`: "Its menu bar icon opens when you log in. Nothing else runs in the background."
+kind `login-item`; `why`: "It starts in the background when you log in and shows no window or icon."
 
 ```text
 🔐 macOS will show a notice that Textbutler can open at login.
-   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.
+   It starts in the background when you log in and shows no window or icon. Turn it off any time in System Settings › General › Login Items & Extensions.
 ```
 
 Before the local app (requester `bun`):
 
 ```text
-🔐 macOS will show a notice that bun can open at login. That's Textbutler's menu bar.
-   Its menu bar icon opens when you log in. Nothing else runs in the background. Turn it off any time in System Settings › General › Login Items & Extensions.
+🔐 macOS will show a notice that bun can open at login. That's how Textbutler starts in the background.
+   It starts in the background when you log in and shows no window or icon. Turn it off any time in System Settings › General › Login Items & Extensions.
 ```
 
 ### `CHROME_SAFE_STORAGE(ref, { browser = 'Chrome', caller, why? })`
@@ -477,7 +455,7 @@ hraness-cli-kit = { git = "https://github.com/hraness/desktop-foundation", tag =
 ```
 
 `desktop_foundation::cli_kit`, `::audience` and `::permissions` re-export it
-for products that already depend on the menu bar crate. Every function that
+for products that already depend on the `desktop-foundation` crate. Every function that
 resolves a default requester takes `env: &dyn Fn(&str) -> Option<String>`
 (`audience::process_env` for the real environment), so tests never touch the
 process.
@@ -500,7 +478,7 @@ pub mod permissions {
     pub enum PermissionState { Granted, Denied, NotDetermined, Unknown }
     pub enum RecoveryState { Denied, Unknown, Missing }
     pub enum PrePromptOutcome { Continue, Skip, UnattendedProceed, UnattendedStop }
-    pub enum Surface { Cli, Menu, Dialog }
+    pub enum Surface { Cli, Dialog }
     pub enum Unattended { Proceed, Stop }
     pub enum NoticeKind { PrePrompt, Recovery }
 
@@ -512,7 +490,6 @@ pub mod permissions {
     pub struct RenderedNotice { pub title: String, pub lines: Vec<String>, pub confirm: Option<String>, pub next: Option<String> }
     pub struct NoticeRequest { pub title: String, pub message: String, pub primary: String,
         pub secondary: Option<String>, pub settings: Option<PermissionKind> }   // .to_json()
-    pub enum PermissionMenuRow { Status { label, detail }, OpenSettings { id, label } }  // .to_json()
 
     pub trait PermissionIo {
         fn env(&self, key: &str) -> Option<String>;
@@ -548,7 +525,6 @@ pub mod permissions {
     pub fn report_permission_failure(need: &PermissionNeed, state: RecoveryState, audience: Option<Audience>, io: &mut dyn PermissionIo) -> std::io::Result<()>;
     pub fn permission_status(kind: PermissionKind, target: Option<&str>, io: &dyn PermissionIo) -> PermissionState;
     pub fn open_settings(kind: PermissionKind, io: &mut dyn PermissionIo) -> bool;
-    pub fn permission_menu_items(need: &PermissionNeed, state: PermissionState, env: Env) -> Vec<PermissionMenuRow>;
     pub fn permission_error_json(need: &PermissionNeed, state: RecoveryState, env: Env) -> String;
     pub fn permission_cli_error(need: &PermissionNeed, state: RecoveryState, env: Env) -> CliError;
     pub fn classify_keychain_status(status: i32) -> Option<RecoveryState>;

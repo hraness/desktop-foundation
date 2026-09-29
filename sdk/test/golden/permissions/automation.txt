@@ -32,12 +32,6 @@ NOTE macOS will ask to let Example control Messages.
 {"title":"Example can't control Messages","lines":["Example couldn't control Messages. macOS may be blocking Example. Check System Settings › Privacy & Security › Automation."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't control Messages. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"automation","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Automation","detail":"To control Messages"}
-{"kind":"action","id":"foundation.settings.automation","label":"Open Automation settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Automation is off","detail":"Turn on Example to control Messages"}
-{"kind":"action","id":"foundation.settings.automation","label":"Open Automation settings","symbol":"action.permission","opens":"settings"}
 
 # automation · requester: terminal
 ## cli pre-prompt, interactive
@@ -73,9 +67,3 @@ NOTE macOS will ask to let Terminal control Messages for Example.
 {"title":"Example can't control Messages","lines":["Example couldn't control Messages. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Automation."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't control Messages. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"automation","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Automation","detail":"To control Messages"}
-{"kind":"action","id":"foundation.settings.automation","label":"Open Automation settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Automation is off","detail":"Turn on Terminal to control Messages"}
-{"kind":"action","id":"foundation.settings.automation","label":"Open Automation settings","symbol":"action.permission","opens":"settings"}

@@ -32,12 +32,6 @@ NOTE Example needs Full Disk Access to read your Messages.
 {"title":"Example can't read your Messages","lines":["Example couldn't read your Messages. macOS may be blocking Example. Check System Settings › Privacy & Security › Full Disk Access."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't read your Messages. macOS may be blocking Example.","next":"example doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Full Disk Access","detail":"To read your Messages"}
-{"kind":"action","id":"foundation.settings.full-disk-access","label":"Open Full Disk Access settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Full Disk Access is off","detail":"Turn on Example to read your Messages"}
-{"kind":"action","id":"foundation.settings.full-disk-access","label":"Open Full Disk Access settings","symbol":"action.permission","opens":"settings"}
 
 # messages-fda · requester: terminal
 ## cli pre-prompt, interactive
@@ -73,9 +67,3 @@ NOTE Example needs Full Disk Access to read your Messages.
 {"title":"Example can't read your Messages","lines":["Example couldn't read your Messages. macOS may be blocking Terminal. Check System Settings › Privacy & Security › Full Disk Access."],"next":"example doctor"}
 ## json missing
 {"ok":false,"error":{"code":"permission-missing","message":"Example couldn't read your Messages. macOS may be blocking Terminal.","next":"example doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}
-## menu not-determined
-{"kind":"status","symbol":"status.locked","label":"Needs Full Disk Access","detail":"To read your Messages"}
-{"kind":"action","id":"foundation.settings.full-disk-access","label":"Open Full Disk Access settings","symbol":"action.permission","opens":"settings"}
-## menu denied
-{"kind":"status","symbol":"status.locked","label":"Full Disk Access is off","detail":"Turn on Terminal to read your Messages"}
-{"kind":"action","id":"foundation.settings.full-disk-access","label":"Open Full Disk Access settings","symbol":"action.permission","opens":"settings"}

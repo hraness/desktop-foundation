@@ -1,5 +1,5 @@
-//! The primitives the one-shot helper modes share with the menu-bar
-//! runner protocol. `desktop_foundation::protocol` re-exports them.
+//! The primitives the one-shot helper modes share: the frame version, the
+//! frame size limit and the error line.
 
 use std::io::Write;
 
@@ -7,8 +7,9 @@ use std::io::Write;
 pub const VERSION: u8 = 1;
 /// The largest frame any mode reads from stdin.
 pub const MAX_FRAME_BYTES: usize = 256 * 1024;
-/// Runner protocol versions `--version` reports. `desktop_foundation`'s
-/// tests check this against its `SUPPORTED_VERSIONS`.
+/// The protocol versions `--version` reports. Frozen by
+/// `contract/helper-argv.v0.8.1.json`; 1.0 removed the menu-bar runner these
+/// once named, and the line keeps its shape so version parsers still work.
 pub const RUNNER_PROTOCOLS: &str = "1,2";
 
 /// Safe machine-readable categories: never copy input into an error message.
@@ -26,7 +27,7 @@ pub fn valid_app_id(value: &str) -> bool {
 }
 
 /// `{"type":"error","version":<v>,"code":"<code>"}` plus a newline: the
-/// same bytes the runner's `Event::Error` serializes to.
+/// same bytes the 0.x menu-bar runner printed for an error.
 pub fn write_error(writer: &mut impl Write, version: u8, code: &str) -> std::io::Result<()> {
     #[derive(serde::Serialize)]
     struct Error<'a> {

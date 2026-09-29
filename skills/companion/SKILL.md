@@ -1,72 +1,63 @@
 ---
 name: companion
-description: Install, diagnose, or integrate Hraness CLI menu companions built on desktop-foundation on macOS, Windows, or Linux. Use for tray lifecycle, release selection, OS approval handoffs, and shared menu adapters; not for general desktop automation or provider permissions.
+description: Install, diagnose, or integrate Hraness CLI products built on desktop-foundation on macOS, Windows, or Linux. Use for the owner process, status and tui, the native helper, release selection, OS approval handoffs, and migrating off the removed menu bar; not for general desktop automation or provider permissions.
 ---
 
-# CLI companions
+# Hraness CLI products
 
-Read [installation](../../docs/installation.md) for installing or diagnosing a
-launch. Read [platforms](../../docs/platforms.md) when implementing an adapter,
-designing a menu, or claiming platform support. The [repository README](../../README.md)
+Read [installation](../../docs/installation.md) for installing or diagnosing
+the helper. Read [platforms](../../docs/platforms.md) and
+[adoption](../../docs/adoption.md) when integrating a product or claiming
+platform support, and [the 1.0 migration guide](../../docs/migration-1.0.md)
+when a product still uses the menu bar. The [repository README](../../README.md)
 and installed CLI help are authoritative for the current API and commands.
+
+1.0 has no menu bar. `hraness-companion` is an alias of `hraness-helper`; with
+no arguments or a 0.x tray flag it exits 2 with `tray-removed`. That is the
+expected answer, not a fault to repair: use `<product> tui` or
+`<product> status --json`.
 
 ## Install or repair
 
 - Identify the exact product/version, OS/architecture and graphical session.
-  Inspect `menubar --help`; older products may not yet implement the common
-  command contract. Start with the product's supported status/doctor commands.
-- Use the product's immutable runner manifest and expected digest. Never replace
-  missing release assets with a mutable latest download, source build, arbitrary
-  executable, or another architecture. Ordinary users need no compiler.
-- Preserve the product/user singleton and data. Stop only the task-owned
-  companion through its supported command; do not kill by process-name pattern,
-  remove live locks, stop other products, or reset daemon/account state.
+  Start with the product's `status --json` and `doctor` commands.
+- Use the product's immutable release manifest and expected digest. Never
+  replace missing release assets with a mutable latest download, source build,
+  arbitrary executable, or another architecture. Ordinary users need no
+  compiler.
+- Preserve the product's owner and data. Stop the owner only through the
+  product's own command; do not kill by process-name pattern, remove live
+  sockets or locks, stop other products, or reset daemon/account state.
 - A native executable can still be blocked by Gatekeeper or Windows policy.
   For an exact verified file, explain the OS-provided human approval flow in
   the installation guide. The human performs the trust decision. Never remove
   quarantine/download metadata, disable protection, or change managed policy.
 - Distinguish SmartScreen's optional Run Anyway from Smart App Control, which
-  has no per-app exception. A policy block may make the unsigned companion
-  unavailable; use already-permitted CLI/browser controls where available.
-- On Linux, distinguish missing loader libraries, no graphical session and no
-  panel host. Offer documented distro packages or a compatible GNOME extension
-  when relevant; do not install another desktop environment to force a tray.
-- After repair, verify the running status and an observable harmless menu action.
-  A spawn, successful checksum or build alone does not prove a working tray.
+  has no per-app exception. A policy block makes the helper's dialogs
+  unavailable; the product's CLI keeps working.
+- On Linux the helper needs GTK 3 and a graphical session for dialogs. Without
+  one, `--prompt-probe` reports unavailable and the product uses the terminal.
 
 ## Integrate a product
 
-Reuse `@hraness/desktop-foundation` and the shared `hraness-companion` runner.
-Keep daemon authority, permissions and action handlers in the product; send
-bounded snapshots and receive stable action IDs over JSON lines. The renderer
-must not become a shell-command transport or credential store.
-
-Use confirmed visible state, actions, checkmarks and short submenus. Open larger
-interfaces in the browser. Include status, a useful setup/recovery action and
-Quit; distinguish quitting the companion from stopping the product daemon.
-Do not depend on tray-title text, tooltips, hover or global shortcuts across all
-platforms. Keep protected provider capabilities on their supported platforms.
-New menus use protocol v2 (`docs/protocol-v2.md`): pass `mark` (a monochrome
-`mark.*` symbol plus one or two `letters` for Windows/Linux, with a dot or
-count only when something needs attention) instead of `title`, build items with
-`layout()` from `@hraness/desktop-foundation/menu-kit`, and check every state
-fixture with `companion lint-menu --strict`. The SDK down-levels to v1 for
-older runners. A v1 `title` is still one or two ASCII letters or a single emoji
-grapheme; icon-only Windows/Linux trays need a pre-rendered `icon` (bounded
-base64 RGBA), without which an emoji title falls back to a blank badge.
+Reuse `@hraness/desktop-foundation`. Put every action behind a registry verb
+with an operation class, keep state in one owner (`./control`), gate `decide`
+verbs with `./human-gate`, and offer `status --json` and `tui`. Keep daemon
+authority, permissions and action handlers in the product. The helper must not
+become a shell-command transport or credential store.
 
 For credential entry, the SDK's `promptSecret` shows one bounded native dialog
-or falls back to a masked TTY prompt; it returns the value to the product and
-stores nothing. Probe hosts with `promptCapability` and keep secrets out of
-argv, labels, logs and the request's own title/message.
+or falls back to a masked terminal prompt; it returns the value to the product
+and stores nothing. Probe hosts with `promptCapability` and keep secrets out of
+argv, logs and the request's own title and message.
 
-Preserve separate evidence for portable tests, native builds, interactive smoke,
-clean installation and login behavior. Report untested combinations clearly.
-On macOS each product gets a local app, `~/Applications/Hraness/<Product>.app`,
-assembled on the person's Mac around the verified runner (`--assemble-app`, or
-`identity::assemble_app` in Rust) and signed with the one `Hraness Local
-Signing` identity, so macOS shows the product's name and keeps its approvals
-across updates. Create that identity only after showing the `LOCAL_SIGNING`
-notice. Never distribute the app: no zip, DMG, cask, installer, publisher
-signing credentials or Apple notarization workflow belong in this model. See
-`docs/identity.md`.
+Preserve separate evidence for portable tests, native builds, the helper
+smokes, clean installation and login behavior. Report untested combinations
+clearly. On macOS each product can have a local app,
+`~/Applications/Hraness/<Product>.app`, assembled on the person's Mac around
+the verified helper (`--assemble-app`, or `identity::assemble_app` in Rust)
+and signed with the one `Hraness Local Signing` identity, so macOS shows the
+product's name and keeps its approvals across updates. Create that identity
+only after showing the `LOCAL_SIGNING` notice. Never distribute the app: no
+zip, DMG, cask, installer, publisher signing credentials or Apple notarization
+workflow belong in this model. See `docs/identity.md`.

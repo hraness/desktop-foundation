@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { link, lstat, mkdir, open, readlink, unlink } from 'node:fs/promises';
+import { link, lstat, mkdir, open, readFile, readlink, unlink } from 'node:fs/promises';
 import { isAbsolute, join, normalize, parse, sep } from 'node:path';
 import { CompanionError } from './errors.js';
 import { resolveTarget, TARGETS, userPaths, type PlatformTarget } from './platform.js';
@@ -15,7 +15,7 @@ export interface ReleaseManifest {
   /** `hraness-helper-<target>` binaries, from v0.9.0. Optional so older manifests still parse. */
   helperAssets?: ReleaseAsset[];
 }
-/** Which binary to install: the companion (tray plus helper modes) or the helper (no tray). */
+/** Which binary to install: the helper, or its `hraness-companion` alias (the same modes; kept for 0.x callers). */
 export type BinaryKind = 'companion' | 'helper';
 const MAX_ASSET_BYTES = 256 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -58,6 +58,12 @@ function validateAssets(list: unknown, stem: string): ReleaseAsset[] {
   return (list as ReleaseAsset[]).map(a => ({ ...a }));
 }
 /** The asset for `target` of the given kind, if the release has one. */
+/** The release manifest this package was published with (`release-manifest.json`). */
+export async function packagedManifest(): Promise<ReleaseManifest> {
+  try { return parseReleaseManifest(await readFile(new URL('../../release-manifest.json', import.meta.url))); }
+  catch { throw new Error('release-manifest-unavailable: use a published package or an explicit maintainer binary'); }
+}
+
 export function releaseAsset(manifest: ReleaseManifest, target: PlatformTarget, kind: BinaryKind = 'companion'): ReleaseAsset | undefined {
   return (kind === 'helper' ? manifest.helperAssets ?? [] : manifest.assets).find(value => value.target === target);
 }

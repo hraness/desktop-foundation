@@ -96,7 +96,7 @@ export function planAutostart(options: AutostartOptions): AutostartPlan {
     const config = env.XDG_CONFIG_HOME && posix.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : posix.join(home, '.config');
     path = posix.join(config, 'autostart', `hraness-companion-${options.id}.desktop`);
     body = `[Desktop Entry]\nType=Application\nVersion=1.0\nName=${desktopValue(options.label)}\nExec=${[options.executable, ...args].map(desktopArg).join(' ')}\nTerminal=false\nStartupNotify=false\nX-GNOME-Autostart-enabled=true\n`;
-    requirements.push('An XDG-compatible graphical desktop with a tray host.');
+    requirements.push('An XDG-compatible desktop session that runs autostart entries.');
   } else {
     // WScript.Shell.Run expands %ENV% before spawning. Reject % rather than
     // silently changing paths/arguments; never interpolate into cmd.exe.

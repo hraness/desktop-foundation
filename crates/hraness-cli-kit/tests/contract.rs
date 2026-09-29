@@ -134,17 +134,6 @@ fn golden(name: &str, make: Preset) -> String {
             out.push(format!("## json {label}"));
             out.push(permission_error_json(&need, state, &env));
         }
-        for (label, state) in [
-            ("not-determined", PermissionState::NotDetermined),
-            ("denied", PermissionState::Denied),
-        ] {
-            out.push(format!("## menu {label}"));
-            out.extend(
-                permission_menu_items(&need, state, &env)
-                    .iter()
-                    .map(PermissionMenuRow::to_json),
-            );
-        }
         out.push(String::new());
     }
     out.join("\n")

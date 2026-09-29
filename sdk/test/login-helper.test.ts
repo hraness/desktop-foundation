@@ -73,7 +73,7 @@ test('resolveHelper: override, then helper asset, then the companion alias', { s
     const cacheDir = join(dir, 'cache');
     const helper = await resolveHelper({ manifest: manifest(true, bytes), cacheDir, fetch });
     assert.equal(helper.source, 'helper');
-    assert.match(helper.path, /hraness-helper-[a-z0-9-]+(\.exe)?$/);
+    assert.ok(helper.path.endsWith(`hraness-helper-${resolveTarget()}${process.platform === 'win32' ? '.exe' : ''}`), helper.path);
     const companion = await resolveHelper({ manifest: manifest(false, bytes), cacheDir, fetch });
     assert.equal(companion.source, 'companion');
     assert.match(companion.path, /hraness-companion-/);

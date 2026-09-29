@@ -207,3 +207,4 @@ may need small edits: `MenuNode` has new `Header` and `Status` variants and
    product-named app on the person's Mac, but nothing calls them by default.
    Turn them on only after the clean-account check in
    [product identity](identity.md#prompts-this-raises).
+

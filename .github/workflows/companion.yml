@@ -280,14 +280,8 @@ jobs:
           merge-multiple: true
       # The package smoke runs the Linux runner, which links WebKitGTK and
       # the tray libraries at load time. Runtime packages only, no -dev.
-      # Cached by package list; install scripts rerun on restore so the
-      # ldconfig, GLib schema and gdk-pixbuf loader triggers still apply.
       - name: Install runner runtime libraries
-        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
-        with:
-          packages: libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
-          version: package-runtime-1
-          execute_install_scripts: true
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
       - run: npm ci --ignore-scripts
       # The SDK tests already ran on this tree in the sdk job and on every
       # native leg; packaging only needs the compiled dist.

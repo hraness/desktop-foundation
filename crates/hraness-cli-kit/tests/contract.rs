@@ -226,6 +226,28 @@ fn the_documented_kind_table_matches_the_kit() {
         "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
     ));
     assert!(!is_allowed_settings_url("https://example.com"));
+    // The same list the control kit's error.permission keeps: the
+    // `settingsUrls` block of contract/names.json, one URL per line.
+    let names = read("contract/names.json");
+    let block = &names[names.find("\"settingsUrls\"").unwrap()..];
+    let block = &block[..block.find(']').unwrap()];
+    let mut want: Vec<&str> = block
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .trim_end_matches(',')
+                .strip_prefix('"')?
+                .strip_suffix('"')
+        })
+        .filter(|url| url.starts_with("x-apple.systempreferences:"))
+        .collect();
+    let mut ours: Vec<&str> = PermissionKind::ALL
+        .iter()
+        .filter_map(|kind| kind.settings_url())
+        .collect();
+    ours.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(ours, want);
     assert!(!is_allowed_settings_url(
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Anything"
     ));

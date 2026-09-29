@@ -11,6 +11,27 @@
     "pattern": "^[a-z][a-z0-9-]{0,31}\\.[a-z0-9][a-z0-9.-]{0,63}$",
     "rule": "The product name, a dot, and a tail of at most 64 characters."
   },
+  "permissionKind": {
+    "pattern": "^[a-z][a-z0-9-]*$",
+    "rule": "error.permission.kind. A builder that gets any other kind leaves error.permission out."
+  },
+  "settingsUrls": {
+    "rule": "The only error.permission.settingsUrl values a builder keeps; any other link is dropped. Readers check the x-apple.systempreferences: prefix, as the schema does.",
+    "urls": [
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork",
+      "x-apple.systempreferences:com.apple.Network-Settings.extension",
+      "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+      "x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
+      "x-apple.systempreferences:com.apple.preference.security?General"
+    ]
+  },
   "cases": {
     "productName": {
       "valid": ["example", "a", "ghostget", "desktop-foundation", "abcdefghijklmnopqrstuvwxyz012345"],
@@ -23,6 +44,10 @@
     "schemaId": {
       "valid": ["example.status/1", "hraness.commands/1", "example.2fa/1", "example.a.b-c/12"],
       "invalid": ["status/1", "example.status", "example.status/x", "Example.status/1", "example.-x/1", "example..x/1", "example.status/1234567890", "example.abcdefghijklmnopqrstuvwxyz0123456/1"]
+    },
+    "permissionKind": {
+      "valid": ["keychain", "full-disk-access", "a", "login-item", "x1"],
+      "invalid": ["", "Keychain", "1x", "-x", "full_disk", "full disk", "k\u00e9y"]
     },
     "productCode": {
       "valid": ["example.policy-locked", "example.2fa", "example.a.b", "example.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],

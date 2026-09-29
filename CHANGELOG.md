@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.1 - 2026-09-29
+
+Fixes from the review of 1.1.0. Exit codes, schema ids, error codes and the envelope shape are unchanged. Some behaviour, message text and helper signatures did change, and every change is listed below.
+
+### Changes
+
+- **`help` is a command only as the first word** (after `--json` at most). In 1.1.0 `runCli` removed the first `help` anywhere in the command line, so `approvals decide a1 --digest help deny` lost its `--digest` value, and `-- help` printed help. Now a flag's value and every word after `--` are left alone.
+- **`--debug`** works like `HRANESS_DEBUG=1`, as `CLI_MENU_STYLE.md` D5 says: a text error adds the code and detail. `runCli` takes `--debug` (before any `--`) out of the command line, unless one of the product's verbs declares its own `debug` flag, in which case it stays that verb's flag and the other verbs reject it as before. 1.1.0 answered `--debug` with an unknown-option error.
+- **An undeclared code no longer shows its code to a person.** The `internal` error reads `The command failed with an error it did not declare.`, and the code moved to `detail` as `Undeclared code <code>.`, which text mode shows only with `--debug` or `HRANESS_DEBUG=1`. In 1.1.0 the message was `The command answered an undeclared code <code>.` This changes `--json` `error.message` and adds `error.detail`.
+- **A wrong or expired code points at the same command.** `gate-failed` and `gate-expired` from `runCli` now have one `next` step for a person, the same command again, so the `→` line re-runs it. In 1.1.0 they had no `next`, and the `→` line pointed at `--help`. This adds `error.next` to those `--json` envelopes. T3 `unsupported-platform` still points at `--help`, since running it again cannot succeed in this release.
+- **`help commands --json`** lists one descriptor for `commands` in `data.verbs` instead of an empty list.
+- **`error.permission` is built the same way by both kits.** In 1.1.0 TypeScript kept only the known System Settings panes, while Rust kept any `x-apple.systempreferences:` link.
+  - Both now keep only the twelve panes in `contract/names.json` `settingsUrls`. Rust exports them as `SETTINGS_URLS`.
+  - Both leave `permission` out for a kind outside `^[a-z][a-z0-9-]*$` (`validPermissionKind`, `valid_permission_kind`).
+  - `contract/golden/error-permission-cases.json` checks that both kits print the same bytes.
+  - `errorPermission` now returns `ErrorPermission | undefined`. TypeScript code that assigns its result to an `ErrorPermission` must handle `undefined`.
+  - Rust `ErrorPermission::with_settings_url` drops a link that is not one of the twelve panes, and `ErrorBody::with_permission` drops a permission with an invalid kind.
+  - The Rust reader now rejects a `permission` whose kind or link the schema rejects. 1.1.0 accepted it.
+  - `permissionErrorJson` keeps its 1.0 shape. Its `error.permission` is now tested to hold the same kind and link as `errorPermission` and to pass the schema.
+- **Documented from 1.1.0:** an agent that runs a `decide` verb without `--json` gets `human-required` (exit 3) and no prompt. In 1.0 only `--json` did that, and an agent without it was prompted at `/dev/tty`. The 1.1.0 notes left this out. A person who wants to decide runs the command at their own terminal, as the `next` step says.
+
 ## 1.1.0 - 2026-09-29
 
 Command-line errors and help from `./registry` now follow `CLI_MENU_STYLE.md`, agents get JSON without asking for it, and an error can name the macOS permission behind it. Exit codes, schema ids, error codes, the envelope shape and the order of `next` are unchanged. Some message text did change, and every change is listed below.

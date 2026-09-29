@@ -1,0 +1,14 @@
+{
+  "rule": "Both kits build error.permission for each input and must print exactly `body`: TypeScript `new HranessError('permission-denied', 'm', undefined, [], {kind, settingsUrl}).toBody()`, Rust `ErrorBody::new(ErrorCode::PermissionDenied, \"m\").with_permission(ErrorPermission::new(kind).with_settings_url(url))`.",
+  "cases": [
+    { "kind": "full-disk-access", "settingsUrl": "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles", "body": "{\"code\":\"permission-denied\",\"message\":\"m\",\"permission\":{\"kind\":\"full-disk-access\",\"settingsUrl\":\"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\"}}" },
+    { "kind": "login-item", "settingsUrl": "x-apple.systempreferences:com.apple.LoginItems-Settings.extension", "body": "{\"code\":\"permission-denied\",\"message\":\"m\",\"permission\":{\"kind\":\"login-item\",\"settingsUrl\":\"x-apple.systempreferences:com.apple.LoginItems-Settings.extension\"}}" },
+    { "kind": "keychain", "settingsUrl": null, "body": "{\"code\":\"permission-denied\",\"message\":\"m\",\"permission\":{\"kind\":\"keychain\"}}" },
+    { "kind": "keychain", "settingsUrl": "x-apple.systempreferences:com.apple.preference.security?Privacy_Anything", "body": "{\"code\":\"permission-denied\",\"message\":\"m\",\"permission\":{\"kind\":\"keychain\"}}" },
+    { "kind": "keychain", "settingsUrl": "https://example.com/", "body": "{\"code\":\"permission-denied\",\"message\":\"m\",\"permission\":{\"kind\":\"keychain\"}}" },
+    { "kind": "my-kind2", "settingsUrl": "file:///etc", "body": "{\"code\":\"permission-denied\",\"message\":\"m\",\"permission\":{\"kind\":\"my-kind2\"}}" },
+    { "kind": "Keychain", "settingsUrl": null, "body": "{\"code\":\"permission-denied\",\"message\":\"m\"}" },
+    { "kind": "", "settingsUrl": "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles", "body": "{\"code\":\"permission-denied\",\"message\":\"m\"}" },
+    { "kind": "full_disk", "settingsUrl": null, "body": "{\"code\":\"permission-denied\",\"message\":\"m\"}" }
+  ]
+}

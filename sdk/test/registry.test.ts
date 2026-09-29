@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   commandsJson, defineRegistry, envelopeExitCode, HELP_SCHEMA, ERROR_CODES, errorEnvelope, EXIT, exitCodeFor, formatCommand, HranessError,
-  errorPermission, isErrorCode, lookupVerb, okEnvelope, parseArgs, runCli, validProductCode, validProductName, validSchemaId, validVerbSegment,
+  errorPermission, isErrorCode, validPermissionKind, lookupVerb, okEnvelope, parseArgs, runCli, validProductCode, validProductName, validSchemaId, validVerbSegment,
   type CliIO, type Envelope, type Verb,
 } from '../src/registry.js';
 import { ownerPaths } from '../src/control.js';
 import { AGENT_ENV_MARKERS, AGENT_PROCESS_NAMES } from '../src/human-gate.js';
-import { permissionError } from '../src/permissions.js';
+import { isAllowedSettingsUrl, permissionError, permissionErrorJson, MESSAGES_FDA, CHROME_SAFE_STORAGE } from '../src/permissions.js';
 import { readContract, validate } from './contract-helpers.js';
 
 const AT = new Date('2026-09-28T00:00:00.000Z');
@@ -303,7 +303,7 @@ test('runCli: T3 answers unsupported-platform', async () => {
 
 test('names follow contract/names.json, the same limits the Rust kit uses', () => {
   const names = readContract('names.json');
-  const checks: Record<string, (v: string) => boolean> = { productName: validProductName, verbSegment: validVerbSegment, schemaId: validSchemaId, productCode: validProductCode };
+  const checks: Record<string, (v: string) => boolean> = { productName: validProductName, verbSegment: validVerbSegment, schemaId: validSchemaId, productCode: validProductCode, permissionKind: validPermissionKind };
   for (const [kind, check] of Object.entries(checks)) {
     const pattern = new RegExp(names[kind].pattern);
     for (const v of names.cases[kind].valid) { assert.equal(check(v), true, `${kind} ${v}`); assert.equal(pattern.test(v), true, `${kind} pattern ${v}`); }
@@ -458,4 +458,75 @@ test('runCli: undeclared flags are usage errors and never run the verb', async (
   assert.throws(() => defineRegistry('example', [{ ...stop, flags: ['help'] }]), /invalid flag/);
   assert.throws(() => defineRegistry('example', [{ ...stop, flags: ['wait'] }]), /invalid flag/);
   assert.throws(() => defineRegistry('example', [{ ...stop, valueFlags: ['help'] }]), /invalid value flag/);
+});
+
+test('error.permission: both kits keep the same kinds and links, byte for byte', () => {
+  const names = readContract('names.json');
+  const urls: string[] = names.settingsUrls.urls;
+  for (const url of urls) assert.equal(isAllowedSettingsUrl(url), true, url);
+  assert.equal(isAllowedSettingsUrl('x-apple.systempreferences:com.apple.preference.security?Privacy_Anything'), false);
+  assert.equal(schema.$defs.permission.properties.kind.pattern, names.permissionKind.pattern);
+  // contract/golden/error-permission-cases.json is also checked by the Rust control kit.
+  for (const c of readContract('golden/error-permission-cases.json').cases) {
+    const body = new HranessError('permission-denied', 'm', undefined, [], { kind: c.kind, settingsUrl: c.settingsUrl }).toBody();
+    assert.equal(JSON.stringify(body), c.body, JSON.stringify(c));
+  }
+  assert.equal(errorPermission('Key chain'), undefined);
+});
+
+test('permissionErrorJson carries the same error.permission member', () => {
+  const ref = { product: 'Example', command: 'example' };
+  for (const need of [MESSAGES_FDA(ref), CHROME_SAFE_STORAGE(ref, { caller: 'security' })]) {
+    const doc = permissionErrorJson(need, 'denied', {});
+    const member = errorPermission(doc.error.permission.kind, doc.error.permission.settingsUrl);
+    // 1.0 shape: settingsUrl is null, not absent, when the kind has no pane.
+    assert.deepEqual(doc.error.permission, { settingsUrl: null, ...member });
+    assert.deepEqual(validate(schema, errorEnvelope({ code: 'permission-denied', message: 'm', permission: doc.error.permission })), []);
+  }
+});
+
+test('only a leading help word is help; a flag value or a word after -- is not', async () => {
+  const ran: string[] = [];
+  let r = io({ audience: 'agent' });
+  // `--digest help` keeps its value, and `deny` runs.
+  assert.equal(await runCli(decideRegistry(ran), ['approvals', 'decide', 'a1', '--digest', 'help', 'deny'], r.value), 0);
+  assert.deepEqual(ran, ['deny a1 help']);
+  r = io({ audience: 'human', env: UTF8 });
+  assert.equal(await runCli(example(), ['--', 'help'], r.value), 2);
+  assert.match(r.err(), /Unknown command "help"/);
+  r = io({ audience: 'human', env: UTF8 });
+  assert.equal(await runCli(example(), ['--json', 'help', 'status'], r.value), 0);
+  assert.equal((r.json() as any).data.verbs[0].path.join(' '), 'status');
+});
+
+test('help commands --json describes commands', async () => {
+  const r = io();
+  assert.equal(await runCli(example(), ['help', 'commands', '--json'], r.value), 0);
+  assert.deepEqual((r.json() as any).data.verbs.map((v: any) => v.path.join(' ')), ['commands']);
+  assert.deepEqual(validate(schema, r.json()), []);
+});
+
+test('a person never sees an undeclared code without --debug or HRANESS_DEBUG=1', async () => {
+  let r = io({ audience: 'human', env: UTF8 });
+  assert.equal(await runCli(example(), ['foreign'], r.value), 1);
+  assert.doesNotMatch(r.err(), /other\.thing|code:/);
+  for (const [argv, env] of [[['foreign', '--debug'], UTF8], [['--debug', 'foreign'], UTF8], [['foreign'], { ...UTF8, HRANESS_DEBUG: '1' }]] as const) {
+    r = io({ audience: 'human', env });
+    assert.equal(await runCli(example(), argv, r.value), 1, argv.join(' '));
+    assert.match(r.err(), /code: internal/);
+    assert.match(r.err(), /Undeclared code other\.thing/);
+  }
+  // --debug is still a word after --, and a verb that declares it keeps it.
+  const own = defineRegistry('example', [{ path: ['run'], opClass: 'read', schema: 'example.run/1', summary: 's', flags: ['debug'], input: a => a, run: async (a: any) => a.flags }]);
+  r = io();
+  assert.equal(await runCli(own, ['run', '--debug', '--json'], r.value), 0);
+  assert.deepEqual((r.json() as any).data, { debug: true });
+});
+
+test('a wrong or expired code points at the same command', async () => {
+  for (const code of ['gate-failed', 'gate-expired'] as const) {
+    const r = io({ audience: 'human', env: UTF8, gate: async () => ({ ok: false as const, code, message: 'The code did not match, so nothing changed.' }) });
+    assert.equal(await runCli(example(), ['approvals', 'decide', 'a1', 'allow-once'], r.value), 3);
+    assert.match(r.err(), /\n→ example approvals decide a1 allow-once\n$/);
+  }
 });

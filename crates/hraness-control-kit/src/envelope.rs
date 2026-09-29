@@ -201,16 +201,74 @@ pub struct ErrorBody {
     pub permission: Option<Box<ErrorPermission>>,
 }
 
+/// The System Settings links a builder keeps in `error.permission.settingsUrl`
+/// (`contract/names.json` `settingsUrls`), the same list as the TypeScript
+/// `isAllowedSettingsUrl` and `hraness-cli-kit`'s `is_allowed_settings_url`.
+pub const SETTINGS_URLS: [&str; 12] = [
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts",
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork",
+    "x-apple.systempreferences:com.apple.Network-Settings.extension",
+    "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+    "x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
+    "x-apple.systempreferences:com.apple.preference.security?General",
+];
+
+/// `^[a-z][a-z0-9-]*$`: a valid `error.permission.kind`
+/// (`contract/names.json` `permissionKind`).
+pub fn valid_permission_kind(kind: &str) -> bool {
+    let mut bytes = kind.bytes();
+    matches!(bytes.next(), Some(b'a'..=b'z'))
+        && bytes.all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-'))
+}
+
 /// The `error.permission` member: a permission kind such as
 /// `full-disk-access`, and the System Settings pane that fixes it when the
 /// kind has one. Added in 1.1.0. A 1.0 reader rejects an envelope that
-/// carries it, so set it only toward 1.1 readers.
+/// carries it, so set it only toward 1.1 readers. Reading checks what the
+/// schema checks: the kind pattern and the `x-apple.systempreferences:`
+/// prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(
+    deny_unknown_fields,
+    rename_all = "camelCase",
+    try_from = "WirePermission"
+)]
 pub struct ErrorPermission {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WirePermission {
+    kind: String,
+    #[serde(default)]
+    settings_url: Option<String>,
+}
+
+impl TryFrom<WirePermission> for ErrorPermission {
+    type Error = String;
+    fn try_from(wire: WirePermission) -> Result<Self, String> {
+        if !valid_permission_kind(&wire.kind) {
+            return Err(format!("invalid permission kind {:?}", wire.kind));
+        }
+        if let Some(url) = &wire.settings_url {
+            if !url.starts_with("x-apple.systempreferences:") {
+                return Err("settingsUrl is not a System Settings link".to_owned());
+            }
+        }
+        Ok(Self {
+            kind: wire.kind,
+            settings_url: wire.settings_url,
+        })
+    }
 }
 
 impl ErrorPermission {
@@ -221,16 +279,12 @@ impl ErrorPermission {
         }
     }
 
-    /// Sets the System Settings link. Anything outside
-    /// `x-apple.systempreferences:` is dropped, as the schema requires, so an
-    /// envelope never carries a link a client should not open. This checks
-    /// the prefix only; the TypeScript `errorPermission` also checks the
-    /// exact pane list, which this crate does not carry. From
-    /// `hraness-cli-kit`, pass `PermissionErrorInfo::settings_url`, which is
-    /// always one of the known panes.
+    /// Sets the System Settings link. A link that is not one of
+    /// [`SETTINGS_URLS`] is dropped, as the TypeScript `errorPermission`
+    /// does, so an envelope never carries a link a client should not open.
     pub fn with_settings_url(mut self, url: impl Into<String>) -> Self {
         let url = url.into();
-        self.settings_url = url.starts_with("x-apple.systempreferences:").then_some(url);
+        self.settings_url = SETTINGS_URLS.contains(&url.as_str()).then_some(url);
         self
     }
 }
@@ -246,8 +300,19 @@ impl ErrorBody {
         }
     }
 
+    /// Sets `error.permission`. A kind outside `^[a-z][a-z0-9-]*$` leaves
+    /// it out, as the TypeScript `HranessError` does. The link is checked
+    /// again, so a struct literal cannot carry one outside [`SETTINGS_URLS`].
     pub fn with_permission(mut self, permission: ErrorPermission) -> Self {
-        self.permission = Some(Box::new(permission));
+        if !valid_permission_kind(&permission.kind) {
+            self.permission = None;
+            return self;
+        }
+        let checked = match permission.settings_url {
+            Some(url) => ErrorPermission::new(permission.kind).with_settings_url(url),
+            None => permission,
+        };
+        self.permission = Some(Box::new(checked));
         self
     }
 
@@ -487,6 +552,34 @@ mod tests {
     }
 
     #[test]
+    fn permission_matches_the_typescript_kit() {
+        let names: serde_json::Value = serde_json::from_str(crate::contract::NAMES).unwrap();
+        let urls: Vec<&str> = names["settingsUrls"]["urls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(urls, SETTINGS_URLS);
+        let doc: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contract/golden/error-permission-cases.json"
+        ))
+        .unwrap();
+        for case in doc["cases"].as_array().unwrap() {
+            let mut permission = ErrorPermission::new(case["kind"].as_str().unwrap());
+            if let Some(url) = case["settingsUrl"].as_str() {
+                permission = permission.with_settings_url(url);
+            }
+            let body = ErrorBody::new(ErrorCode::PermissionDenied, "m").with_permission(permission);
+            assert_eq!(
+                serde_json::to_string(&body).unwrap(),
+                case["body"].as_str().unwrap(),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
     fn permission_is_optional_and_additive() {
         let env: Envelope<()> = Envelope::error(
             ErrorBody::new(ErrorCode::PermissionDenied, "No access.").with_permission(
@@ -510,13 +603,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(null.permission.unwrap().settings_url, None);
-        // A link outside System Settings is dropped.
-        assert_eq!(
-            ErrorPermission::new("keychain")
-                .with_settings_url("https://example.com/")
-                .settings_url,
-            None
-        );
+        // A link outside the known panes is dropped, as in TypeScript.
+        for url in [
+            "https://example.com/",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Anything",
+        ] {
+            assert_eq!(
+                ErrorPermission::new("keychain")
+                    .with_settings_url(url)
+                    .settings_url,
+                None
+            );
+        }
+        // Reading checks the schema's kind pattern and link prefix.
+        for bad in [
+            r#"{"code":"usage","message":"m","permission":{"kind":"Key chain"}}"#,
+            r#"{"code":"usage","message":"m","permission":{"kind":"keychain","settingsUrl":"https://x"}}"#,
+        ] {
+            assert!(serde_json::from_str::<ErrorBody>(bad).is_err(), "{bad}");
+        }
         // Without it, the 1.0.0 bytes are unchanged.
         assert!(
             !serde_json::to_string(&ErrorBody::new(ErrorCode::Usage, "m"))

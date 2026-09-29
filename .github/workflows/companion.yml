@@ -76,6 +76,33 @@ jobs:
       - run: cargo test -p hraness-cli-kit --locked --all-features
       # The default build has no clap; make sure it stands alone.
       - run: cargo test -p hraness-cli-kit --locked --lib
+  control-kit:
+    # The headless control crates. control-kit is std-only with optional
+    # ratatui; local-app links GTK on Linux but no WebKit or Tauri. The tests
+    # read contract/ and the SDK goldens, so a docs change runs it.
+    name: Control kit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: control-kit
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev
+      - run: cargo fmt -p hraness-control-kit -p hraness-local-app --check
+      - run: cargo clippy -p hraness-control-kit -p hraness-local-app --locked --all-features --all-targets -- -D warnings
+      - run: cargo test -p hraness-control-kit -p hraness-local-app --locked --all-features
+      # Feature matrix: the default build has no TUI, and the envelope and
+      # registry stand alone without the owner process.
+      - run: cargo test -p hraness-control-kit --locked
+      - run: cargo test -p hraness-control-kit --locked --no-default-features --lib
   native:
     name: Native (${{ matrix.target }})
     needs: changes
@@ -155,7 +182,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       # Reuses the release artifacts the test build just produced.
-      - run: cargo build --locked --release --bin hraness-companion
+      - run: cargo build --locked --release --bin hraness-companion --bin hraness-helper
       # The cache's post step retains reusable build inputs even if a later
       # desktop integration test fails. Every gate still runs on every tree.
       - name: Headless protocol probe
@@ -191,6 +218,17 @@ jobs:
           extension=''
           if [[ "$COMPANION_TARGET" == *windows* ]]; then extension='.exe'; fi
           cp "target/release/hraness-companion$extension" "artifacts/hraness-companion-$COMPANION_TARGET$extension"
+          cp "target/release/hraness-helper$extension" "artifacts/hraness-helper-$COMPANION_TARGET$extension"
+      # Ad-hoc signature only: no identity, no notarization. Apple Silicon
+      # refuses unsigned arm64 code, and this keeps the helper's code
+      # directory stable for the person's own OS approval.
+      - name: Ad-hoc sign the helper (macOS)
+        if: runner.os == 'macOS'
+        env:
+          COMPANION_TARGET: ${{ matrix.target }}
+        run: |
+          codesign --force --sign - "artifacts/hraness-helper-$COMPANION_TARGET"
+          codesign --verify --verbose=2 "artifacts/hraness-helper-$COMPANION_TARGET"
       - name: Record ABI and build evidence
         env:
           COMPANION_TARGET: ${{ matrix.target }}
@@ -239,7 +277,7 @@ jobs:
   required:
     name: Required
     if: always()
-    needs: [changes, sdk, cli-kit, native, package]
+    needs: [changes, sdk, cli-kit, control-kit, native, package]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -249,12 +287,14 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           SDK_RESULT: ${{ needs.sdk.result }}
           CLI_KIT_RESULT: ${{ needs.cli-kit.result }}
+          CONTROL_KIT_RESULT: ${{ needs.control-kit.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
         run: |
           test "$CHANGES_RESULT" = success
           test "$SDK_RESULT" = success
           test "$CLI_KIT_RESULT" = success
+          test "$CONTROL_KIT_RESULT" = success
           if [ "$DOCS_ONLY" = true ]; then
             # A docs-only pull request deliberately skips the native matrix.
             test "$NATIVE_RESULT" = skipped && test "$PACKAGE_RESULT" = skipped
@@ -271,6 +311,10 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      # The notes come from CHANGELOG.md at the tagged commit.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: distribution
@@ -278,9 +322,14 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: artifacts/*
+      - name: Render release notes from CHANGELOG.md
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: node scripts/release-notes.mjs "$RELEASE_TAG" "$RELEASE_COMMIT" > "$RUNNER_TEMP/notes.md"
       - name: Publish new versioned release assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$RELEASE_TAG" artifacts/* --verify-tag --title "$RELEASE_TAG" --notes 'Unsigned, unbundled CLI companions for macOS, Windows and Linux. Includes a pinned SDK manifest and GitHub build attestations. See docs/installation.md for human OS approval guidance. Native event-loop tests do not establish clean-machine visual acceptance.'
+        run: gh release create "$RELEASE_TAG" artifacts/* --verify-tag --title "desktop-foundation $RELEASE_TAG" --notes-file "$RUNNER_TEMP/notes.md"

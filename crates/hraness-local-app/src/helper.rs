@@ -72,11 +72,14 @@ pub const TRAY_REMOVED_MESSAGE: &str =
 Run `<product> tui` to watch a product, or `<product> status --json` from a script. \
 See docs/migration-1.0.md.";
 
-/// True for the argv the 0.x companion answered with the menu bar or its
-/// wire self-check, frozen in `contract/companion-alias.v1.json`: no
-/// arguments, and any argv starting `--state-dir`, `--check-protocol` or
-/// `--foreground`. Every other argv is either a helper mode or
-/// `invalid-arguments`, exactly as in `hraness-helper`.
+/// True for the argv refused as removed tray modes, frozen in
+/// `contract/companion-alias.v1.json`: no arguments, and any argv starting
+/// `--state-dir` or `--check-protocol` (the 0.x menu bar and its wire
+/// self-check) or `--foreground` (the flag product CLIs passed to their
+/// menu bar command). 0.x answered malformed variants of these with
+/// `invalid-arguments`; 1.0 refuses them all with the clearer error. Every
+/// other argv is either a helper mode or `invalid-arguments`, exactly as in
+/// `hraness-helper`.
 pub fn is_tray_mode(args: &[OsString]) -> bool {
     match args.first() {
         None => true,

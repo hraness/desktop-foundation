@@ -57,13 +57,13 @@ function validateAssets(list: unknown, stem: string): ReleaseAsset[] {
   // Copy to prevent the caller mutating a manifest while an install awaits IO.
   return (list as ReleaseAsset[]).map(a => ({ ...a }));
 }
-/** The asset for `target` of the given kind, if the release has one. */
 /** The release manifest this package was published with (`release-manifest.json`). */
 export async function packagedManifest(): Promise<ReleaseManifest> {
   try { return parseReleaseManifest(await readFile(new URL('../../release-manifest.json', import.meta.url))); }
   catch { throw new Error('release-manifest-unavailable: use a published package or an explicit maintainer binary'); }
 }
 
+/** The asset for `target` of the given kind, if the release has one. */
 export function releaseAsset(manifest: ReleaseManifest, target: PlatformTarget, kind: BinaryKind = 'companion'): ReleaseAsset | undefined {
   return (kind === 'helper' ? manifest.helperAssets ?? [] : manifest.assets).find(value => value.target === target);
 }

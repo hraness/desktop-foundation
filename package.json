@@ -19,7 +19,7 @@
     "./retire": { "types": "./dist/src/retire.d.ts", "import": "./dist/src/retire.js" },
     "./helper": { "types": "./dist/src/helper.d.ts", "import": "./dist/src/helper.js" }
   },
-  "files": ["dist/src", "src", "crates/hraness-control-kit/src", "crates/hraness-local-app/src", "release-manifest.json", "contract", "README.md", "docs", "skills", "LICENSE"],
+  "files": ["dist/src", "src", "crates/hraness-control-kit/src", "crates/hraness-local-app/src", "sdk/src/prompt.ts", "release-manifest.json", "contract", "README.md", "docs", "skills", "LICENSE"],
   "scripts": {
     "build:sdk": "tsc -p sdk/tsconfig.json",
     "test:sdk": "node scripts/test-sdk.mjs",

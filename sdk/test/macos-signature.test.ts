@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureBinary, inspectBinary, type ReleaseManifest } from '../src/install.js';
@@ -29,7 +30,7 @@ test('both executable identities require cryptographic Developer ID verification
       (commands as string[][]).push([...args]);
       return args.includes('--display') ? metadata(kind) : '';
     });
-    assert.deepEqual(commands[0], ['--verify', '--strict', '--test-requirement', macosRequirement(kind), '/private/example']);
+    assert.deepEqual(commands[0], ['--verify', '--strict', '--test-requirement', '=' + macosRequirement(kind), '/private/example']);
     assert.ok(macosRequirement(kind).includes('anchor apple generic'));
     assert.ok(macosRequirement(kind).includes(APPLE_TEAM));
     for (const changed of [metadata(kind).replace(APPLE_TEAM, 'AAAAAAAAAA'), metadata(kind).replace(MACOS_IDENTIFIERS[kind], 'other.id'),
@@ -39,6 +40,23 @@ test('both executable identities require cryptographic Developer ID verification
     await assert.rejects(verifyMacosSignatureWith('/private/example', kind, async () => { throw new Error('untrusted tool output'); }),
       error => (error as Error).message.includes('Developer ID') && !(error as Error).message.includes('untrusted'));
   }
+});
+
+test('real codesign parses the SDK requirement and rejects an ad-hoc identity', { skip: process.platform !== 'darwin' }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sdk-requirement-parser-'));
+  try {
+    const path = join(directory, 'owned-fixture');
+    await copyFile('/usr/bin/true', path); await chmod(path, 0o755);
+    const options = { encoding: 'utf8' as const, timeout: 15_000,
+      env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', HOME: directory, LC_ALL: 'C' }, stdio: 'pipe' as const };
+    execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', MACOS_IDENTIFIERS.helper, path], options);
+    let diagnostic = '';
+    await assert.rejects(verifyMacosSignatureWith(path, 'helper', async args => {
+      try { return execFileSync('/usr/bin/codesign', [...args], options); }
+      catch (error) { diagnostic = String((error as { stderr?: string }).stderr); throw error; }
+    }), { code: 'integrity_failed' });
+    assert.match(diagnostic, /code failed to satisfy specified code requirement/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('unsigned new Mac download is rejected before publication and its staging file is removed', async () => {

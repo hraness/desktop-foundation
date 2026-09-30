@@ -29,7 +29,7 @@ export type SignatureRunner = (args: readonly string[]) => Promise<string>;
 /** Internal test seam; production always uses the absolute system codesign tool. */
 export async function verifyMacosSignatureWith(path: string, kind: BinaryKind, run: SignatureRunner): Promise<void> {
   try {
-    await run(['--verify', '--strict', '--test-requirement', macosRequirement(kind), path]);
+    await run(['--verify', '--strict', '--test-requirement', '=' + macosRequirement(kind), path]);
     const metadata = await run(['--display', '--verbose=4', path]);
     const lines = metadata.split(/\r?\n/);
     if (!lines.includes(`Identifier=${MACOS_IDENTIFIERS[kind]}`) || !lines.includes(`TeamIdentifier=${APPLE_TEAM}`)

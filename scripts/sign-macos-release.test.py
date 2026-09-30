@@ -155,11 +155,35 @@ class SigningTests(unittest.TestCase):
     def test_artifact_metadata_requires_run_source_digest_and_exact_id(self):
         metadata = {"id": 7, "name": "macos-signed-2", "digest": "sha256:" + "b" * 64,
                     "expired": False, "size_in_bytes": 123, "workflow_run": {"id": 123, "head_sha": SHA}}
-        self.assertEqual(artifacts.admit_metadata(metadata, "macos-signed-2", SHA, "7", "b" * 64), (7, "b" * 64))
-        for key, value in [("name", "macos-signed-1"), ("id", 8), ("expired", True), ("digest", "sha256:" + "c" * 64),
+        self.assertEqual(artifacts.admit_metadata(metadata, "macos-signed", SHA, "7", "b" * 64), (7, "b" * 64))
+        self.assertEqual(artifacts.admit_metadata({**metadata, 'name': 'macos-signed-1'}, "macos-signed", SHA, "7", "b" * 64), (7, "b" * 64))
+        for key, value in [("name", "macos-signed-3"), ("name", "macos-signed-0"), ("name", "other-signed-2"), ("id", 8), ("expired", True), ("digest", "sha256:" + "c" * 64),
                            ("workflow_run", {"id": 456, "head_sha": SHA}), ("workflow_run", {"id": 123, "head_sha": "c" * 40})]:
             with self.assertRaises(artifacts.signing.SigningError):
-                artifacts.admit_metadata({**metadata, key: value}, "macos-signed-2", SHA, "7", "b" * 64)
+                artifacts.admit_metadata({**metadata, key: value}, "macos-signed", SHA, "7", "b" * 64)
+
+    def test_native_fetch_binds_each_exact_producer_on_a_downstream_retry(self):
+        environment, metadata, seen = {}, {}, []
+        for index, target in enumerate(artifacts.BUILD_TARGETS, start=7):
+            key = target.replace('-', '_').upper()
+            environment[key + '_ARTIFACT_ID'] = str(index)
+            environment[key + '_ARTIFACT_DIGEST'] = 'b' * 64
+            metadata[f'actions/artifacts/{index}'] = {'id': index, 'name': f'native-{target}-1',
+                'digest': 'sha256:' + 'b' * 64, 'expired': False, 'size_in_bytes': 123,
+                'workflow_run': {'id': 123, 'head_sha': SHA}}
+
+        def fetch(info, prefix, names, destination, sha, artifact_id, digest):
+            artifacts.admit_metadata(info, prefix, sha, artifact_id, digest)
+            seen.append(artifact_id)
+            destination.mkdir()
+            for name in names:
+                (destination / name).write_bytes(b'exact producer fixture')
+
+        destination = self.root / 'retried-native-builds'
+        with patch.dict(os.environ, environment), patch.object(artifacts, 'api', side_effect=lambda path: metadata[path]), patch.object(artifacts, 'fetch_artifact', side_effect=fetch):
+            artifacts.fetch_native(destination, artifacts.BUILD_TARGETS)
+        self.assertEqual(seen, list(map(str, range(7, 13))))
+        self.assertEqual({path.name for path in destination.iterdir()}, set().union(*(artifacts.native_names(t) for t in artifacts.BUILD_TARGETS)))
 
     def test_remote_tag_recheck_accepts_lightweight_and_annotated_and_rejects_move(self):
         tag = 'refs/tags/v1.1.3'

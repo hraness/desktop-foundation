@@ -30,5 +30,12 @@ test('Apple credentials occur only in the separate tag-gated signer and before p
   assert.ok(smoke.includes("if: ${{ !cancelled() && needs.package.result == 'success' }}"), 'smoke must run after successful packaging even when a tag-only ancestor was skipped');
   assert.equal(workflow.split('macos-release-artifacts.py fetch-distribution artifacts').length, 3);
   assert.ok(workflow.includes('DISTRIBUTION_ARTIFACT_ID: ${{ needs.package.outputs.artifact_id }}'));
+  assert.ok(pack.includes('macos-release-artifacts.py fetch-builds artifacts'));
+  assert.ok(!pack.includes('pattern: native-'), 'native inputs must be exact producer outputs, including on retries');
+  for (const target of ['aarch64_apple_darwin', 'x86_64_apple_darwin', 'x86_64_pc_windows_msvc', 'aarch64_pc_windows_msvc', 'x86_64_unknown_linux_gnu', 'aarch64_unknown_linux_gnu']) {
+    assert.ok(workflow.includes(`steps.producer.outputs.${target}_artifact_id`));
+    assert.ok(pack.includes(`needs.native.outputs.${target}_artifact_id`));
+    assert.ok(pack.includes(`needs.native.outputs.${target}_artifact_digest`));
+  }
   assert.ok(workflow.indexOf('macos-release-artifacts.py verify-tag') < workflow.indexOf('gh release create'));
 });

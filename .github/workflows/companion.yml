@@ -144,6 +144,19 @@ jobs:
       - run: cargo test -p hraness-control-kit --locked
       - run: cargo test -p hraness-control-kit --locked --no-default-features --lib
   native:
+    outputs:
+      aarch64_apple_darwin_artifact_id: ${{ steps.producer.outputs.aarch64_apple_darwin_artifact_id }}
+      aarch64_apple_darwin_artifact_digest: ${{ steps.producer.outputs.aarch64_apple_darwin_artifact_digest }}
+      x86_64_apple_darwin_artifact_id: ${{ steps.producer.outputs.x86_64_apple_darwin_artifact_id }}
+      x86_64_apple_darwin_artifact_digest: ${{ steps.producer.outputs.x86_64_apple_darwin_artifact_digest }}
+      x86_64_pc_windows_msvc_artifact_id: ${{ steps.producer.outputs.x86_64_pc_windows_msvc_artifact_id }}
+      x86_64_pc_windows_msvc_artifact_digest: ${{ steps.producer.outputs.x86_64_pc_windows_msvc_artifact_digest }}
+      aarch64_pc_windows_msvc_artifact_id: ${{ steps.producer.outputs.aarch64_pc_windows_msvc_artifact_id }}
+      aarch64_pc_windows_msvc_artifact_digest: ${{ steps.producer.outputs.aarch64_pc_windows_msvc_artifact_digest }}
+      x86_64_unknown_linux_gnu_artifact_id: ${{ steps.producer.outputs.x86_64_unknown_linux_gnu_artifact_id }}
+      x86_64_unknown_linux_gnu_artifact_digest: ${{ steps.producer.outputs.x86_64_unknown_linux_gnu_artifact_digest }}
+      aarch64_unknown_linux_gnu_artifact_id: ${{ steps.producer.outputs.aarch64_unknown_linux_gnu_artifact_id }}
+      aarch64_unknown_linux_gnu_artifact_digest: ${{ steps.producer.outputs.aarch64_unknown_linux_gnu_artifact_digest }}
     name: Native (${{ matrix.target }})
     needs: changes
     if: needs.changes.outputs.scope == 'subset' || needs.changes.outputs.scope == 'full'
@@ -257,11 +270,25 @@ jobs:
         env:
           COMPANION_TARGET: ${{ matrix.target }}
         run: node scripts/artifact-evidence.mjs
-      - uses: actions/upload-artifact@v7
+      - id: native_artifact
+        uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}-${{ github.run_attempt }}
           path: artifacts/*
           if-no-files-found: error
+      - name: Export immutable artifact identity for this matrix target
+        id: producer
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          ARTIFACT_ID: ${{ steps.native_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.native_artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in aarch64-apple-darwin|x86_64-apple-darwin|x86_64-pc-windows-msvc|aarch64-pc-windows-msvc|x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu) ;; *) exit 1 ;; esac
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          key="${TARGET//-/_}"
+          printf '%s_artifact_id=%s\n%s_artifact_digest=%s\n' "$key" "$ARTIFACT_ID" "$key" "$ARTIFACT_DIGEST" >> "$GITHUB_OUTPUT"
   release_identity:
     name: Admit the exact release source
     if: github.event_name == 'push' && github.ref_type == 'tag'
@@ -302,6 +329,10 @@ jobs:
       - name: Download and bind exact same-run Mac build artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          AARCH64_APPLE_DARWIN_ARTIFACT_ID: ${{ needs.native.outputs.aarch64_apple_darwin_artifact_id }}
+          AARCH64_APPLE_DARWIN_ARTIFACT_DIGEST: ${{ needs.native.outputs.aarch64_apple_darwin_artifact_digest }}
+          X86_64_APPLE_DARWIN_ARTIFACT_ID: ${{ needs.native.outputs.x86_64_apple_darwin_artifact_id }}
+          X86_64_APPLE_DARWIN_ARTIFACT_DIGEST: ${{ needs.native.outputs.x86_64_apple_darwin_artifact_digest }}
         run: python3 -I scripts/macos-release-artifacts.py fetch-native "$RUNNER_TEMP/desktop-foundation-native"
       - name: Sign and notarize without executing any payload
         env:
@@ -356,11 +387,23 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: native-*-${{ github.run_attempt }}
-          path: artifacts
-          merge-multiple: true
+      - name: Fetch exact native producer artifacts, including successful earlier attempts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_WORKFLOW_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          AARCH64_APPLE_DARWIN_ARTIFACT_ID: ${{ needs.native.outputs.aarch64_apple_darwin_artifact_id }}
+          AARCH64_APPLE_DARWIN_ARTIFACT_DIGEST: ${{ needs.native.outputs.aarch64_apple_darwin_artifact_digest }}
+          X86_64_APPLE_DARWIN_ARTIFACT_ID: ${{ needs.native.outputs.x86_64_apple_darwin_artifact_id }}
+          X86_64_APPLE_DARWIN_ARTIFACT_DIGEST: ${{ needs.native.outputs.x86_64_apple_darwin_artifact_digest }}
+          X86_64_PC_WINDOWS_MSVC_ARTIFACT_ID: ${{ needs.native.outputs.x86_64_pc_windows_msvc_artifact_id }}
+          X86_64_PC_WINDOWS_MSVC_ARTIFACT_DIGEST: ${{ needs.native.outputs.x86_64_pc_windows_msvc_artifact_digest }}
+          AARCH64_PC_WINDOWS_MSVC_ARTIFACT_ID: ${{ needs.native.outputs.aarch64_pc_windows_msvc_artifact_id }}
+          AARCH64_PC_WINDOWS_MSVC_ARTIFACT_DIGEST: ${{ needs.native.outputs.aarch64_pc_windows_msvc_artifact_digest }}
+          X86_64_UNKNOWN_LINUX_GNU_ARTIFACT_ID: ${{ needs.native.outputs.x86_64_unknown_linux_gnu_artifact_id }}
+          X86_64_UNKNOWN_LINUX_GNU_ARTIFACT_DIGEST: ${{ needs.native.outputs.x86_64_unknown_linux_gnu_artifact_digest }}
+          AARCH64_UNKNOWN_LINUX_GNU_ARTIFACT_ID: ${{ needs.native.outputs.aarch64_unknown_linux_gnu_artifact_id }}
+          AARCH64_UNKNOWN_LINUX_GNU_ARTIFACT_DIGEST: ${{ needs.native.outputs.aarch64_unknown_linux_gnu_artifact_digest }}
+        run: python3 -I scripts/macos-release-artifacts.py fetch-builds artifacts
       - name: Replace Mac artifacts with the exact notarized signing output
         if: github.event_name == 'push' && github.ref_type == 'tag'
         env:

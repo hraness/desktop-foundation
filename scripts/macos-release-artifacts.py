@@ -17,6 +17,8 @@ signing = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(signing)
 require = signing.require
 REPOSITORY = "hraness/desktop-foundation"
+BUILD_TARGETS = (*signing.TARGETS, 'x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc',
+                 'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu')
 
 
 def command(args):
@@ -73,10 +75,12 @@ def api(path):
     return json.loads(command(["gh", "api", f"repos/{REPOSITORY}/{path}"]))
 
 
-def admit_metadata(metadata, name, sha, expected_id=None, expected_digest=None):
+def admit_metadata(metadata, prefix, sha, expected_id, expected_digest):
     artifact_id = metadata.get("id")
     digest = metadata.get("digest", "")
-    require(type(artifact_id) is int and artifact_id > 0 and metadata.get("name") == name,
+    name = re.fullmatch(re.escape(prefix) + r'-([1-9][0-9]*)', metadata.get('name', ''))
+    require(type(artifact_id) is int and artifact_id > 0 and name is not None
+            and int(name[1]) <= int(os.environ['GITHUB_RUN_ATTEMPT']),
             "artifact identity mismatch")
     require(metadata.get("expired") is False and 0 < metadata.get("size_in_bytes", 0) <= signing.MAX_BYTES * 5,
             "artifact expired or unbounded")
@@ -84,13 +88,13 @@ def admit_metadata(metadata, name, sha, expected_id=None, expected_digest=None):
     run = metadata.get("workflow_run", {})
     require(str(run.get("id")) == os.environ["GITHUB_RUN_ID"] and run.get("head_sha") == sha,
             "artifact belongs to another workflow run or source")
-    require(expected_id is None or str(artifact_id) == expected_id, "signing output artifact ID mismatch")
-    require(expected_digest is None or digest == "sha256:" + expected_digest, "signing output artifact digest mismatch")
+    require(str(artifact_id) == expected_id, "producer output artifact ID mismatch")
+    require(digest == "sha256:" + expected_digest, "producer output artifact digest mismatch")
     return artifact_id, digest[7:]
 
 
-def fetch_artifact(metadata, name, names, destination, sha, expected_id=None, expected_digest=None):
-    artifact_id, digest = admit_metadata(metadata, name, sha, expected_id, expected_digest)
+def fetch_artifact(metadata, prefix, names, destination, sha, expected_id, expected_digest):
+    artifact_id, digest = admit_metadata(metadata, prefix, sha, expected_id, expected_digest)
     with tempfile.TemporaryDirectory(prefix="desktop-foundation-artifact-", dir=os.environ["RUNNER_TEMP"]) as temp:
         archive = Path(temp) / "artifact.zip"
         with archive.open("xb") as output:
@@ -100,19 +104,27 @@ def fetch_artifact(metadata, name, names, destination, sha, expected_id=None, ex
         signing.unpack_artifact(archive, digest, names, destination)
 
 
-def fetch_native(destination):
+def native_names(target):
+    require(target in BUILD_TARGETS, 'unsupported native artifact target')
+    suffix = '.exe' if 'windows' in target else ''
+    return {f'{stem}-{target}{suffix}' for stem in signing.IDENTIFIERS} | {f'hraness-companion-{target}.evidence.json'}
+
+
+def fetch_native(destination, targets=tuple(signing.TARGETS)):
     sha = context()
+    workflow_sha = os.environ.get('ARTIFACT_WORKFLOW_SHA', sha)
+    require(re.fullmatch(r'[a-f0-9]{40}', workflow_sha), 'invalid workflow source SHA')
     require(not destination.exists(), "native staging already exists")
-    listing = api(f"actions/runs/{os.environ['GITHUB_RUN_ID']}/artifacts?per_page=100")
-    require(listing.get("total_count", 101) <= 100, "artifact inventory exceeds one page")
     destination.mkdir(mode=0o700)
-    for target in signing.TARGETS:
-        name = f"native-{target}-{os.environ['GITHUB_RUN_ATTEMPT']}"
-        matches = [a for a in listing.get("artifacts", []) if a.get("name") == name]
-        require(len(matches) == 1, "native artifact is missing or ambiguous")
-        metadata = api(f"actions/artifacts/{matches[0]['id']}")
+    for target in targets:
+        key = target.replace('-', '_').upper()
+        artifact_id = os.environ.get(key + '_ARTIFACT_ID', '')
+        digest = os.environ.get(key + '_ARTIFACT_DIGEST', '')
+        require(re.fullmatch(r'[1-9][0-9]*', artifact_id) and re.fullmatch(r'[a-f0-9]{64}', digest),
+                'native producer omitted its exact artifact ID or digest')
+        metadata = api(f"actions/artifacts/{artifact_id}")
         stage = destination / target
-        fetch_artifact(metadata, name, signing.native_names(target), stage, sha)
+        fetch_artifact(metadata, f'native-{target}', native_names(target), stage, workflow_sha, artifact_id, digest)
         for path in stage.iterdir():
             path.rename(destination / path.name)
         stage.rmdir()
@@ -137,7 +149,7 @@ def fetch_signed(destination):
     artifact_id, digest = os.environ.get("SIGNED_ARTIFACT_ID", ""), os.environ.get("SIGNED_ARTIFACT_DIGEST", "")
     require(re.fullmatch(r"[1-9][0-9]*", artifact_id) and re.fullmatch(r"[a-f0-9]{64}", digest),
             "missing exact signing job outputs")
-    name = f"macos-signed-{os.environ['GITHUB_RUN_ATTEMPT']}"
+    name = "macos-signed"
     require(destination.is_dir() and not destination.is_symlink(), "unsafe package artifact destination")
     with tempfile.TemporaryDirectory(prefix="desktop-foundation-signed-", dir=os.environ["RUNNER_TEMP"]) as temp:
         stage = Path(temp) / "signed"
@@ -171,28 +183,30 @@ def fetch_distribution(destination):
     require(re.fullmatch(r'[1-9][0-9]*', artifact_id) and re.fullmatch(r'[a-f0-9]{64}', digest),
             'missing immutable package artifact identity')
     version = signing.version_value(json.loads(Path('package.json').read_text())['version'])
-    targets = (*signing.TARGETS, 'x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc',
-               'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu')
+    targets = BUILD_TARGETS
     names = {f'{stem}-{target}' + ('.exe' if 'windows' in target else '')
              for target in targets for stem in signing.IDENTIFIERS}
     names |= {f'hraness-companion-{target}.evidence.json' for target in targets}
     names |= {'release-manifest.json', 'SHA256SUMS', f'hraness-desktop-foundation-{version}.tgz'}
     if os.environ.get('GITHUB_EVENT_NAME') == 'push' and os.environ.get('GITHUB_REF_TYPE') == 'tag':
         names.add('macos-signing.json')
-    name = f'distribution-{os.environ["GITHUB_RUN_ATTEMPT"]}'
+    name = 'distribution'
     fetch_artifact(api(f'actions/artifacts/{artifact_id}'), name, names, destination, workflow_sha, artifact_id, digest)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["qualify", "verify-tag", "fetch-native", "fetch-signed", "verify-stage", "fetch-distribution"])
+    parser.add_argument("command", choices=["qualify", "verify-tag", "fetch-native", "fetch-builds", "fetch-signed", "verify-stage", "fetch-distribution"])
     parser.add_argument("destination", type=Path, nargs="?")
     args = parser.parse_args()
     if args.command in ("qualify", "verify-tag"):
         (qualify if args.command == "qualify" else verify_tag)()
     else:
         require(args.destination is not None, "destination required")
-        {'fetch-native': fetch_native, 'fetch-signed': fetch_signed, 'verify-stage': verify_stage, 'fetch-distribution': fetch_distribution}[args.command](args.destination)
+        if args.command == 'fetch-builds':
+            fetch_native(args.destination, BUILD_TARGETS)
+        else:
+            {'fetch-native': fetch_native, 'fetch-signed': fetch_signed, 'verify-stage': verify_stage, 'fetch-distribution': fetch_distribution}[args.command](args.destination)
 
 
 if __name__ == "__main__":

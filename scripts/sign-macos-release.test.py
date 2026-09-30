@@ -5,6 +5,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import stat
 import struct
 import sys
@@ -38,6 +40,7 @@ class SigningTests(unittest.TestCase):
         self.output = self.root / "output"
         self.work = self.root / "desktop-foundation-apple-signing"
         self.calls = []
+        self.search_list = [str(self.root / "login space.keychain-db"), str(self.root / "other.keychain-db")]
         self.status = "Accepted"
         self.failure = None
         env = {"HOME": str(self.root), "RUNNER_TEMP": str(self.root), "GITHUB_SHA": SHA,
@@ -59,7 +62,17 @@ class SigningTests(unittest.TestCase):
             raise signing.SigningError("mock tool failure")
         if "create-keychain" in args:
             Path(args[-1]).touch(mode=0o600)
+        if args[:4] == ["/usr/bin/security", "list-keychains", "-d", "user"]:
+            if len(args) == 4:
+                return "\n".join(json.dumps(path) for path in self.search_list)
+            self.assertEqual(args[4], "-s")
+            self.search_list = args[5:]
+            return ""
+        if "delete-keychain" in args:
+            self.search_list = [path for path in self.search_list if path != args[-1]]
         if "find-identity" in args:
+            if str(self.work / "credentials" / "signing.keychain-db") not in self.search_list:
+                return "0 valid identities found"
             return f'1) {"A" * 40} "Developer ID Application: Example ({signing.TEAM_ID})"'
         if "--sign" in args:
             binary = Path(args[-1])
@@ -70,6 +83,31 @@ class SigningTests(unittest.TestCase):
         if "notarytool" in args:
             return json.dumps({"id": UUID, "status": self.status})
         return ""
+
+    def test_search_list_preserves_existing_entries_and_removes_only_owned_keychain(self):
+        existing = list(self.search_list)
+        self.sign()
+        added = next(call for call in self.calls if call[:5] == ["/usr/bin/security", "list-keychains", "-d", "user", "-s"])
+        self.assertEqual(added[5:], existing + [str(self.work / "credentials" / "signing.keychain-db")])
+        self.assertEqual(self.search_list, existing)
+        self.assertEqual(sum("delete-keychain" in call for call in self.calls), 1)
+
+    def test_cancellation_after_append_preserves_another_owners_new_entry(self):
+        existing = list(self.search_list)
+        other = str(self.root / "concurrent-owner.keychain-db")
+        def interrupted(args, timeout=60):
+            result = self.tool(args, timeout)
+            if list(map(str, args))[:5] == ["/usr/bin/security", "list-keychains", "-d", "user", "-s"]:
+                self.search_list.append(other)
+                raise SystemExit(143)
+            return result
+        with patch.object(signing, "run", interrupted), self.assertRaises(SystemExit) as stopped:
+            self.sign()
+        self.assertEqual(stopped.exception.code, 143)
+        self.assertEqual(self.search_list, existing + [other])
+        self.assertFalse(self.output.exists())
+        self.assertFalse(self.work.exists())
+        self.assertEqual(sum("list-keychains" in call and "-s" in call for call in self.calls), 1)
 
     def sign(self):
         signing.sign(self.inputs, "1.1.3", self.output, self.work)
@@ -208,6 +246,30 @@ class SigningTests(unittest.TestCase):
             receipt_path.write_text(json.dumps(receipt))
             with self.assertRaises(artifacts.signing.SigningError):
                 artifacts.verify_stage(self.output)
+
+
+@unittest.skipUnless(sys.platform == "darwin", "requires the real macOS codesign parser")
+class NativeRequirementParserTests(unittest.TestCase):
+    def test_literal_designated_and_verification_requirements_use_real_parser(self):
+        with tempfile.TemporaryDirectory(prefix="hraness-requirement-parser-") as folder:
+            root = Path(folder)
+            binary = root / "owned-fixture"
+            shutil.copyfile("/usr/bin/true", binary)
+            binary.chmod(0o755)
+            rule = 'identifier "dev.hraness.signing-parser-fixture"'
+            environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(root), "LC_ALL": "C"}
+            def codesign(*arguments):
+                return subprocess.run(["/usr/bin/codesign", *arguments, str(binary)],
+                                      capture_output=True, text=True, env=environment, timeout=15)
+            signed = codesign("--force", "--sign", "-", "--identifier", "dev.hraness.signing-parser-fixture",
+                              "--requirements", signing.requirement_argument(rule, designated=True))
+            self.assertEqual(signed.returncode, 0, signed.stderr)
+            accepted = codesign("--verify", "--strict", "--test-requirement", signing.requirement_argument(rule))
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            rejected = codesign("--verify", "--strict", "--test-requirement",
+                                signing.requirement_argument('identifier "other.identity"'))
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("code failed to satisfy specified code requirement", rejected.stderr)
 
 
 if __name__ == "__main__":

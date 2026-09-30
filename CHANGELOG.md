@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.2 - 2026-09-29
+
+The Rust CLI kit can now be published separately to crates.io. Its runtime API
+and behavior are unchanged from 1.1.1.
+
+### Changes
+
+- Made `hraness-cli-kit` publishable with its source, README, and MIT license.
+- Added crates.io trusted publishing after the existing release checks. It
+  stays disabled until the first publication and registry setup are complete;
+  later releases use GitHub OIDC without a stored token or human approval.
+
 ## 1.1.1 - 2026-09-29
 
 Fixes from the review of 1.1.0. Exit codes, schema ids, error codes and the envelope shape are unchanged. Some behaviour, message text and helper signatures did change, and every change is listed below.

@@ -389,6 +389,7 @@ jobs:
   package_smoke:
     name: Smoke the immutable distribution on a separate runner
     needs: [package]
+    if: ${{ !cancelled() && needs.package.result == 'success' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:

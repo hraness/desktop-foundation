@@ -26,6 +26,8 @@ test('Apple credentials occur only in the separate tag-gated signer and before p
   const pack = workflow.slice(workflow.indexOf('  package:'), workflow.indexOf('  package_smoke:'));
   assert.ok(!pack.includes('package-smoke.mjs'));
   assert.ok(pack.includes('steps.distribution.outputs.artifact-digest'));
+  const smoke = workflow.slice(workflow.indexOf('  package_smoke:'), workflow.indexOf('  required:'));
+  assert.ok(smoke.includes("if: ${{ !cancelled() && needs.package.result == 'success' }}"), 'smoke must run after successful packaging even when a tag-only ancestor was skipped');
   assert.equal(workflow.split('macos-release-artifacts.py fetch-distribution artifacts').length, 3);
   assert.ok(workflow.includes('DISTRIBUTION_ARTIFACT_ID: ${{ needs.package.outputs.artifact_id }}'));
   assert.ok(workflow.indexOf('macos-release-artifacts.py verify-tag') < workflow.indexOf('gh release create'));

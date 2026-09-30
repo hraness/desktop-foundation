@@ -20,8 +20,11 @@ notification-area item or panel indicator to qualify. See
 
 The local app modes are macOS only; on Windows and Linux they answer with an
 error frame. Native executables are distributed without `.app`, DMG, PKG, MSI,
-MSIX or AppImage packaging. Builds use no publisher signing credentials or
-notarization submission. OS approval remains a separate condition; see
+MSIX or AppImage packaging. The release workflow is prepared to sign and
+notarize Mac helper and companion executables from version 1.1.3 using a
+protected tag-only environment. Ordinary builds and tests receive no
+publisher credentials. Windows executables remain unsigned. OS approval
+remains a separate condition; see
 [installation and blocked-launch guidance](installation.md).
 
 ## Lifecycle and ownership

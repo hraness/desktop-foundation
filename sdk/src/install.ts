@@ -4,6 +4,8 @@ import { link, lstat, mkdir, open, readFile, readlink, unlink } from 'node:fs/pr
 import { isAbsolute, join, normalize, parse, sep } from 'node:path';
 import { CompanionError } from './errors.js';
 import { resolveTarget, TARGETS, userPaths, type PlatformTarget } from './platform.js';
+import { verifyMacosRelease, requiresMacosSignature } from './macos-signature.js';
+import type { Stats } from 'node:fs';
 
 export interface ReleaseAsset { target: PlatformTarget; name: string; size: number; sha256: string }
 export interface ReleaseManifest {
@@ -86,7 +88,7 @@ export async function inspectBinary(options: Omit<EnsureBinaryOptions, 'fetch' |
   if (!asset) throw new CompanionError('unsupported_target', `This release has no ${options.kind ?? 'companion'} asset for ${target}.`);
   const path = join(options.cacheDir ?? userPaths().cacheDir, ...manifest.repository.split('/'), manifest.version, target, asset.name);
   await assertPhysicalPath(path);
-  const installed = await verifyFile(path, asset);
+  const installed = await verifyAdmittedFile(path, asset, manifest, target, options.kind ?? 'companion');
   return { path, installed, integrity: installed ? 'verified' : 'missing', version: manifest.version, tag: manifest.tag, repository: manifest.repository, target, sha256: asset.sha256, size: asset.size };
 }
 function errno(error: unknown, code: string) { return (error as NodeJS.ErrnoException)?.code === code; }
@@ -113,6 +115,13 @@ export async function ensurePrivateDirectory(path: string) {
   if (!info.isDirectory() || info.isSymbolicLink()) throw new CompanionError('unsafe_path', 'Companion cache directories must be real directories, not symbolic links.');
   if (process.platform !== 'win32' && ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.())) throw new CompanionError('unsafe_path', 'The companion directory must belong to the current user and have owner-only permissions.');
 }
+class InstallationLinkReleased extends CompanionError {
+  constructor() { super('integrity_failed', 'The installer released its temporary link during verification.'); }
+}
+function onlyInstallationLinkReleased(before: Stats, after: Stats): boolean {
+  return before.nlink === 2 && after.nlink === 1 && before.ctimeMs !== after.ctimeMs
+    && ['dev', 'ino', 'size', 'mode', 'uid', 'mtimeMs'].every(key => before[key as keyof Stats] === after[key as keyof Stats]);
+}
 async function verifyFile(path: string, asset: ReleaseAsset): Promise<boolean> {
   let info;
   try { info = await lstat(path); } catch (error) { if (errno(error, 'ENOENT')) return false; throw error; }
@@ -129,9 +138,37 @@ async function verifyFile(path: string, asset: ReleaseAsset): Promise<boolean> {
     if (size !== asset.size || hash.digest('hex') !== asset.sha256) throw new CompanionError('integrity_failed', 'The cached companion failed SHA-256 verification.', 'Do not launch this file. Explicitly remove this version from the cache before retrying.');
     const current = await file.stat();
     const named = await lstat(path);
-    if (current.size !== asset.size || current.mtimeMs !== opened.mtimeMs || current.ctimeMs !== opened.ctimeMs
+    if (current.size !== asset.size || current.mtimeMs !== opened.mtimeMs
         || named.isSymbolicLink() || named.dev !== current.dev || named.ino !== current.ino || named.mode !== opened.mode || named.uid !== opened.uid) throw new CompanionError('integrity_failed', 'The cached companion changed while it was verified.');
+    if (current.ctimeMs !== opened.ctimeMs) {
+      if (onlyInstallationLinkReleased(opened, current)) throw new InstallationLinkReleased();
+      throw new CompanionError('integrity_failed', 'The cached companion changed while it was verified.');
+    }
   } finally { await file.close(); }
+  return true;
+}
+async function verifyAdmittedFile(path: string, asset: ReleaseAsset, manifest: ReleaseManifest, target: PlatformTarget, kind: BinaryKind): Promise<boolean> {
+  // Atomic no-clobber publication uses a hard link. Another installer can
+  // remove its temporary name while we read the published inode. Restart the
+  // entire admission only for that precise metadata change; never accept the
+  // failed snapshot, and never retry content, ownership, or permission changes.
+  for (let attempt = 0; ; attempt++) {
+    try { return await verifyAdmittedFileOnce(path, asset, manifest, target, kind); }
+    catch (error) { if (!(error instanceof InstallationLinkReleased) || attempt >= 2) throw error; }
+  }
+}
+async function verifyAdmittedFileOnce(path: string, asset: ReleaseAsset, manifest: ReleaseManifest, target: PlatformTarget, kind: BinaryKind): Promise<boolean> {
+  if (!await verifyFile(path, asset)) return false;
+  if (requiresMacosSignature(manifest, target)) {
+    const before = await lstat(path);
+    await verifyMacosRelease(path, manifest, target, kind);
+    if (!await verifyFile(path, asset)) throw new CompanionError('integrity_failed', 'The signed release disappeared during verification.');
+    const after = await lstat(path);
+    if (['dev', 'ino', 'size', 'mode', 'uid', 'mtimeMs', 'ctimeMs'].some(key => before[key as keyof typeof before] !== after[key as keyof typeof after])) {
+      if (onlyInstallationLinkReleased(before, after)) throw new InstallationLinkReleased();
+      throw new CompanionError('integrity_failed', 'The signed release changed during signature verification.');
+    }
+  }
   return true;
 }
 function allowedRedirect(url: URL) {
@@ -191,17 +228,20 @@ async function ensureBinaryImpl(options: EnsureBinaryOptions): Promise<Installed
   for (const segment of [...manifest.repository.split('/'), manifest.version, target]) { directory = join(directory, segment); await ensurePrivateDirectory(directory); }
   const path = join(directory, asset.name);
   const result = { path, version: manifest.version, target };
-  if (await verifyFile(path, asset)) return { ...result, reused: true };
+  if (await verifyAdmittedFile(path, asset, manifest, target, options.kind ?? 'companion')) return { ...result, reused: true };
   const temp = join(directory, `.${asset.name}.${randomUUID()}.tmp`);
   try {
     await download(asset, new URL(`https://github.com/${manifest.repository}/releases/download/${manifest.tag}/${asset.name}`), temp, options.fetch ?? globalThis.fetch, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS));
+    if (!await verifyAdmittedFile(temp, asset, manifest, target, options.kind ?? 'companion')) throw new CompanionError('integrity_failed', 'The staged release disappeared.');
     try { await link(temp, path); }
     catch (error) {
       if (!errno(error, 'EEXIST')) throw error;
       // Another installer won the atomic publish. Never replace its file.
-      if (!await verifyFile(path, asset)) throw new CompanionError('cache_conflict', 'Concurrent install disappeared before it could be verified.');
+      if (!await verifyAdmittedFile(path, asset, manifest, target, options.kind ?? 'companion')) throw new CompanionError('cache_conflict', 'Concurrent install disappeared before it could be verified.');
       return { ...result, reused: true };
     }
+    await unlink(temp);
+    if (!await verifyAdmittedFile(path, asset, manifest, target, options.kind ?? 'companion')) throw new CompanionError('cache_conflict', 'Published install disappeared before it could be verified.');
     return { ...result, reused: false };
   } catch (error) {
     if (error instanceof CompanionError) throw error;

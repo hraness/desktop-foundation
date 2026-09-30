@@ -71,7 +71,7 @@ test('a touched platform branch runs every target', async () => {
 
 test('security and process modules run every target, whatever their content', async () => {
   const { selectScope } = await load();
-  for (const path of ['sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/prompt.ts', 'crates/hraness-control-kit/src/crypto.rs']) {
+  for (const path of ['sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/prompt.ts', 'sdk/src/install.ts', 'sdk/src/macos-signature.ts', 'crates/hraness-control-kit/src/crypto.rs']) {
     const read = files({ [path]: { base: neutral, head: neutral } });
     assert.equal(selectScope([{ status: 'M', path }], read, () => false).scope, 'full', path);
   }

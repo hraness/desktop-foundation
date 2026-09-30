@@ -5,7 +5,12 @@ things a terminal cannot do: show a notice or a secret prompt, and on macOS
 assemble, sign and launch the product's local app. It opens no window of its
 own and has no menu bar. Each call does one thing and exits. Distribution uses
 a versioned executable rather than an app bundle or desktop installer; it does
-not use Apple notarization or publisher signing credentials.
+not receive publisher signing credentials. Mac release executables starting
+with 1.1.3 require Hraness Developer ID signatures; their release workflow
+performs notarization before publication. This pipeline is prepared in
+source; 1.1.2 and earlier artifacts retain their original signatures.
+Locally assembled product apps keep the separate `Hraness Local Signing`
+identity described in [product identity](identity.md).
 
 `hraness-companion` is the 0.x name, kept as an alias. It answers every helper
 mode the same way. Asked for the old menu bar it exits 2 and points to

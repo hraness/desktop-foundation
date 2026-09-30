@@ -68,6 +68,7 @@ const FULL = [
 // rests on OS facilities (ps, /dev/tty, drive-letter and UNC paths, .exe
 // resolution) that a marker scan can miss, so they always run every target.
 export const SECURITY = new Set([
+  'sdk/src/install.ts', 'sdk/src/macos-signature.ts',
   'sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/prompt.ts', 'sdk/src/login.ts',
   'crates/hraness-control-kit/src/gate.rs', 'crates/hraness-control-kit/src/crypto.rs',
   'crates/hraness-local-app/src/helper.rs',

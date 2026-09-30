@@ -11,9 +11,11 @@ start, stop and status calls are gone; `hraness-companion` stays as an alias
 of `hraness-helper`. Upgrading from 0.9? Read the
 [migration guide](docs/migration-1.0.md).
 
-There is no `.app` download, DMG, MSI, AppImage, publisher certificate,
-Apple Developer account or notarization step. The helper is still a native
-executable, so the operating system's trust controls apply to it. See the
+Releases ship raw executables, without an `.app` download, DMG, MSI or
+AppImage. Developer ID signing and Apple notarization are prepared for Mac
+helper and companion releases starting with 1.1.3; the current 1.1.2 assets
+retain their original signatures. Installing a release needs no Apple
+Developer account. The operating system's trust controls still apply. See the
 [architecture](docs/architecture.md), [control kit](docs/control.md),
 [human gate](docs/human-gate.md), [helper protocol](docs/protocol.md),
 [platform contract](docs/platforms.md), [installation guide](docs/installation.md),

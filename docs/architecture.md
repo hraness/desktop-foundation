@@ -62,8 +62,10 @@ published provenance provide that separate evidence. A SHA-256 match
 establishes byte identity, not that software is harmless.
 
 End users need the product's runtime, not a compiler, Cargo, Swift or Xcode.
-The pipeline creates no installers and no Apple notarization submissions;
-macOS helper builds are ad-hoc signed. OS approval can still be needed; see
+The pipeline creates no installers. Starting with the next release, 1.1.3,
+a separate tag-only job signs and notarizes the four raw Mac helper and
+companion executables before their manifest hashes are generated.
+Ordinary Mac helper builds remain ad-hoc signed. OS approval can still be needed; see
 [installation guidance](installation.md).
 
 ## Platform boundary

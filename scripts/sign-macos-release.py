@@ -187,16 +187,20 @@ def diagnostic(path, receipt):
     # This small allowlisted receipt survives credential/work cleanup. Atomic
     # replacement preserves the latest known submission ID even on TERM.
     require(not path.is_symlink(), "unsafe notarization diagnostic path")
-    with tempfile.NamedTemporaryFile(mode="w", encoding="utf8", dir=path.parent,
-                                     prefix=".desktop-foundation-notarization-", delete=False) as output:
-        temporary = Path(output.name)
-        try:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf8", dir=path.parent,
+                                         prefix=".desktop-foundation-notarization-", delete=False) as output:
+            temporary = Path(output.name)
             json.dump(receipt, output, sort_keys=True)
             output.write("\n")
             output.flush()
             os.fsync(output.fileno())
-            os.replace(temporary, path)
-        finally:
+        # Close first: Windows also runs the mocked signing tests and refuses
+        # to replace an open temporary file. Replacement stays atomic.
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
             temporary.unlink(missing_ok=True)
 
 

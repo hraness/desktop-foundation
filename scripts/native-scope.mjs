@@ -49,6 +49,7 @@ const FULL = [
   /^scripts\//, // smokes, fixtures, packaging and this selector
   /^Cargo\.(toml|lock)$/,
   /^crates\/[^/]+\/Cargo\.toml$/,
+  /^crates\/[^/]+\/LICENSE$/, // part of the published crate archive
   /^build\.rs$/,
   /^rust-toolchain(\.toml)?$/,
   /^tauri\.conf\.json$/,

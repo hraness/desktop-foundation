@@ -50,8 +50,8 @@ libraries can fail before the helper starts; follow the
 ## Version
 
 ```text
-hraness-helper 1.1.1 protocol/1,2
-hraness-companion 1.1.1 protocol/1,2
+hraness-helper 1.1.2 protocol/1,2
+hraness-companion 1.1.2 protocol/1,2
 ```
 
 The `protocol/1,2` suffix keeps the 0.8 line shape so existing version

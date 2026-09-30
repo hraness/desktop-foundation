@@ -132,7 +132,7 @@ test('build, packaging, CI and selector changes run every target', async () => {
   const { selectScope } = await load();
   for (const path of [
     '.github/workflows/companion.yml', 'scripts/native-scope.mjs', 'scripts/alias-smoke.mjs', 'scripts/prompt-smoke.mjs',
-    'Cargo.toml', 'Cargo.lock', 'crates/hraness-local-app/Cargo.toml', 'build.rs', 'tauri.conf.json', 'windows.manifest.xml',
+    'Cargo.toml', 'Cargo.lock', 'crates/hraness-local-app/Cargo.toml', 'crates/hraness-cli-kit/LICENSE', 'build.rs', 'tauri.conf.json', 'windows.manifest.xml',
     'capabilities/README.json', 'icons/icon.ico', 'examples/stdio_fixture.rs', 'package.json', 'package-lock.json',
     'sdk/tsconfig.json', '.gitattributes', 'crates/hraness-control-kit/tests/golden/tui-status-80.txt',
   ]) {

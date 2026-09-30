@@ -59,5 +59,8 @@ the verified helper (`--assemble-app`, or `identity::assemble_app` in Rust)
 and signed with the one `Hraness Local Signing` identity, so macOS shows the
 product's name and keeps its approvals across updates. Create that identity
 only after showing the `LOCAL_SIGNING` notice. Never distribute the app: no
-zip, DMG, cask, installer, publisher signing credentials or Apple notarization
-workflow belong in this model. See `docs/identity.md`.
+zip, DMG, cask or installer belongs in this model. Publisher credentials
+never enter this local assembly flow. Separately, the release pipeline is
+prepared to sign and notarize raw Mac helper and companion downloads from
+version 1.1.3, before recording their manifest hashes. This does not change
+the local app identity or grant permissions. See `docs/identity.md`.

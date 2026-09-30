@@ -4,6 +4,7 @@ import { link, lstat, mkdir, open, readFile, readlink, unlink } from 'node:fs/pr
 import { isAbsolute, join, normalize, parse, sep } from 'node:path';
 import { CompanionError } from './errors.js';
 import { resolveTarget, TARGETS, userPaths, type PlatformTarget } from './platform.js';
+import { verifyMacosRelease, requiresMacosSignature } from './macos-signature.js';
 
 export interface ReleaseAsset { target: PlatformTarget; name: string; size: number; sha256: string }
 export interface ReleaseManifest {
@@ -86,7 +87,7 @@ export async function inspectBinary(options: Omit<EnsureBinaryOptions, 'fetch' |
   if (!asset) throw new CompanionError('unsupported_target', `This release has no ${options.kind ?? 'companion'} asset for ${target}.`);
   const path = join(options.cacheDir ?? userPaths().cacheDir, ...manifest.repository.split('/'), manifest.version, target, asset.name);
   await assertPhysicalPath(path);
-  const installed = await verifyFile(path, asset);
+  const installed = await verifyAdmittedFile(path, asset, manifest, target, options.kind ?? 'companion');
   return { path, installed, integrity: installed ? 'verified' : 'missing', version: manifest.version, tag: manifest.tag, repository: manifest.repository, target, sha256: asset.sha256, size: asset.size };
 }
 function errno(error: unknown, code: string) { return (error as NodeJS.ErrnoException)?.code === code; }
@@ -132,6 +133,19 @@ async function verifyFile(path: string, asset: ReleaseAsset): Promise<boolean> {
     if (current.size !== asset.size || current.mtimeMs !== opened.mtimeMs || current.ctimeMs !== opened.ctimeMs
         || named.isSymbolicLink() || named.dev !== current.dev || named.ino !== current.ino || named.mode !== opened.mode || named.uid !== opened.uid) throw new CompanionError('integrity_failed', 'The cached companion changed while it was verified.');
   } finally { await file.close(); }
+  return true;
+}
+async function verifyAdmittedFile(path: string, asset: ReleaseAsset, manifest: ReleaseManifest, target: PlatformTarget, kind: BinaryKind): Promise<boolean> {
+  if (!await verifyFile(path, asset)) return false;
+  if (requiresMacosSignature(manifest, target)) {
+    const before = await lstat(path);
+    await verifyMacosRelease(path, manifest, target, kind);
+    if (!await verifyFile(path, asset)) throw new CompanionError('integrity_failed', 'The signed release disappeared during verification.');
+    const after = await lstat(path);
+    if (['dev', 'ino', 'size', 'mode', 'uid', 'mtimeMs', 'ctimeMs'].some(key => before[key as keyof typeof before] !== after[key as keyof typeof after])) {
+      throw new CompanionError('integrity_failed', 'The signed release changed during signature verification.');
+    }
+  }
   return true;
 }
 function allowedRedirect(url: URL) {
@@ -191,17 +205,19 @@ async function ensureBinaryImpl(options: EnsureBinaryOptions): Promise<Installed
   for (const segment of [...manifest.repository.split('/'), manifest.version, target]) { directory = join(directory, segment); await ensurePrivateDirectory(directory); }
   const path = join(directory, asset.name);
   const result = { path, version: manifest.version, target };
-  if (await verifyFile(path, asset)) return { ...result, reused: true };
+  if (await verifyAdmittedFile(path, asset, manifest, target, options.kind ?? 'companion')) return { ...result, reused: true };
   const temp = join(directory, `.${asset.name}.${randomUUID()}.tmp`);
   try {
     await download(asset, new URL(`https://github.com/${manifest.repository}/releases/download/${manifest.tag}/${asset.name}`), temp, options.fetch ?? globalThis.fetch, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS));
+    if (!await verifyAdmittedFile(temp, asset, manifest, target, options.kind ?? 'companion')) throw new CompanionError('integrity_failed', 'The staged release disappeared.');
     try { await link(temp, path); }
     catch (error) {
       if (!errno(error, 'EEXIST')) throw error;
       // Another installer won the atomic publish. Never replace its file.
-      if (!await verifyFile(path, asset)) throw new CompanionError('cache_conflict', 'Concurrent install disappeared before it could be verified.');
+      if (!await verifyAdmittedFile(path, asset, manifest, target, options.kind ?? 'companion')) throw new CompanionError('cache_conflict', 'Concurrent install disappeared before it could be verified.');
       return { ...result, reused: true };
     }
+    if (!await verifyAdmittedFile(path, asset, manifest, target, options.kind ?? 'companion')) throw new CompanionError('cache_conflict', 'Published install disappeared before it could be verified.');
     return { ...result, reused: false };
   } catch (error) {
     if (error instanceof CompanionError) throw error;

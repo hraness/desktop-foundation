@@ -259,13 +259,93 @@ jobs:
         run: node scripts/artifact-evidence.mjs
       - uses: actions/upload-artifact@v7
         with:
-          name: native-${{ matrix.target }}
+          name: native-${{ matrix.target }}-${{ github.run_attempt }}
           path: artifacts/*
           if-no-files-found: error
+  release_identity:
+    name: Admit the exact release source
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.identity.outputs.sha }}
+      tag: ${{ steps.identity.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-tags: false
+      - id: identity
+        run: python3 -I scripts/macos-release-artifacts.py qualify
+  macos_sign:
+    name: Sign and notarize the four Mac release executables
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [release_identity, native, sdk, cli-kit, control-kit]
+    # Only release tags may enter this environment. No reviewers or timers.
+    # Build, test, and package jobs never receive these Apple credentials.
+    environment: hraness-apple-release
+    permissions:
+      contents: read
+      actions: read
+    runs-on: macos-15
+    timeout-minutes: 30
+    outputs:
+      artifact_id: ${{ steps.signed.outputs.artifact-id }}
+      artifact_digest: ${{ steps.signed.outputs.artifact-digest }}
+      receipt_sha256: ${{ steps.signed_bytes.outputs.receipt_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release_identity.outputs.sha }}
+          persist-credentials: false
+          fetch-tags: false
+      - name: Download and bind exact same-run Mac build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I scripts/macos-release-artifacts.py fetch-native "$RUNNER_TEMP/desktop-foundation-native"
+      - name: Sign and notarize without executing any payload
+        env:
+          RELEASE_TAG: ${{ needs.release_identity.outputs.tag }}
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: python3 -I scripts/sign-macos-release.py sign "$RUNNER_TEMP/desktop-foundation-native" "$RELEASE_TAG" "$GITHUB_WORKSPACE/signed-artifacts" "$RUNNER_TEMP/desktop-foundation-apple-signing"
+      - name: Remove isolated signing credentials on every outcome
+        if: always()
+        run: python3 -I scripts/sign-macos-release.py cleanup "$RUNNER_TEMP/desktop-foundation-apple-signing"
+      - name: Bind exact signed receipt before publishing artifacts
+        id: signed_bytes
+        run: |
+          set -euo pipefail
+          test -f signed-artifacts/macos-signing.json && test ! -L signed-artifacts/macos-signing.json
+          printf 'receipt_sha256=%s\n' "$(shasum -a 256 signed-artifacts/macos-signing.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - id: signed
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-signed-${{ github.run_attempt }}
+          path: signed-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve bounded notarization status for reconciliation
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-notarization-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/desktop-foundation-apple-notarization.json
+          if-no-files-found: warn
+          retention-days: 30
   package:
+    outputs:
+      artifact_id: ${{ steps.distribution.outputs.artifact-id }}
+      artifact_digest: ${{ steps.distribution.outputs.artifact-digest }}
     # The manifest and package need all six binaries, so only full runs.
-    needs: [changes, sdk, native]
-    if: needs.changes.outputs.scope == 'full'
+    needs: [changes, sdk, native, macos_sign]
+    if: always() && needs.changes.outputs.scope == 'full' && needs.sdk.result == 'success' && needs.native.result == 'success' && (needs.macos_sign.result == 'success' || (needs.macos_sign.result == 'skipped' && !(github.event_name == 'push' && github.ref_type == 'tag')))
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -278,13 +358,16 @@ jobs:
           cache: npm
       - uses: actions/download-artifact@v8
         with:
-          pattern: native-*
+          pattern: native-*-${{ github.run_attempt }}
           path: artifacts
           merge-multiple: true
-      # The package smoke runs the Linux binaries, which link GTK for the
-      # dialogs. Runtime packages only, no -dev.
-      - name: Install runner runtime libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-0
+      - name: Replace Mac artifacts with the exact notarized signing output
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED_ARTIFACT_ID: ${{ needs.macos_sign.outputs.artifact_id }}
+          SIGNED_ARTIFACT_DIGEST: ${{ needs.macos_sign.outputs.artifact_digest }}
+        run: python3 -I scripts/macos-release-artifacts.py fetch-signed artifacts
       - run: npm ci --ignore-scripts
       # The SDK tests already ran on this tree in the sdk job and on every
       # native leg; packaging only needs the compiled dist.
@@ -292,17 +375,48 @@ jobs:
       - run: node scripts/release-manifest.mjs
       - name: Package verified SDK and pinned manifest
         run: npm pack --ignore-scripts --pack-destination artifacts
-      - name: Smoke test the installed SDK tarball
-        run: node scripts/package-smoke.mjs
-      - uses: actions/upload-artifact@v7
+      - name: Recheck exact signed bytes before immutable package upload
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          SIGNED_RECEIPT_SHA256: ${{ needs.macos_sign.outputs.receipt_sha256 }}
+        run: python3 -I scripts/macos-release-artifacts.py verify-stage artifacts
+      - id: distribution
+        uses: actions/upload-artifact@v7
         with:
-          name: distribution
+          name: distribution-${{ github.run_attempt }}
           path: artifacts/*
           if-no-files-found: error
+  package_smoke:
+    name: Smoke the immutable distribution on a separate runner
+    needs: [package]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Download exact package job artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISTRIBUTION_ARTIFACT_ID: ${{ needs.package.outputs.artifact_id }}
+          DISTRIBUTION_ARTIFACT_DIGEST: ${{ needs.package.outputs.artifact_digest }}
+          ARTIFACT_WORKFLOW_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 -I scripts/macos-release-artifacts.py fetch-distribution artifacts
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-0
+      # No Apple credentials, publication authority, or artifact upload in this
+      # payload-executing job. Mutations cannot reach the immutable release.
+      - name: Smoke test the installed SDK tarball
+        run: node scripts/package-smoke.mjs
   required:
     name: Required
     if: always()
-    needs: [changes, sdk, cli-kit, control-kit, native, package]
+    needs: [changes, sdk, cli-kit, control-kit, native, release_identity, macos_sign, package, package_smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -316,19 +430,30 @@ jobs:
           CONTROL_KIT_RESULT: ${{ needs.control-kit.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
+          PACKAGE_SMOKE_RESULT: ${{ needs.package_smoke.result }}
+          RELEASE_REQUEST: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+          IDENTITY_RESULT: ${{ needs.release_identity.result }}
+          SIGNING_RESULT: ${{ needs.macos_sign.result }}
         run: |
           test "$CHANGES_RESULT" = success
           test "$SDK_RESULT" = success
           test "$CLI_KIT_RESULT" = success
           test "$CONTROL_KIT_RESULT" = success
+          if [ "$RELEASE_REQUEST" = true ]; then
+            test "$IDENTITY_RESULT" = success
+            test "$SIGNING_RESULT" = success
+          else
+            test "$IDENTITY_RESULT" = skipped
+            test "$SIGNING_RESULT" = skipped
+          fi
           # Only a pull request may narrow the matrix.
           if [ "$EVENT_NAME" != pull_request ]; then test "$SCOPE" = full; fi
           case "$SCOPE" in
             # A docs-only pull request deliberately skips the native matrix.
-            docs) test "$NATIVE_RESULT" = skipped && test "$PACKAGE_RESULT" = skipped ;;
+            docs) test "$NATIVE_RESULT" = skipped && test "$PACKAGE_RESULT" = skipped && test "$PACKAGE_SMOKE_RESULT" = skipped ;;
             # Three targets passed; the package needs all six and waits for main.
-            subset) test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = skipped ;;
-            full) test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = success ;;
+            subset) test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = skipped && test "$PACKAGE_SMOKE_RESULT" = skipped ;;
+            full) test "$NATIVE_RESULT" = success && test "$PACKAGE_RESULT" = success && test "$PACKAGE_SMOKE_RESULT" = success ;;
             *) echo "unknown native scope: $SCOPE"; exit 1 ;;
           esac
   main-health:
@@ -364,12 +489,13 @@ jobs:
             gh issue close "$issue" --comment "The $EVENT_NAME run for $SHA passed: $RUN_URL"
           fi
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [required]
+    if: github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
+    needs: [required, macos_sign, package]
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
       contents: write
+      actions: read
       id-token: write
       attestations: write
     steps:
@@ -377,10 +503,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          name: distribution
-          path: artifacts
+      - name: Fetch the same immutable distribution that passed package smoke
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISTRIBUTION_ARTIFACT_ID: ${{ needs.package.outputs.artifact_id }}
+          DISTRIBUTION_ARTIFACT_DIGEST: ${{ needs.package.outputs.artifact_digest }}
+        run: python3 -I scripts/macos-release-artifacts.py fetch-distribution artifacts
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: artifacts/*
@@ -394,7 +522,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$RELEASE_TAG" artifacts/* --verify-tag --title "desktop-foundation $RELEASE_TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          SIGNED_RECEIPT_SHA256: ${{ needs.macos_sign.outputs.receipt_sha256 }}
+        run: |
+          set -euo pipefail
+          python3 -I scripts/macos-release-artifacts.py verify-stage artifacts
+          python3 -I scripts/macos-release-artifacts.py verify-tag
+          gh release create "$RELEASE_TAG" artifacts/* --verify-tag --title "desktop-foundation $RELEASE_TAG" --notes-file "$RUNNER_TEMP/notes.md"
   crates:
     name: Publish CLI kit to crates.io
     needs: [required, release]

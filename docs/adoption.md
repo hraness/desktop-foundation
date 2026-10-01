@@ -52,9 +52,9 @@ host supports one and falls back to a masked terminal prompt otherwise. Keep
 secrets out of `title` and `message` and never pass them as arguments.
 Validation, storage and rotation stay with the product.
 
-On macOS a product can assemble and sign its own local app so its permissions
-stick across updates; see [product identity](identity.md). Leave that off
-until the clean-account check there passes.
+On macOS a product can assemble and sign its own local app to give dialogs
+and login startup a stable identity; see [product identity](identity.md).
+Enable that path only after its fresh-user check passes.
 
 ## 5. Start at login, only on request
 

@@ -6,9 +6,7 @@ product, short-lived commands that print JSON, a human gate for decisions a
 person owns, terminal views, and one small native helper for the few things
 a terminal cannot do.
 
-1.0 removed the menu bar. The tray runner, `./menu-kit` and the companion
-start, stop and status calls are gone; `hraness-companion` stays as an alias
-of `hraness-helper`. Upgrading from 0.9? Read the
+For products upgrading from a menu bar integration, follow the
 [migration guide](docs/migration-1.0.md).
 
 Releases ship raw executables, without an `.app` download, DMG, MSI or
@@ -36,9 +34,6 @@ for newer versions. Rust products pin the same tag:
 desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", tag = "v1.1.2" }
 hraness-control-kit = { git = "https://github.com/hraness/desktop-foundation", tag = "v1.1.2", features = ["tui"] }
 ```
-
-The Rust CLI kit also supports [crates.io trusted publishing](docs/crates-publishing.md)
-after its one-time registry setup.
 
 ## Headless control
 
@@ -83,7 +78,7 @@ Windows and Linux on arm64 and x64; macOS builds are ad-hoc signed.
 |---|---|
 | `--notice` | One native alert with the product's buttons, optionally opening a Settings pane. |
 | `--prompt`, `--prompt-probe` | One text-entry dialog (a credential, say), and a check that a dialog can be shown. |
-| `--assemble-app`, `--signing-identity`, `--launch` | The macOS local app a product assembles and signs on the person's own Mac, so its permissions stick across updates. |
+| `--assemble-app`, `--signing-identity`, `--launch` | A local macOS app that gives dialogs and login startup a stable product identity. |
 | `--version` | `hraness-helper 1.1.2 protocol/1,2`. |
 
 The SDK downloads it on first use, checks its size and SHA-256 against the
@@ -157,17 +152,3 @@ permissions::pre_prompt(&need, None, &mut ProcessIo)?;
 ✗ Unknown command "stauts". Did you mean "status"?
 → textbutler --help
 ```
-
-## Validation and releases
-
-Run `npm run check` on macOS: the SDK build and tests, `cargo test --locked
---release` and a release build of both executables. Tests use private
-temporary homes, fake `security` and `codesign` tools, and never touch the
-real login keychain, LaunchAgents or login items.
-
-Release from the reviewed, validated tree: bump `package.json`, the Cargo
-versions (workspace and crates) and the CHANGELOG section, merge, then push
-an annotated immutable `v*` tag. The tag workflow builds the six targets,
-the package and `SHA256SUMS`, attests every asset and creates the GitHub
-Release. Never move existing tags. Consumers update their tgz URL or Git
-tag and their lockfile.

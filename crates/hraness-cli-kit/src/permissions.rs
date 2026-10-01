@@ -1389,7 +1389,7 @@ pub mod presets {
             r,
             PermissionKind::Keychain,
             "use your \"Hraness Local Signing\" key",
-            "Hraness signs its apps on this Mac with it so they keep their permissions after updates.",
+            "Hraness uses this key to give the apps it builds on this Mac a stable signing identity.",
         )
         .with_requester("codesign")
         .with_target("Hraness Local Signing")

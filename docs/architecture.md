@@ -18,9 +18,8 @@ product CLI
         --assemble-app · --signing-identity · --launch   (macOS local app)
 ```
 
-1.0 removed the 0.x menu bar (the Tauri tray runner, `./menu-kit` and the
-companion lifecycle calls). `hraness-companion` remains as an alias of the
-helper; see the [migration guide](migration-1.0.md).
+`hraness-companion` is an alias of the helper. Products replacing an older
+menu bar integration can follow the [migration guide](migration-1.0.md).
 
 ## Responsibilities
 
@@ -72,8 +71,8 @@ Ordinary Mac helper builds remain ad-hoc signed. OS approval can still be needed
 
 The helper builds for macOS, Windows and Linux on x64 and arm64. The
 dialogs work on each; the local app is macOS only. Terminal views and the
-owner sockets need no GUI at all, so products now work the same over SSH
-and in CI. Platform-specific product features (Apple Messages, Contacts,
+owner sockets need no GUI at all, so those interfaces work over SSH and
+in CI. Platform-specific product features (Apple Messages, Contacts,
 Mac capture helpers) stay with their products. See the
 [platform contract](platforms.md).
 

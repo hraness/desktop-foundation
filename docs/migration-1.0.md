@@ -71,8 +71,7 @@ Exit 2 is the usage code of the control contract, and no 0.x runner exited
 still starts the old tray fails the same way on every login until the
 product retires it; `retireLegacyLoginItem` moves it aside.
 
-Prefer `hraness-helper` in new code. `resolveHelper` already does, and the
-alias will be dropped in a later major once no pin references it.
+Prefer `hraness-helper` in new code. `resolveHelper` selects that executable.
 
 ## Release assets
 

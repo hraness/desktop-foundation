@@ -6,9 +6,8 @@
 permissions and action authorization. The helper's dialogs are portable;
 product capabilities are not automatically portable.
 
-1.0 removed the 0.x menu bar on every platform. There is no tray icon,
-notification-area item or panel indicator to qualify. See
-[the migration guide](migration-1.0.md).
+For products replacing a menu bar integration, see the
+[migration guide](migration-1.0.md).
 
 ## What runs where
 

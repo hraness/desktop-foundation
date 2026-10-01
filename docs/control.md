@@ -1,15 +1,14 @@
 # Headless control
 
-From 0.9.0 a product runs without a menu bar, and from 1.0 there is none. One **owner** process per
-product holds the product's state and answers requests on two Unix sockets.
-Every other command is a short-lived client that prints a JSON envelope with
-`--json`. The TypeScript side is `@hraness/desktop-foundation/control` and
-`/registry`; the Rust side is the `hraness-control-kit` crate. Both read the
-same files in [`contract/`](../contract), and tests on both sides check the
-same golden fixtures in `contract/golden/`.
+One **owner** process per product holds the product's state and answers
+requests on two Unix sockets. Every other command is a short-lived client
+that prints a JSON envelope with `--json`. The TypeScript API is
+`@hraness/desktop-foundation/control` and `/registry`; Rust products use the
+`hraness-control-kit` crate. The [shared contracts](../contract) define the
+request and response formats for both.
 
-1.0 removed the tray, `./menu-kit` and the companion lifecycle calls; see
-[the migration guide](migration-1.0.md).
+For products replacing a menu bar integration, see the
+[migration guide](migration-1.0.md).
 
 ## Envelope
 
@@ -103,19 +102,17 @@ person, an error is two lines on stderr, following `CLI_MENU_STYLE.md` D5:
 ```
 
 The first line is one sentence (plus the suggestion for a mistyped command);
-the second is the first `next` step meant for a person. `HRANESS_DEBUG=1`,
-or `--debug` since 1.1.1, adds the code and detail. A script (the quiet
-audience) keeps the 1.0 contract: the error envelope on stdout, and `FAIL <code>: <message>` on stderr, in ASCII
-whatever the locale. Help starts with `Usage:`, and `<product> help <command>` is the
-same as `<command> --help` unless a product registers its own `help` verb.
+the second is the first `next` step meant for a person. `HRANESS_DEBUG=1` or
+`--debug` adds the code and detail. A script (the quiet audience) receives the
+error envelope on stdout and `FAIL <code>: <message>` on stderr, in ASCII
+whatever the locale. Help starts with `Usage:`, and `<product> help <command>`
+is the same as `<command> --help` unless a product registers its own `help` verb.
 
-A `decide` verb called
-by an agent (with or without `--json`), or with `--json` by a quiet audience,
-returns exit 3 with a `next` step for a person and never prompts. In 1.0 an
-agent without `--json` was prompted at `/dev/tty`; since 1.1.0 it gets
-exit 3. Since 1.1.1, after a wrong or expired code, the `next` step is the
-same command again. `HRANESS_AUDIENCE=human` and `--confirm` only change
-wording; they never satisfy the gate. See
+A `decide` verb called by an agent (with or without `--json`), or with `--json` by a quiet audience,
+returns exit 3 with a `next` step for a person and never prompts. After a
+wrong or expired code, the `next` step is the same command again.
+`HRANESS_AUDIENCE=human` and `--confirm` only change wording; they never satisfy
+the gate. See
 [human-gate.md](human-gate.md).
 
 ## Owner files
@@ -187,6 +184,6 @@ Response:
 The sockets separate agent requests from admin requests by path and by the
 capability file. Both live in a 0700 directory, so another user on the machine
 cannot connect. They do not keep out a process running as the same user: such
-a process can read `admin.cap`. Peer-credential checks are deferred with the
-T3 gate tier. See [human-gate.md](human-gate.md) and
+a process can read `admin.cap`. These sockets do not perform peer-credential
+checks. See [human-gate.md](human-gate.md) and
 [SECURITY.md](../SECURITY.md).

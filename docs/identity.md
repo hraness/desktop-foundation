@@ -1,34 +1,26 @@
 # Product identity on macOS
 
-Status: built for desktop-foundation 0.8.0 (see
-[implementation notes](#implementation-notes)); from 1.0 the helper runs
-every mode below, and `hraness-companion` answers them the same way. It replaces the "unbundled
-companions only" rule for macOS in `AGENTS.md` and
-`skills/companion/SKILL.md`.
+A product can assemble a local macOS app so dialogs and login startup use its
+name and icon. A persistent signing identity gives successive builds the same
+code identity; macOS decides which permissions apply to the running product.
+The local app is separate from the downloaded helper's publisher signature.
 
-## The problem
+The product must explicitly request assembly and signing. Before enabling this
+path for users, test identity creation, signing, an update, login startup and a
+privacy request in a fresh macOS user account. Automated tests with substitute
+keychain and signing tools do not establish those OS interactions.
 
-macOS names whatever executable it sees. Today a login item shows as `node`,
-`bun` or `env`, Activity Monitor shows
-`hraness-helper-aarch64-apple-darwin`, the native dialog has a generic
-icon, and Rust products show bare executable names. Ad-hoc signatures change
-with every build, so each upgrade resets Full Disk Access, Automation and
-keychain approvals.
+## App location and identity
 
-## Design
+The helper builds `~/Applications/Hraness/<Product>.app` on the user's Mac.
+The display name identifies the product, such as `Textbutler.app` or
+`AI Charts.app`, and the bundle ID is `app.hraness.<appId>`.
+Keep that ID stable across updates.
 
-Each product gets a small app bundle that is built on the person's own Mac,
-around the runner the SDK has already verified, and signed with one
-persistent local signing identity.
-
-- Path: `~/Applications/Hraness/<Product>.app`, where `<Product>` is the
-  registry display name (`Textbutler.app`, `AI Charts.app`).
-- Bundle ID: `app.hraness.<appId>`, fixed forever for that product.
-- Never distributed. No zip, DMG, cask, release asset or browser download of
-  the bundle exists. CI builds bundles only inside tests.
-- Never quarantined. The runner arrives through `fetch`, npm or Cargo without
-  `com.apple.quarantine`, and a bundle assembled locally has none, so
-  Gatekeeper does not assess it and notarization is not needed.
+The bundle is assembled locally and is not distributed as a download. Assembly
+refuses inputs with `com.apple.quarantine` and does not clear that attribute.
+Local assembly does not exempt software from Gatekeeper or device policy;
+follow the [installation guidance](installation.md) when macOS blocks a launch.
 
 ### Bundle contents
 
@@ -67,7 +59,7 @@ sentence of at most 110 characters, with no jargon:
 | Key | Example |
 | --- | --- |
 | `NSAppleEventsUsageDescription` | Textbutler sends the replies you approve through Messages. |
-| `NSContactsUsageDescription` | Textbutler shows your contacts' names instead of phone numbers. Nothing leaves your Mac. |
+| `NSContactsUsageDescription` | Textbutler shows your contacts' names instead of phone numbers. |
 | `NSLocalNetworkUsageDescription` | Valhalla lets room members on your network connect to this Mac. |
 | `NSCameraUsageDescription` | Slopcamera uses the camera only while you record. |
 | `NSMicrophoneUsageDescription` | Slopcamera records sound only while you record. |
@@ -78,40 +70,35 @@ without the hardened runtime, so no Apple Events entitlement is needed.
 
 ### Launching through the bundle
 
-Two things decide what macOS names:
+Running the helper from `Contents/MacOS/<Product>` supplies the app's bundle
+metadata. Privacy attribution also depends on the requested permission,
+launch method and macOS behavior. Check the displayed product name, Login
+Items entry and privacy request using the product's actual launch path in a
+fresh user account; the executable's display name alone does not establish
+which process receives a permission.
 
-- Activity Monitor and native dialogs use the bundle of
-  the running executable. Running `Contents/MacOS/<Product>` as a child with
-  pipes, as the SDK does today, is enough.
-- Privacy prompts and grants follow the responsible process: the process
-  launchd or Launch Services started. A product owner started by
-  `/usr/bin/env bun` from a LaunchAgent is attributed to `env`, and one
-  started from Terminal to Terminal.
-
-So the runner gains a supervisor mode:
+The helper launches the product through a supervisor mode:
 
 ```text
 <Product>.app/Contents/MacOS/<Product> --launch <owner-only argv file>
 ```
 
 It reads the product's command line from an owner-only file in the product's
-state directory (never argv, so no values show in `ps`), spawns that command as
-a child with `HRANESS_APP_BUNDLE_ID=app.hraness.<appId>` in its environment,
-forwards SIGTERM and SIGINT, and exits with the child's status. It stays the
-parent on purpose: `exec` would make the child its own responsible process.
-The product's helper dialogs then run from the same bundle path.
+state directory and spawns that command as a child with
+`HRANESS_APP_BUNDLE_ID=app.hraness.<appId>` in its environment. The supervisor
+remains the child's parent, forwards signals and collects its exit status.
+The product's helper dialogs use the same bundle path. The child
+receives the stored command and arguments, so keep credentials out of that
+command line. The file protects the stored launch configuration; it does not
+hide the child's arguments from process inspection.
 
-Login startup points at the bundle:
-
-- Preferred: the LaunchAgent at
-  `~/Library/LaunchAgents/app.hraness.<appId>.plist` with
-  `ProgramArguments = [<bundle executable>, "--launch", <argv file>]`,
-  `AssociatedBundleIdentifiers = [app.hraness.<appId>]`, `RunAtLoad`, and
-  `LimitLoadToSessionType = Aqua`. Login Items then shows the product's name
-  and icon.
-- To evaluate during implementation: `SMAppService.mainApp` registered from
-  inside the bundle, which lists the app under Open at Login. Use it only if
-  it works for a locally signed, non-notarized bundle on macOS 13 through 26.
+Login startup uses a LaunchAgent at
+`~/Library/LaunchAgents/app.hraness.<appId>.plist`. Its `ProgramArguments` name
+the bundle executable, `--launch` and the argv file. It declares
+`AssociatedBundleIdentifiers = [app.hraness.<appId>]`, `RunAtLoad` and
+`LimitLoadToSessionType = Aqua`. These fields describe the product and request
+startup in the user's graphical session. Confirm the displayed Login Items
+entry during the fresh-user check.
 
 Upgrading replaces the old `app.hraness.companion.<appId>` agent: the SDK
 removes the old plist after the new one is written, in the same command.
@@ -160,16 +147,16 @@ Steps:
 One identity per Mac user signs every Hraness bundle and helper: the
 designated requirement stays
 `identifier "app.hraness.<appId>" and certificate leaf = H"<sha1>"` across
-upgrades, so privacy and keychain approvals survive them.
+upgrades. This keeps the signing identity stable; it does not grant a
+permission or guarantee that macOS will preserve an approval.
 
 | Property | Value |
 | --- | --- |
 | Common name and label | `Hraness Local Signing` |
 | Keychain | the login keychain |
 | Key | RSA 2048, created on this Mac, marked non-extractable |
-| Certificate | self-signed, Key Usage digitalSignature, Extended Key Usage codeSigning, valid 20 years (renewal would change the requirement and reset approvals) |
+| Certificate | self-signed, Key Usage digitalSignature, Extended Key Usage codeSigning, valid 20 years |
 | Key access list | `/usr/bin/codesign` only |
-| Keychain comment | Signs Hraness apps built on this Mac so macOS keeps their permissions after updates. Delete it to reset. |
 | Selection | always by SHA-1 hash, never by name |
 
 Runner commands, each printing one JSON line:
@@ -179,77 +166,55 @@ hraness-helper --signing-identity status   {"type":"signing-identity","version":
 hraness-helper --signing-identity ensure   creates the identity when missing
 ```
 
-### Prompts this raises
+### Creating and using the identity
 
-| Step | Prompt | Handling |
-| --- | --- | --- |
-| Creating the key and certificate in the unlocked login keychain | none expected | If the keychain is locked, macOS asks to unlock it. Show nothing extra; the result is `identity-unavailable` with "Unlock your login keychain, then retry." |
-| First signing with the key | expected: "codesign wants to sign using key "Hraness Local Signing" in your keychain", with a password field and Always Allow | Show the `LOCAL_SIGNING` notice from [permissions](permissions.md#local_signingref) first. After Always Allow it does not return for later upgrades. A denial is `signing-declined`; the product falls back to ad-hoc and says permissions will be asked again after updates. |
-| Trusting the certificate | not done | Adding trust settings (`security add-trusted-cert`) opens an administrator password dialog and edits system trust policy. The design does not need it: `codesign` signs with an untrusted self-signed identity selected by hash, and `codesign --verify` checks the signature, not the anchor. If implementation shows `codesign` refuses the identity, stop and take the decision to the maintainer; never add trust automatically. |
+Show the shared [local signing notice](permissions.md#local_signingref) before
+requesting identity creation or use. A locked keychain may require the person
+to unlock it, and macOS may ask permission for `codesign` to use the key.
+If creation or signing fails, report the returned error and let the person
+choose the next step. The helper does not add certificate trust settings.
 
-These prompts were reasoned from macOS keychain behavior and have not been
-observed on this design. 0.8.0 ships the code, but nothing runs it unless a
-product calls it: the SDK and the default runner path never assemble an app
-or create an identity. Before a product turns local signing on for its users,
-run the flow once on a clean macOS user account and record what appears:
-identity creation, first signing, an upgrade re-sign, the Login Items entry
-(`sfltool dumpbtm`), and one privacy prompt through `--launch`.
+Assembly with `signing: "local"` requires an existing identity. A missing one
+returns `identity-unavailable`; assembly does not create it automatically.
+An explicit `--signing-identity ensure` call creates it when missing.
+`signing: "ad-hoc"` is a separate choice whose code identity changes when the
+signed executable changes, so permissions may need to be granted again after
+an update.
 
-### Security trade-off
+### Signing and process trust
 
-Any program running as the same user can ask `codesign` to use this key, so
-it could sign its own code as a Hraness app and inherit that app's approvals,
-including Full Disk Access. Ad-hoc signing ties each approval to one exact
-binary, which blocks that, at the cost of re-approval after every update. The
-key's access list, non-extractable storage and the one-time Always Allow are
-the mitigations in this design. The stronger alternative, asking for approval
-on every signing, would show a password prompt at each upgrade.
+A persistent signing identity gives builds a consistent code identity. It
+does not establish a security boundary between processes running as the same
+user. A same-user process can invoke `codesign` and access user-owned
+configuration; keychain access rules still govern use of the key.
 
-## Implementation notes
+Changing a certificate or using an ad-hoc signature changes code identity.
+The effect on a particular privacy approval depends on macOS and the
+permission involved. Neither signing mode proves a caller is trusted or
+replaces the product's authorization checks.
 
-As built in 0.8.0 (now `crates/hraness-local-app/src/identity.rs`, with the
-helper modes in `crates/hraness-local-app/src/helper.rs`):
+## Launch file limits
 
-- `status` lists identities with `security find-identity -p codesigning
-  <login keychain>` without `-v`, because the self-signed certificate is not
-  trusted, and takes the first `"Hraness Local Signing"` hash.
-- `ensure` makes the key and certificate with `/usr/bin/openssl` in an
-  owner-only temporary folder, exports a one-time-password PKCS#12 (3DES,
-  which `security import` reads on every macOS), and imports it with
-  `security import -x -T /usr/bin/codesign`. The folder is removed before it
-  returns. The keychain comment is not set yet.
-- Info.plist also carries `HranessInputsSha256`, the digest of every input
-  including the signing mode and runner version; `unchanged` means that digest
-  matches and `codesign --verify --strict` passes. The icon is resized only
-  when a build is needed.
-- A local-signing request without an identity fails with
-  `identity-unavailable`; it never creates one. The product shows the notice,
-  calls `--signing-identity ensure`, then retries, or falls back to ad-hoc.
-- `--launch` refuses to run outside a Hraness app (`launch-outside-app`) or
-  with an argv file that is not an owner-only JSON array of 1 to 64 strings,
-  at most 64 KiB, whose first entry is an absolute path
-  (`invalid-launch-file`). The SDK and `write_argv_file` refuse to write a
-  bigger one; a child that fails to start is
-  `launch-failed`. It forwards SIGTERM, SIGINT and SIGHUP and exits with the
-  child's code, or 128 plus its signal.
-- Rust products use `identity::login_item` with `service::plan` and
-  `service::install` so their LaunchAgent starts `--launch` from the app.
-  `identity::doctor_line` prints the doctor copy below.
+`--launch` must run inside a Hraness app. The argv file must be an owner-only
+JSON array of 1 to 64 strings, at most 64 KiB, whose first entry is an absolute
+executable path. Invalid input returns `invalid-launch-file`; a child that
+cannot start returns `launch-failed`. The supervisor forwards SIGTERM, SIGINT
+and SIGHUP and returns the child's exit code, or 128 plus its terminating
+signal.
 
-Not yet observed on a clean macOS user account: identity creation, the first
-signing prompt, an upgrade re-sign, the Login Items entry and a privacy prompt
-through `--launch`. The unit tests use a fake `security`, `openssl` and
-`codesign` and a temporary home; only ad-hoc signing has run for real.
+Rust products use `identity::login_item` with `service::plan` and
+`service::install` to register that launch command. `identity::doctor_line`
+provides the diagnostic text below.
 
 ## Doctor copy
 
 ```text
 ✓ Textbutler.app is signed by Hraness Local Signing
-⚠ Textbutler.app is ad-hoc signed, so macOS asks for its permissions again after each update.
-→ textbutler login-item install
+⚠ Textbutler.app is ad-hoc signed. macOS may ask for its permissions again after an update.
+→ textbutler control install
 ```
 
 ## Windows and Linux
 
-Unchanged. The runner keeps its current naming there; this design is macOS
-only.
+Local app assembly and signing are macOS-only capabilities. Windows and Linux
+products use the portable helper and their own platform permission flows.

@@ -75,7 +75,7 @@ pub enum Signing {
     /// The persistent `Hraness Local Signing` identity.
     #[default]
     Local,
-    /// Ad-hoc: approvals reset after each update.
+    /// Ad-hoc: code identity changes when the executable changes.
     AdHoc,
 }
 
@@ -926,7 +926,7 @@ pub fn doctor_line(name: &str, command: &str, signing: Option<Signing>, ascii: b
     match signing {
         Some(Signing::Local) => format!("{ok} {name}.app is signed by {IDENTITY_NAME}\n"),
         Some(Signing::AdHoc) => format!(
-            "{warn} {name}.app is ad-hoc signed, so macOS asks for its permissions again after each update.\n{next} {command} control install\n"
+            "{warn} {name}.app is ad-hoc signed. macOS may ask for its permissions again after an update.\n{next} {command} control install\n"
         ),
         None => format!("{warn} {name}.app isn't set up yet.\n{next} {command} control install\n"),
     }
@@ -1509,7 +1509,7 @@ mod tests {
         );
         assert_eq!(
             doctor_line("Textbutler", "textbutler", Some(Signing::AdHoc), false),
-            "⚠ Textbutler.app is ad-hoc signed, so macOS asks for its permissions again after each update.\n→ textbutler control install\n"
+            "⚠ Textbutler.app is ad-hoc signed. macOS may ask for its permissions again after an update.\n→ textbutler control install\n"
         );
         assert_eq!(
             doctor_line("Textbutler", "textbutler", None, true),

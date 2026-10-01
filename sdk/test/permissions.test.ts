@@ -117,7 +117,7 @@ test('presets render the documented copy', () => {
     + '   Press Enter to continue · s to skip\n');
   assert.equal(cli(LOCAL_SIGNING(textbutler)),
     '🔐 macOS will ask to let codesign use your "Hraness Local Signing" key for Textbutler.\n'
-    + "   Hraness signs its apps on this Mac with it so they keep their permissions after updates. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.\n"
+    + "   Hraness uses this key to give the apps it builds on this Mac a stable signing identity. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.\n"
     + '   Press Enter to continue · s to skip\n');
 });
 

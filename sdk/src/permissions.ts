@@ -485,6 +485,6 @@ export function SCREEN_RECORDING(ref: ProductRef, why: string): PermissionNeed {
 export function LOCAL_SIGNING(ref: ProductRef): PermissionNeed {
   return {
     ...ref, kind: 'keychain', requester: 'codesign', target: 'Hraness Local Signing', ask: 'use your "Hraness Local Signing" key',
-    why: 'Hraness signs its apps on this Mac with it so they keep their permissions after updates.',
+    why: 'Hraness uses this key to give the apps it builds on this Mac a stable signing identity.',
   };
 }

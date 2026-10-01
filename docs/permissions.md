@@ -1,12 +1,9 @@
 # Permission notices and recovery
 
-Status: the TypeScript kit ships in desktop-foundation 0.8.0 as
-`@hraness/desktop-foundation/permissions` (`sdk/src/permissions.ts`, with
-`sdk/src/audience.ts` and `sdk/src/cli-style.ts`). It doesn't need the native
-runner, so any CLI can use it. The Rust mirror is the std-only
-`hraness-cli-kit` crate in `crates/hraness-cli-kit`, from 0.8.1, with the API
-[below](#rust-api-hraness-cli-kit). Its copy is byte for byte the same as the
-TypeScript kit's.
+Use `@hraness/desktop-foundation/permissions` to explain a macOS permission
+request and help a person recover from a denial. It runs independently of the
+native helper. Rust products use the std-only `hraness-cli-kit` crate with the
+matching [API and permission wording](#rust-api-hraness-cli-kit).
 
 The kit never triggers a macOS prompt by itself. It says what macOS is about
 to ask and why, probes state only where a probe cannot cause a prompt,
@@ -429,12 +426,13 @@ kind `keychain`; target `Hraness Local Signing`; requester `codesign`; ask
 
 ```text
 🔐 macOS will ask to let codesign use your "Hraness Local Signing" key for Textbutler.
-   Hraness signs its apps on this Mac with it so they keep their permissions after updates. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
+   Hraness uses this key to give the apps it builds on this Mac a stable signing identity. Enter your Mac password if asked, then choose Always Allow so macOS doesn't ask again.
    Press Enter to continue · s to skip
 ```
 
-Skipping falls back to ad-hoc signing and prints `⚠ Textbutler will ask for
-its permissions again after each update.`
+Skipping returns control to the product. If the product chooses ad-hoc
+signing, macOS may ask for permissions again after an update; see
+[product identity](identity.md#creating-and-using-the-identity).
 
 ## JSON error shape
 
@@ -446,12 +444,12 @@ With `--json` or an agent audience, a permission failure is:
 
 ## Rust API (`hraness-cli-kit`)
 
-From 0.8.1. The crate uses only `std`; the optional `clap` feature adds the
+The crate uses only `std`; the optional `clap` feature adds the
 usage-error hook for clap 4 CLIs. Pin it by tag like the rest of this
 repository:
 
 ```toml
-hraness-cli-kit = { git = "https://github.com/hraness/desktop-foundation", tag = "v0.8.1", features = ["clap"] }
+hraness-cli-kit = { git = "https://github.com/hraness/desktop-foundation", tag = "v1.1.2", features = ["clap"] }
 ```
 
 `desktop_foundation::cli_kit`, `::audience` and `::permissions` re-export it

@@ -12,3 +12,8 @@ an annotated immutable `v*` tag. The tag workflow builds the six targets,
 the package and `SHA256SUMS`, attests every asset and creates the GitHub
 Release. Never move existing tags. Consumers update their tgz URL or Git
 tag and their lockfile.
+
+Pushing the tag by hand is optional: once the Companion run on `main` passes
+for a commit that bumps `package.json`, the Tag release workflow creates the
+annotated `v<version>` tag on that commit with the `hraness-release-tagger`
+App. A manually pushed tag still works.

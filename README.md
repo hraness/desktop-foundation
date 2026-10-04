@@ -35,6 +35,24 @@ desktop-foundation = { git = "https://github.com/hraness/desktop-foundation", ta
 hraness-control-kit = { git = "https://github.com/hraness/desktop-foundation", tag = "v1.1.2", features = ["tui"] }
 ```
 
+## Verify the TypeScript SDK
+
+Use Node.js 22 or later. After installing, run this in your terminal:
+
+```sh
+node --input-type=module -e 'import { detectAudience } from "@hraness/desktop-foundation/audience"; console.log(detectAudience({ env: {}, stderrIsTTY: false }));'
+```
+
+The result is `quiet`. This checks that Node can load the installed SDK without
+downloading a helper, showing a dialog, registering login startup, or creating
+a signing identity. It does not check native helper installation or OS trust.
+
+Choose your next task:
+
+- [Adopt the control kit](docs/adoption.md) to connect your product's commands and owner process.
+- [Install and diagnose the helper](docs/installation.md) when you need native dialogs or macOS local app identity.
+- [Understand human decisions](docs/human-gate.md) before exposing a decision command. Keep the product's permission checks; a terminal challenge is not protection against malicious code running as the same user.
+
 ## Headless control
 
 One owner process holds a product's state, and every other command is a

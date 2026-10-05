@@ -29,7 +29,7 @@ import { pathToFileURL } from 'node:url';
 
 // Documentation that code reads. Rust tests include_str! these (native legs
 // only), so an edit runs the subset rather than skipping native.
-const ASSERTED_DOCS = new Set(['docs/protocol.md', 'docs/permissions.md']);
+const ASSERTED_DOCS = new Set(['docs/permissions.md']);
 // Files scripts/package-smoke.mjs asserts in the installed package (existence,
 // and the skill's front matter). The package job runs only on `full`, so an
 // edit to the skill, or deleting any of these, runs every target.
@@ -69,7 +69,7 @@ const FULL = [
 // resolution) that a marker scan can miss, so they always run every target.
 export const SECURITY = new Set([
   'sdk/src/install.ts', 'sdk/src/macos-signature.ts',
-  'sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/prompt.ts', 'sdk/src/login.ts',
+  'sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/login.ts',
   'crates/hraness-control-kit/src/gate.rs', 'crates/hraness-control-kit/src/crypto.rs',
   'crates/hraness-local-app/src/helper.rs',
 ]);

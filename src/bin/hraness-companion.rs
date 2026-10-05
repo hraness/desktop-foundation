@@ -2,8 +2,8 @@
 
 //! `hraness-companion`, kept from 1.0 as an alias of `hraness-helper`.
 //!
-//! Every one-shot mode (`--version`, `--prompt-probe`, `--assemble-app`,
-//! `--signing-identity`, `--launch`, `--notice`, `--prompt`) runs the same
+//! Every one-shot mode (`--version`, `--assemble-app`,
+//! `--signing-identity`, `--launch`) runs the same
 //! code as `hraness-helper`, with the same argv, stdout and exit status
 //! (`contract/helper-argv.v0.8.1.json`); only `--version` prints this
 //! binary's name. The menu bar was removed in 1.0: with no arguments, or

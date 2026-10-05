@@ -1,8 +1,8 @@
 # Install and run the helper
 
 `hraness-helper` is a small native executable a product CLI runs for the few
-things a terminal cannot do: show a notice or a secret prompt, and on macOS
-assemble, sign and launch the product's local app. It opens no window of its
+things a terminal cannot do: on macOS it assembles, signs and launches the
+product's local app. It opens no window of its
 own and has no menu bar. Each call does one thing and exits. Distribution uses
 a versioned executable rather than an app bundle or desktop installer; it does
 not receive publisher signing credentials. Mac release executables starting
@@ -14,12 +14,12 @@ identity described in [product identity](identity.md).
 
 `hraness-companion` is the 0.x name, kept as an alias. It answers every helper
 mode the same way. Asked for the old menu bar it exits 2 and points to
-`<product> tui` and `<product> status --json`. See
+`<product> status --json`. See
 [the 1.0 migration guide](migration-1.0.md).
 
 The executable is still downloaded software. Operating-system checks apply,
 and some machines will not allow an unsigned executable. A successful download,
-checksum, build, or process spawn is not proof that a dialog can appear. See
+checksum, build, or process spawn is not proof the helper's modes can run. See
 [platform support](platforms.md).
 
 ## What the person runs
@@ -30,7 +30,6 @@ The product owns its commands. With the control kit a product typically offers:
 | --- | --- |
 | `<product> start` / `stop` | Start or stop the product's one owner process for this user. |
 | `<product> status --json` | The owner state as one JSON object, for scripts and agents. |
-| `<product> tui` | An interactive view of the same state in the terminal. |
 | `<product> login-item install` / `uninstall` | Opt in to starting the owner when this user signs in, or remove that registration. This is login registration, not an app installer. |
 | `<product> doctor` | Platform, release and helper diagnostics with one actionable next step. |
 
@@ -88,18 +87,15 @@ metadata. [Microsoft: SmartScreen settings](https://learn.microsoft.com/en-us/wi
 
 **Smart App Control is different from SmartScreen.** Microsoft documents no
 per-app exception for Smart App Control. If it blocks this unsigned helper,
-the dialogs are unavailable on that machine; the product's CLI keeps working.
+the local-app modes are unavailable on that machine; the product's CLI keeps
+working.
 Turning off Smart App Control is not an installation step. [Microsoft: Smart App Control FAQ](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions)
 
-## Linux: desktop session and libraries
+## Linux
 
-The dialogs use GTK 3. The published binary needs the GTK 3 runtime library
-(`libgtk-3-0` on Ubuntu) and a graphical user session. 1.0 no longer needs
-WebKitGTK or an AppIndicator library. [Ubuntu GTK 3 package](https://packages.ubuntu.com/noble/libgtk-3-0)
-
-Over SSH, in containers, on servers or without a display, `--prompt-probe`
-reports the dialogs unavailable and the product falls back to its terminal
-prompt. That is the expected result, not a failure to repair.
+The helper is a POSIX binary with no GTK, WebKit or display dependency. Its
+local-app modes are macOS-only; on Linux and Windows it answers `--version`
+and refuses everything else per the protocol.
 
 ## Agent handoff after a failed call
 

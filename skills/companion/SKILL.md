@@ -1,6 +1,6 @@
 ---
 name: companion
-description: Install, diagnose, or integrate Hraness CLI products built on desktop-foundation on macOS, Windows, or Linux. Use for the owner process, status and tui, the native helper, release selection, OS approval handoffs, and migrating off the removed menu bar; not for general desktop automation or provider permissions.
+description: Install, diagnose, or integrate Hraness CLI products built on desktop-foundation on macOS, Windows, or Linux. Use for the owner process and status, the native helper, release selection, OS approval handoffs, and migrating off the removed menu bar; not for general desktop automation or provider permissions.
 ---
 
 # Hraness CLI products
@@ -14,8 +14,7 @@ and installed CLI help are authoritative for the current API and commands.
 
 1.0 has no menu bar. `hraness-companion` is an alias of `hraness-helper`; with
 no arguments or a 0.x tray flag it exits 2 with `tray-removed`. That is the
-expected answer, not a fault to repair: use `<product> tui` or
-`<product> status --json`.
+expected answer, not a fault to repair: use `<product> status --json`.
 
 ## Install or repair
 
@@ -33,23 +32,21 @@ expected answer, not a fault to repair: use `<product> tui` or
   the installation guide. The human performs the trust decision. Never remove
   quarantine/download metadata, disable protection, or change managed policy.
 - Distinguish SmartScreen's optional Run Anyway from Smart App Control, which
-  has no per-app exception. A policy block makes the helper's dialogs
-  unavailable; the product's CLI keeps working.
-- On Linux the helper needs GTK 3 and a graphical session for dialogs. Without
-  one, `--prompt-probe` reports unavailable and the product uses the terminal.
+  has no per-app exception. A policy block can make the helper unavailable;
+  the product's CLI keeps working.
+- On Linux and Windows the helper answers only `--version`; the local-app
+  modes are macOS only.
 
 ## Integrate a product
 
 Reuse `@hraness/desktop-foundation`. Put every action behind a registry verb
 with an operation class, keep state in one owner (`./control`), gate `decide`
-verbs with `./human-gate`, and offer `status --json` and `tui`. Keep daemon
+verbs with `./human-gate`, and offer `status --json`. Keep daemon
 authority, permissions and action handlers in the product. The helper must not
 become a shell-command transport or credential store.
 
-For credential entry, the SDK's `promptSecret` shows one bounded native dialog
-or falls back to a masked terminal prompt; it returns the value to the product
-and stores nothing. Probe hosts with `promptCapability` and keep secrets out of
-argv, logs and the request's own title and message.
+Keep secrets out of argv and logs; credential entry is the product's own
+terminal or keychain flow.
 
 Preserve separate evidence for portable tests, native builds, the helper
 smokes, clean installation and login behavior. Report untested combinations

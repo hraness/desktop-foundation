@@ -1,6 +1,6 @@
 # Adopt desktop-foundation in a product CLI
 
-This recipe gives a product one owner process, `status --json`, `tui`, a human
+This recipe gives a product one owner process, `status --json`, a human
 gate and the native helper. It does not replace the product's daemon, provider
 adapters or permission helpers. Products upgrading from a menu bar release
 start with the [0.9 to 1.0 migration guide](migration-1.0.md).
@@ -37,23 +37,21 @@ other command is a short-lived client that calls it through `agentRequest` or
 `adminRequest` and prints the JSON envelope with `--json`. See
 [control](control.md) and [the human gate](human-gate.md).
 
-Offer `status --json` for scripts and agents and `tui` (`./tui`) for a person.
-Show pending decisions in `status` rather than in a notification. Read product
+Offer `status --json` for scripts and agents, and a terminal listing for a
+person. Show pending decisions in `status` rather than in a notification. Read product
 state with bounded IO, show unavailable capabilities clearly on unsupported
 platforms, and do not retry an uncertain mutation.
 
 ## 4. Use the helper for what a terminal cannot do
 
 `./helper` finds and verifies `hraness-helper` from the packaged manifest.
-Before an action causes a macOS permission prompt, show the notice
-(`--notice`, or `prePrompt` from `./permissions`). When a flow needs a
-credential, use `promptSecret(request)`: it shows a native dialog where the
-host supports one and falls back to a masked terminal prompt otherwise. Keep
-secrets out of `title` and `message` and never pass them as arguments.
-Validation, storage and rotation stay with the product.
+Before an action causes a macOS permission prompt, show the notice with
+`prePrompt` from `./permissions`, and keep credentials in the product's own
+terminal prompt or keychain flow — never argv.
 
-On macOS a product can assemble and sign its own local app to give dialogs
-and login startup a stable identity; see [product identity](identity.md).
+On macOS a product can assemble and sign its own local app to give keychain
+custody and login startup a stable identity; see
+[product identity](identity.md).
 Enable that path only after its fresh-user check passes.
 
 ## 5. Start at login, only on request
@@ -69,7 +67,7 @@ product installed and deletes nothing.
 
 Run the product's required checks, then exercise the installed package in a
 fresh user environment: first download, `status --json`, a harmless verb,
-`tui`, stop and a repeated start. Test opt-in login behavior separately.
+stop and a repeated start. Test opt-in login behavior separately.
 Record OS/architecture, release and digest.
 
 For OS blocks, use doctor output and the shared

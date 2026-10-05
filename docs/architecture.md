@@ -2,9 +2,8 @@
 
 desktop-foundation gives Hraness CLI products a shared way to run without a
 window or a menu bar: one owner process per product, short-lived commands
-that print JSON, a human gate for decisions a person owns, terminal views,
-and one small native helper for the few things a terminal cannot do (a
-dialog, a credential prompt, the macOS local app).
+that print JSON, a human gate for decisions a person owns,
+and one small native helper for the macOS local app.
 
 ```text
 product CLI
@@ -12,10 +11,8 @@ product CLI
   ├─ control: one owner per product, agent + admin sockets (0700 dir)
   │    └─ ensureOwner / controlStatus (never signals a process)
   ├─ human-gate: decide verbs need a person at /dev/tty
-  ├─ tui: interactive view, plain snapshot, or the status --json object
   └─ hraness-helper (native, one task, then exit)
-        --notice · --prompt · --prompt-probe · --version
-        --assemble-app · --signing-identity · --launch   (macOS local app)
+        --version · --assemble-app · --signing-identity · --launch   (macOS local app)
 ```
 
 `hraness-companion` is an alias of the helper. Products replacing an older
@@ -26,8 +23,8 @@ menu bar integration can follow the [migration guide](migration-1.0.md).
 | Layer | Owns | Does not own |
 | --- | --- | --- |
 | Product CLI and owner | Accounts, data, permission checks, provider APIs, verbs and their handlers | Native binary publication |
-| TypeScript SDK and Rust crates | The envelope and registry, owner sockets, the human gate, terminal views, login items, retiring old login items, pinned helper installation | Product authorization or permission escalation |
-| Native helper | One dialog, prompt or local-app step per run, with bounded input | Provider credentials, shell commands, daemon APIs or product files |
+| TypeScript SDK and Rust crates | The envelope and registry, owner sockets, the human gate, login items, retiring old login items, pinned helper installation | Product authorization or permission escalation |
+| Native helper | One local-app step per run, with bounded input | Provider credentials, shell commands, daemon APIs or product files |
 | Shared release workflow | Six target builds, tests, executable assets, SDK archive, manifests and provenance | Product release gates |
 
 The helper and the owner run as the same OS user. The sockets and the JSON
@@ -69,9 +66,8 @@ Ordinary Mac helper builds remain ad-hoc signed. OS approval can still be needed
 
 ## Platform boundary
 
-The helper builds for macOS, Windows and Linux on x64 and arm64. The
-dialogs work on each; the local app is macOS only. Terminal views and the
-owner sockets need no GUI at all, so those interfaces work over SSH and
+The helper builds for macOS, Windows and Linux on x64 and arm64; the local
+app is macOS only. The owner sockets need no GUI at all, so that interface works over SSH and
 in CI. Platform-specific product features (Apple Messages, Contacts,
 Mac capture helpers) stay with their products. See the
 [platform contract](platforms.md).

@@ -86,7 +86,7 @@ the verbs under the words given. With `--json` it prints a `hraness.help/1`
 envelope holding the same descriptors as `commands --json`. The Rust side gets
 the same behaviour from clap.
 
-A verb with `output: 'raw'`, such as `tui` or `control serve`, owns stdout
+A verb with `output: 'raw'`, such as `control serve`, owns stdout
 and returns its exit status as a number; `runCli` prints no envelope for it.
 
 `<product> commands --json` prints the registry (path, class, schema, summary

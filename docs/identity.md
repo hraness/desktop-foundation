@@ -1,7 +1,7 @@
 # Product identity on macOS
 
-A product can assemble a local macOS app so dialogs and login startup use its
-name and icon. A persistent signing identity gives successive builds the same
+A product can assemble a local macOS app so keychain items, permission
+attribution and login startup use its name and icon. A persistent signing identity gives successive builds the same
 code identity; macOS decides which permissions apply to the running product.
 The local app is separate from the downloaded helper's publisher signature.
 
@@ -87,8 +87,7 @@ It reads the product's command line from an owner-only file in the product's
 state directory and spawns that command as a child with
 `HRANESS_APP_BUNDLE_ID=app.hraness.<appId>` in its environment. The supervisor
 remains the child's parent, forwards signals and collects its exit status.
-The product's helper dialogs use the same bundle path. The child
-receives the stored command and arguments, so keep credentials out of that
+The child receives the stored command and arguments, so keep credentials out of that
 command line. The file protects the stored launch configuration; it does not
 hide the child's arguments from process inspection.
 

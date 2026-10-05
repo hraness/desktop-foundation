@@ -9,19 +9,25 @@ import { homedir } from 'node:os';
 import { posix } from 'node:path';
 import { detectAudience, type Audience } from './audience.js';
 import { cliStyle, cliSymbol, type CliStyle } from './cli-style.js';
-import type { NoticeRequest, NoticeResult, PermissionKind, SettingsPermissionKind } from './notice.js';
-
 // Probe paths are macOS paths, so use POSIX rules on every host (CI runs these tests on Windows too).
 const { isAbsolute, join, normalize } = posix;
 
+/** Permission kinds, as used in permission errors and pre-prompt copy. */
+export type PermissionKind =
+  | 'full-disk-access' | 'automation' | 'contacts' | 'accessibility'
+  | 'screen-recording' | 'camera' | 'microphone' | 'local-network'
+  | 'incoming-connections' | 'notifications' | 'login-item' | 'keychain'
+  | 'developer-tools' | 'gatekeeper';
+
+/** Kinds with a System Settings pane (keychain and developer-tools have none). */
+export type SettingsPermissionKind = Exclude<PermissionKind, 'keychain' | 'developer-tools'>;
+
 export type { Audience } from './audience.js';
 export { detectAudience } from './audience.js';
-export type { PermissionKind, SettingsPermissionKind } from './notice.js';
 export type PromptBehavior = 'asks' | 'settings-only' | 'notifies';
 export type PermissionState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 export type RecoveryState = 'denied' | 'unknown' | 'missing';
 export type PrePromptOutcome = 'continue' | 'skip' | 'unattended-proceed' | 'unattended-stop';
-export type Surface = 'cli' | 'dialog';
 
 export interface ProductRef {
   /** Display name from the portfolio registry: "Textbutler". */
@@ -47,9 +53,9 @@ export interface PermissionNeed extends ProductRef {
 }
 
 export interface RenderedNotice {
-  /** Dialog title; for the CLI, the first line without its symbol. */
+  /** The first CLI line without its symbol. */
   title: string;
-  /** Following CLI lines without indentation, or the dialog message parts. */
+  /** Following CLI lines without indentation. */
   lines: string[];
   /** Pre-prompt: the confirm line. Recovery: the "press o" hint for the `→` line. Only shown when stdin and stderr are terminals. */
   confirm?: string;
@@ -67,8 +73,6 @@ export interface PermissionIO {
   readKey(timeoutSeconds: number): Promise<'enter' | 's' | 'o' | 'timeout'>;
   /** Opens an allowlisted `x-apple.systempreferences:` URL. */
   openUrl(url: string): Promise<boolean>;
-  /** Shows the runner `--notice` dialog. */
-  notice?(request: NoticeRequest): Promise<NoticeResult>;
   fileAccess?(path: string): Promise<'ok' | 'denied' | 'missing'>;
   run?(argv: readonly string[]): Promise<{ status: number }>;
 }
@@ -150,8 +154,8 @@ export function requesterOf(need: PermissionNeed, env: NodeJS.ProcessEnv = proce
 const nextOf = (need: PermissionNeed) => need.next ?? `${need.command} doctor`;
 const forProduct = (requester: string, need: PermissionNeed) => requester === need.product ? '' : ` for ${need.product}`;
 
-/** The pre-prompt copy for one surface. Pure; `env` only resolves the default requester. */
-export function renderPrePrompt(need: PermissionNeed, surface: Surface, env: NodeJS.ProcessEnv = process.env): RenderedNotice {
+/** The pre-prompt copy for the CLI. Pure; `env` only resolves the default requester. */
+export function renderPrePrompt(need: PermissionNeed, env: NodeJS.ProcessEnv = process.env): RenderedNotice {
   const { behavior, pane, path } = info(need.kind);
   const requester = requesterOf(need, env);
   let title: string, detail: string, confirm: string | undefined;
@@ -174,15 +178,11 @@ export function renderPrePrompt(need: PermissionNeed, surface: Surface, env: Nod
       : `${need.why} Change this any time in ${path}.`;
     confirm = 'Press Enter to continue · s to skip';
   }
-  if (surface === 'cli') return { title, lines: [detail], ...(confirm ? { confirm } : {}) };
-  const heading = behavior === 'settings-only'
-    ? `${need.product} needs ${pane}`
-    : need.kind === 'developer-tools' ? `${need.product} needs Apple's command line tools` : `${need.product} needs access to ${need.target ?? pane}`;
-  return { title: heading, lines: [`${title} ${detail}`] };
+  return { title, lines: [detail], ...(confirm ? { confirm } : {}) };
 }
 
 /** The recovery copy after a denial or an unexplained failure. */
-export function renderRecovery(need: PermissionNeed, state: RecoveryState, surface: Surface, env: NodeJS.ProcessEnv = process.env): RenderedNotice {
+export function renderRecovery(need: PermissionNeed, state: RecoveryState, env: NodeJS.ProcessEnv = process.env): RenderedNotice {
   const { pane, path, url } = info(need.kind);
   const requester = requesterOf(need, env);
   const next = nextOf(need);
@@ -208,10 +208,7 @@ export function renderRecovery(need: PermissionNeed, state: RecoveryState, surfa
     title = `${need.product} couldn't ${need.ask}. macOS may be blocking ${requester}.`;
     lines = path ? [`Check ${path}.`] : [];
   }
-  if (surface === 'cli') return { title, lines, ...(confirm ? { confirm } : {}), next: step };
-  const heading = need.kind === 'developer-tools' ? `${need.product} needs Apple's command line tools`
-    : state === 'denied' && pane && need.kind !== 'keychain' ? `${pane} is off for ${need.product}` : `${need.product} can't ${need.ask}`;
-  return { title: heading, lines: [[title, ...lines].join(' ')], next: step };
+  return { title, lines, ...(confirm ? { confirm } : {}), next: step };
 }
 
 /** Plain text for a rendered CLI notice or recovery. `interactive` shows the confirm or "press o" hint. */
@@ -225,23 +222,6 @@ export function formatNotice(notice: RenderedNotice, options: { kind: 'pre-promp
   const lines = [`${cliSymbol('fail', style)} ${notice.title}`, ...notice.lines.map(line => `  ${line}`)];
   if (notice.next) lines.push(`${cliSymbol('next', style)} ${notice.next}${options.interactive && notice.confirm ? ` · ${notice.confirm}` : ''}`);
   return lines.join('\n') + '\n';
-}
-
-/** The `--notice` dialog request for a need, or `null` when no dialog applies (login items: the toggle is the consent). */
-export function permissionNoticeRequest(need: PermissionNeed, env: NodeJS.ProcessEnv = process.env): NoticeRequest | null {
-  const behavior = behaviorOf(need.kind);
-  if (behavior === 'notifies') return null;
-  const rendered = renderPrePrompt(need, 'dialog', env);
-  const settings = behavior === 'settings-only' && hasSettingsPane(need.kind) ? need.kind : undefined;
-  return {
-    type: 'notice-request', version: 1, title: clip(rendered.title, 128), message: clip(rendered.lines.join(' '), 512),
-    primary: settings ? 'Open System Settings' : 'Continue', secondary: 'Not now', ...(settings ? { settings } : {}),
-  };
-}
-
-function clip(text: string, max: number): string {
-  const chars = [...text];
-  return chars.length <= max ? text : chars.slice(0, max - 1).join('') + '…';
 }
 
 let interactiveKeyBusy = false;
@@ -333,7 +313,7 @@ export async function prePrompt(need: PermissionNeed, options: { audience?: Audi
   const audience = options.audience ?? detectAudience({ env: io.env, stderrIsTTY: io.stderrIsTTY });
   const behavior = behaviorOf(need.kind);
   const unattended: PrePromptOutcome = (need.whenUnattended ?? (behavior === 'notifies' ? 'proceed' : 'stop')) === 'proceed' ? 'unattended-proceed' : 'unattended-stop';
-  const notice = renderPrePrompt(need, 'cli', io.env);
+  const notice = renderPrePrompt(need, io.env);
   if (audience === 'quiet') return unattended;
   if (audience === 'agent') {
     io.write(JSON.stringify({ type: 'permission-notice', product: need.product, kind: need.kind, message: [notice.title, ...notice.lines].join(' ') }) + '\n');
@@ -359,7 +339,7 @@ export async function reportPermissionFailure(need: PermissionNeed, state: Recov
   const io = options.io ?? defaultPermissionIO();
   const audience = options.audience ?? detectAudience({ env: io.env, stderrIsTTY: io.stderrIsTTY });
   if (audience === 'agent') return;
-  const recovery = renderRecovery(need, state, 'cli', io.env);
+  const recovery = renderRecovery(need, state, io.env);
   const interactive = audience === 'human' && io.stdinIsTTY && io.stderrIsTTY;
   const style = audience === 'human' ? cliStyle({ isTTY: io.stderrIsTTY }, io.env) : { ...cliStyle({ isTTY: false }, io.env), color: false };
   io.write(formatNotice(recovery, { kind: 'recovery', interactive, style }));
@@ -438,7 +418,7 @@ export interface PermissionErrorInfo {
 }
 /** The `--json` error fields for a permission failure. */
 export function permissionError(need: PermissionNeed, state: RecoveryState, env: NodeJS.ProcessEnv = process.env): PermissionErrorInfo {
-  const recovery = renderRecovery(need, state, 'cli', env);
+  const recovery = renderRecovery(need, state, env);
   return { code: `permission-${state}`, kind: need.kind, message: recovery.title, next: recovery.next ?? nextOf(need), settingsUrl: settingsUrl(need.kind) };
 }
 /** The whole `--json` error document: `{"ok":false,"error":{…,"permission":{"kind","settingsUrl"}}}`. */

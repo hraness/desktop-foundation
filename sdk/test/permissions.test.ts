@@ -5,7 +5,7 @@ import {
   AUTOMATION, CHROME_SAFE_STORAGE, CONTACTS, INCOMING_CONNECTIONS, LOCAL_NETWORK, LOCAL_SIGNING, LOGIN_ITEM,
   MESSAGES_FDA, PERMISSION_KINDS, SCREEN_RECORDING, XCODE_TOOLS,
   behaviorOf, classifyKeychainStatus, formatNotice, hasSettingsPane, isAllowedSettingsUrl, openPermissionSettings,
-  paneName, permissionError, permissionErrorJson, permissionNoticeRequest, permissionStatus,
+  paneName, permissionError, permissionErrorJson, permissionStatus,
   prePrompt, renderPrePrompt, renderRecovery, reportPermissionFailure, responsibleApp, settingsPath, settingsUrl,
   type PermissionIO, type PermissionNeed, type ProductRef, type RecoveryState,
 } from '../src/permissions.js';
@@ -18,7 +18,7 @@ const UTF8 = { LANG: 'en_US.UTF-8' };
 
 const textbutler: ProductRef = { product: 'Textbutler', command: 'textbutler', requester: 'Textbutler' };
 const cli = (need: PermissionNeed, interactive = true) =>
-  formatNotice(renderPrePrompt(need, 'cli', UTF8), { kind: 'pre-prompt', interactive });
+  formatNotice(renderPrePrompt(need, UTF8), { kind: 'pre-prompt', interactive });
 
 function fakeIO(overrides: Partial<PermissionIO> & { keys?: Array<'enter' | 's' | 'o' | 'timeout'> } = {}) {
   const written: string[] = [];
@@ -68,7 +68,7 @@ test('responsibleApp names the terminal, then the product inside its local app',
   // Without a product name the bundle ID alone cannot name the app.
   assert.equal(responsibleApp({ HRANESS_APP_BUNDLE_ID: 'app.hraness.textbutler', TERM_PROGRAM: 'Apple_Terminal' }), 'Terminal');
   const need = MESSAGES_FDA({ product: 'Textbutler', command: 'textbutler' });
-  assert.match(renderPrePrompt(need, 'cli', { TERM_PROGRAM: 'iTerm.app' }).lines[0]!, /Turn on iTerm in/);
+  assert.match(renderPrePrompt(need, { TERM_PROGRAM: 'iTerm.app' }).lines[0]!, /Turn on iTerm in/);
 });
 
 // The exact strings from docs/permissions.md § Presets. Any change here is a
@@ -123,7 +123,7 @@ test('presets render the documented copy', () => {
 
 test('recovery copy follows the templates', () => {
   const recovery = (need: PermissionNeed, state: RecoveryState, interactive = true) =>
-    formatNotice(renderRecovery(need, state, 'cli', UTF8), { kind: 'recovery', interactive });
+    formatNotice(renderRecovery(need, state, UTF8), { kind: 'recovery', interactive });
   const fda = MESSAGES_FDA(textbutler);
   assert.equal(recovery(fda, 'denied'),
     "✗ Textbutler can't read your Messages: macOS access is off for Textbutler.\n"
@@ -148,26 +148,14 @@ test('recovery copy follows the templates', () => {
     + '→ ghostget auth add\n');
   assert.equal(recovery(XCODE_TOOLS({ product: 'algal', command: 'algal' }, { skipEffect: 'x' }), 'missing'),
     "✗ algal needs Apple's command line tools. Nothing was installed.\n→ xcode-select --install\n");
-  assert.equal(formatNotice(renderRecovery(fda, 'denied', 'cli', UTF8), { kind: 'recovery', interactive: false, style: { color: false, ascii: true } }),
+  assert.equal(formatNotice(renderRecovery(fda, 'denied', UTF8), { kind: 'recovery', interactive: false, style: { color: false, ascii: true } }),
     "FAIL Textbutler can't read your Messages: macOS access is off for Textbutler.\n"
     + '  Turn on Textbutler in System Settings › Privacy & Security › Full Disk Access.\n'
     + '-> textbutler doctor\n');
 });
 
-test('dialogs and JSON errors', () => {
-  const automation = AUTOMATION(textbutler, 'Messages', 'Textbutler only sends replies in chats you turn on.');
-  assert.deepEqual(permissionNoticeRequest(automation), {
-    type: 'notice-request', version: 1, title: 'Textbutler needs access to Messages',
-    message: 'macOS will ask to let Textbutler control Messages. Textbutler only sends replies in chats you turn on. Change this any time in System Settings › Privacy & Security › Automation.',
-    primary: 'Continue', secondary: 'Not now',
-  });
+test('JSON permission errors', () => {
   const fda = MESSAGES_FDA(textbutler);
-  assert.deepEqual(permissionNoticeRequest(fda), {
-    type: 'notice-request', version: 1, title: 'Textbutler needs Full Disk Access',
-    message: "Textbutler needs Full Disk Access to read your Messages. macOS doesn't ask for this. Turn on Textbutler in System Settings › Privacy & Security › Full Disk Access. Only the chats you pick are read.",
-    primary: 'Open System Settings', secondary: 'Not now', settings: 'full-disk-access',
-  });
-  assert.equal(permissionNoticeRequest(LOGIN_ITEM(textbutler)), null);
   assert.deepEqual(permissionErrorJson(fda, 'denied'), JSON.parse(
     '{"ok":false,"error":{"code":"permission-denied","message":"Textbutler can\'t read your Messages: macOS access is off for Textbutler.","next":"textbutler doctor","permission":{"kind":"full-disk-access","settingsUrl":"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"}}}'));
   assert.equal(permissionError(fda, 'unknown').code, 'permission-unknown');
@@ -296,7 +284,7 @@ test('classifyKeychainStatus maps OSStatus and security exit codes', () => {
   assert.equal(classifyKeychainStatus(1), undefined);
 });
 
-// Golden files hold every preset for every surface and state. The Rust twin
+// Golden files hold every preset for every state. The Rust twin
 // (crates/hraness-cli-kit) checks the same files. Regenerate with
 // UPDATE_GOLDEN=1 npm run check:sdk and review the diff.
 const PRESETS: Record<string, (ref: ProductRef) => PermissionNeed> = {
@@ -317,19 +305,17 @@ function golden(name: string, make: (ref: ProductRef) => PermissionNeed): string
   for (const [variant, ref] of [['local app', { product: 'Example', command: 'example', requester: 'Example' }], ['terminal', { product: 'Example', command: 'example' }]] as const) {
     const need = make(ref);
     out.push(`# ${name} · requester: ${variant}`);
-    out.push('## cli pre-prompt, interactive', formatNotice(renderPrePrompt(need, 'cli', env), { kind: 'pre-prompt', interactive: true }).trimEnd());
-    out.push('## cli pre-prompt, ascii', formatNotice(renderPrePrompt(need, 'cli', env), { kind: 'pre-prompt', interactive: false, style: { color: false, ascii: true } }).trimEnd());
-    out.push('## dialog', JSON.stringify(permissionNoticeRequest(need, env)));
+    out.push('## cli pre-prompt, interactive', formatNotice(renderPrePrompt(need, env), { kind: 'pre-prompt', interactive: true }).trimEnd());
+    out.push('## cli pre-prompt, ascii', formatNotice(renderPrePrompt(need, env), { kind: 'pre-prompt', interactive: false, style: { color: false, ascii: true } }).trimEnd());
     for (const state of ['denied', 'unknown', 'missing'] as const) {
-      out.push(`## cli recovery ${state}`, formatNotice(renderRecovery(need, state, 'cli', env), { kind: 'recovery', interactive: true }).trimEnd());
-      out.push(`## dialog recovery ${state}`, JSON.stringify(renderRecovery(need, state, 'dialog', env)));
+      out.push(`## cli recovery ${state}`, formatNotice(renderRecovery(need, state, env), { kind: 'recovery', interactive: true }).trimEnd());
       out.push(`## json ${state}`, JSON.stringify(permissionErrorJson(need, state, env)));
     }
     out.push('');
   }
   return out.join('\n');
 }
-test('golden copy for every preset, surface and state', () => {
+test('golden copy for every preset and state', () => {
   if (process.env.UPDATE_GOLDEN === '1') mkdirSync(GOLDEN, { recursive: true });
   for (const [name, make] of Object.entries(PRESETS)) {
     const file = new URL(`${name}.txt`, GOLDEN);

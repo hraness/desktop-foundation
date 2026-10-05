@@ -1,6 +1,6 @@
 {
   "name": "@hraness/desktop-foundation",
-  "version": "1.1.2",
+  "version": "2.0.0",
   "description": "The one-shot desktop helper, control kit and CLI contract that Hraness CLI tools share on macOS, Windows, and Linux, with no app bundle or installer.",
   "type": "module",
   "license": "MIT",
@@ -14,12 +14,11 @@
     "./registry": { "types": "./dist/src/registry.d.ts", "import": "./dist/src/registry.js" },
     "./control": { "types": "./dist/src/control.d.ts", "import": "./dist/src/control.js" },
     "./human-gate": { "types": "./dist/src/human-gate.d.ts", "import": "./dist/src/human-gate.js" },
-    "./tui": { "types": "./dist/src/tui.d.ts", "import": "./dist/src/tui.js" },
     "./login": { "types": "./dist/src/login.d.ts", "import": "./dist/src/login.js" },
     "./retire": { "types": "./dist/src/retire.d.ts", "import": "./dist/src/retire.js" },
     "./helper": { "types": "./dist/src/helper.d.ts", "import": "./dist/src/helper.js" }
   },
-  "files": ["dist/src", "src", "crates/hraness-control-kit/src", "crates/hraness-local-app/src", "sdk/src/prompt.ts", "release-manifest.json", "contract", "README.md", "docs", "skills", "LICENSE"],
+  "files": ["dist/src", "src", "crates/hraness-control-kit/src", "crates/hraness-local-app/src", "release-manifest.json", "contract", "README.md", "docs", "skills", "LICENSE"],
   "scripts": {
     "build:sdk": "tsc -p sdk/tsconfig.json",
     "test:sdk": "node scripts/test-sdk.mjs",

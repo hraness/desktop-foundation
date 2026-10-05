@@ -13,6 +13,10 @@ fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// The documented contract this test asserts; the include binds the doc to
+/// the native test legs (`scripts/native-scope.mjs`).
+const PERMISSIONS_DOC: &str = include_str!("../../../docs/permissions.md");
+
 fn read(path: &str) -> String {
     std::fs::read_to_string(repo().join(path))
         .unwrap_or_else(|error| panic!("read {path}: {error}"))
@@ -33,7 +37,7 @@ const UTF8: &[(&str, &str)] = &[("LANG", "en_US.UTF-8")];
 fn cli(need: &PermissionNeed) -> String {
     let env = env_of(UTF8);
     format_notice(
-        &render_pre_prompt(need, Surface::Cli, &env),
+        &render_pre_prompt(need, &env),
         NoticeKind::PrePrompt,
         true,
         Style::PLAIN,
@@ -94,7 +98,7 @@ fn golden(name: &str, make: Preset) -> String {
     ] {
         let need = make(reference);
         out.push(format!("# {name} · requester: {variant}"));
-        let pre = render_pre_prompt(&need, Surface::Cli, &env);
+        let pre = render_pre_prompt(&need, &env);
         out.push("## cli pre-prompt, interactive".into());
         out.push(
             format_notice(&pre, NoticeKind::PrePrompt, true, Style::PLAIN)
@@ -107,11 +111,6 @@ fn golden(name: &str, make: Preset) -> String {
                 .trim_end()
                 .to_owned(),
         );
-        out.push("## dialog".into());
-        out.push(
-            notice_request(&need, &env)
-                .map_or_else(|| "null".to_owned(), |request| request.to_json()),
-        );
         for state in [
             RecoveryState::Denied,
             RecoveryState::Unknown,
@@ -121,7 +120,7 @@ fn golden(name: &str, make: Preset) -> String {
             out.push(format!("## cli recovery {label}"));
             out.push(
                 format_notice(
-                    &render_recovery(&need, state, Surface::Cli, &env),
+                    &render_recovery(&need, state, &env),
                     NoticeKind::Recovery,
                     true,
                     Style::PLAIN,
@@ -129,8 +128,6 @@ fn golden(name: &str, make: Preset) -> String {
                 .trim_end()
                 .to_owned(),
             );
-            out.push(format!("## dialog recovery {label}"));
-            out.push(render_recovery(&need, state, Surface::Dialog, &env).to_json());
             out.push(format!("## json {label}"));
             out.push(permission_error_json(&need, state, &env));
         }
@@ -171,7 +168,7 @@ fn golden_copy_matches_the_typescript_kit() {
 
 #[test]
 fn the_documented_kind_table_matches_the_kit() {
-    let doc = read("docs/permissions.md");
+    let doc = PERMISSIONS_DOC;
     let section = doc
         .split("\n## Permission kinds\n")
         .nth(1)
@@ -298,7 +295,7 @@ fn documented_preset_copy_is_what_the_kit_prints() {
         )),
         cli(&presets::local_signing(textbutler.clone())),
     ];
-    let doc = read("docs/permissions.md");
+    let doc = PERMISSIONS_DOC;
     let section = doc
         .split("\n## Presets\n")
         .nth(1)
@@ -323,7 +320,7 @@ fn documented_preset_copy_is_what_the_kit_prints() {
 
 #[test]
 fn the_documented_json_error_is_what_the_kit_prints() {
-    let doc = read("docs/permissions.md");
+    let doc = PERMISSIONS_DOC;
     let sample = doc
         .split("\n## JSON error shape\n")
         .nth(1)
@@ -347,7 +344,7 @@ fn recovery_copy_follows_the_templates() {
     let env = env_of(UTF8);
     let recovery = |need: &PermissionNeed, state, interactive, style| {
         format_notice(
-            &render_recovery(need, state, Surface::Cli, &env),
+            &render_recovery(need, state, &env),
             NoticeKind::Recovery,
             interactive,
             style,

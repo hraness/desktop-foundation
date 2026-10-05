@@ -28,7 +28,7 @@
   ],
   "refusalExit": 2,
   "refusalStdout": "{\"type\":\"error\",\"version\":1,\"code\":\"tray-removed\"}",
-  "refusalStderrPrefix": "hraness-companion: the menu bar was removed in desktop-foundation 1.0. Run `<product> tui` to watch a product, or `<product> status --json` from a script.",
+  "refusalStderrPrefix": "hraness-companion: the menu bar was removed in desktop-foundation 1.0. Run `<product> status --json` to watch a product from a script.",
   "helperAnswersTrayModesWith": "{\"type\":\"error\",\"version\":1,\"code\":\"invalid-arguments\"}",
   "parityExtraArgv": [
     [

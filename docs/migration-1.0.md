@@ -30,15 +30,15 @@ name that is still in use.
 
 | Removed | Use instead |
 |---|---|
-| The tray: `hraness-companion --state-dir <dir>`. The alias also refuses the argv around it: no arguments and malformed `--state-dir` or `--check-protocol` argv (0.x answered those with `invalid-arguments`), and `--foreground` (the flag product CLIs passed to their menu bar command) | `<product> tui` for a person, `<product> status --json` for a script |
+| The tray: `hraness-companion --state-dir <dir>`. The alias also refuses the argv around it: no arguments and malformed `--state-dir` or `--check-protocol` argv (0.x answered those with `invalid-arguments`), and `--foreground` (the flag product CLIs passed to their menu bar command) | `<product> status --json` for a script; `./tui` was the person view until 2.0 removed it |
 | `hraness-companion --check-protocol` and the menu snapshot protocol (v1 and v2 frames, `docs/protocol-v2.md`) | Nothing; there is no menu to check |
-| `./menu-kit` and the same names at the package root (`layout`, `lintMenu`, `assertMenuFixture`, `renderMenuTree`, `openAtLoginItem`, `degradedMenu`, `actionErrorItem`, `MenuActionError`) | `./tui` views and `status --json`. build-governance 0.5 drops the menu fixture check |
+| `./menu-kit` and the same names at the package root (`layout`, `lintMenu`, `assertMenuFixture`, `renderMenuTree`, `openAtLoginItem`, `degradedMenu`, `actionErrorItem`, `MenuActionError`) | `status --json`; the `./tui` views existed until 2.0 removed them |
 | The `companion` CLI (`companion doctor`, `companion lint-menu`) | `<product> doctor` and `resolveHelper` for the helper |
 | Root exports for the companion lifecycle: `runCompanion`, `startCompanion`, `stopCompanion`, `companionStatus`, `handleCompanionCommand`, `describeCompanionError`, `serveCompanion`, `companionHelp`, `menuLoginItem`, `CompanionOptions` and related types and helpers | `./control` (`ensureOwner`, `controlStatus`, `adminRequest`) and `./login` |
 | Root exports for menu snapshots: `validateSnapshot`, `validateSnapshotV2`, `downlevelSnapshot`, `parseRunnerProtocols`, `runnerProtocols`, `parseRunnerEvent`, `assertAppId`, `PROTOCOL_VERSION`, `ACTION_ERROR_MS` and the `MenuModel`, `MenuItem`, `Snapshot` and `TrayIcon` types, and related helpers, constants and `*V2` and `Runner*` types (`MAX_FRAME_BYTES` stays, for the notice and prompt frames) | Nothing |
 | `openBrowser` and the Rust `browser` module | The product's own launcher, or print the URL |
 | `permissionMenuItems` (TypeScript), `permission_menu_items` and `PermissionMenuRow` (Rust), and the menu surface in permission copy (`Surface::Menu` in Rust) | `renderPrePrompt`, `renderRecovery` and `permissionErrorJson` |
-| The Rust crate's `MenuModel`, `MenuNode`, `Host`, `run`, `outputs`, `protocol`, `protocol_v2` and symbol table, the `Options`, `DispatchOutcome` and `RefreshHandle` types, and the Tauri, WebKitGTK and AppIndicator dependencies | `hraness-control-kit` with the `tui` feature |
+| The Rust crate's `MenuModel`, `MenuNode`, `Host`, `run`, `outputs`, `protocol`, `protocol_v2` and symbol table, the `Options`, `DispatchOutcome` and `RefreshHandle` types, and the Tauri, WebKitGTK and AppIndicator dependencies | `hraness-control-kit` (its `tui` feature existed until 2.0 removed it) |
 
 Still exported, unchanged: `packagedManifest`, `parseReleaseManifest`,
 `ensureBinary`, `inspectBinary`, `userPaths`, `diagnosePlatform`, the
@@ -47,13 +47,18 @@ prompt calls, the notice and permission-kind types, `./permissions`,
 re-exports `identity`, `notice`, `prompt`, `service`, `audience` and
 `permissions` from `hraness-local-app` and `hraness-cli-kit`.
 
+(2.0 later removed the prompt calls, the `--notice`/`--prompt` helper modes,
+the `./tui` subpath and the control-kit `tui` feature.)
+
 ## The `hraness-companion` alias
 
 `hraness-companion` stays so a local app assembled before 1.0, or a product
 that still names the companion asset, keeps working. For `--version`,
-`--prompt-probe`, `--assemble-app`, `--signing-identity`, `--launch`,
-`--notice` and `--prompt` it prints the same bytes and exits with the same
-status as `hraness-helper` (only `--version` names the binary). Ghostget's
+`--assemble-app`, `--signing-identity` and `--launch` it prints the same
+bytes and exits with the same status as `hraness-helper` (only `--version`
+names the binary); the 1.x dialog modes `--notice`, `--prompt` and
+`--prompt-probe` were removed in 2.0 and now answer `invalid-arguments`.
+Ghostget's
 Safe Storage cookie reader, which assembles `Ghostget.app` from the resolved
 helper with `HRANESS_LOCAL_APP=1`, needs no change.
 
@@ -63,7 +68,7 @@ exits **2**:
 ```text
 $ hraness-companion --state-dir ~/Library/Application\ Support/example
 {"type":"error","version":1,"code":"tray-removed"}          (stdout)
-hraness-companion: the menu bar was removed in desktop-foundation 1.0. Run `<product> tui` to watch a product, or `<product> status --json` from a script. See docs/migration-1.0.md.   (stderr)
+hraness-companion: the menu bar was removed in desktop-foundation 1.0. Run `<product> status --json` to watch a product from a script. See docs/migration-1.0.md.   (stderr)
 ```
 
 Exit 2 is the usage code of the control contract, and no 0.x runner exited

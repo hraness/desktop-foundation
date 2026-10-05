@@ -1,5 +1,55 @@
 # Changelog
 
+## 2.0.0 - 2026-10-05
+
+All on-screen UI is gone. There is no terminal UI, no native notice or
+prompt dialog, and no dialog capability probe. Products present everything
+in the terminal they already own (`status --json` for scripts, `prePrompt`
+and `renderRecovery` for people), and `hraness-helper` exists only to
+assemble, sign and launch the macOS local app. The headless control kit —
+registry, owner sockets, human gate, audience, permissions, login items and
+retirement — is unchanged. Every product pins an exact release, so nothing
+changes until a product bumps.
+
+### Changes
+
+- **Removed the `./tui` SDK subpath and the `hraness-control-kit` `tui`
+  feature**, with their ratatui, crossterm and ratatui-textarea
+  dependencies. `runTui` and `renderSnapshot` are gone; `<product>
+  status --json` is the view for scripts and the basis for any product's
+  own terminal listing.
+- **Removed the native dialog helper modes.** `--notice`, `--prompt` and
+  `--prompt-probe` now answer `invalid-arguments` (exit 1) like any unknown
+  argv, and `contract/helper-argv.v0.8.1.json` pins exactly that. This drops
+  the GTK 3 dependency on Linux, the AppKit dialogs on macOS and the Win32
+  dialog on Windows, and with them the `objc2`, `windows` and `zeroize`
+  dependency trees.
+- **Removed the SDK dialog surface**: `sdk/src/notice.ts`,
+  `sdk/src/prompt.ts` and `sdk/src/tui.ts` are deleted, including
+  `promptNative`, `promptTui`, `promptCapability`, `promptSecret`,
+  `permissionNoticeRequest`, `NoticeRequest`, `NoticeResult`,
+  `PermissionNoticeRequest` and the injectable `notice` hook on the
+  permission renderer.
+- **`Surface` / `Surface::Dialog` is gone.** `renderPrePrompt` and
+  `renderRecovery` are terminal-only: `renderPrePrompt(need, env)` and
+  `renderRecovery(need, state, env)` in TypeScript, and the same signatures
+  without a surface argument in Rust.
+- **Removed `scripts/prompt-smoke.mjs`** and the dialog-capability check in
+  CI, plus the orphaned `tui-status` goldens under `sdk/test/golden/` and
+  `crates/hraness-control-kit/tests/golden/`.
+- **Unchanged:** `hraness-helper` keeps `--version`, `--assemble-app`,
+  `--signing-identity` and `--launch`, so the macOS local app and Ghostget's
+  Safe Storage cookie reader keep working. `hraness-companion` remains an
+  alias that prints byte-identical output for the retained modes and still
+  refuses the 0.x menu bar argv with exit 2 and `tray-removed`; the stderr
+  line now points to `<product> status --json`. `packagedManifest`,
+  `resolveHelper` and every other SDK subpath (`./audience`, `./cli-style`,
+  `./control`, `./helper`, `./human-gate`, `./login`, `./permissions`,
+  `./registry`, `./retire`) keep their APIs. Terminal permission copy,
+  settings links, permission probes, JSON error envelopes and the shared
+  golden files are unchanged; the golden files now cover terminal output
+  only.
+
 ## 1.1.2 - 2026-09-29
 
 The Rust CLI kit can now be published separately to crates.io. Its runtime API

@@ -71,7 +71,7 @@ test('a touched platform branch runs every target', async () => {
 
 test('security and process modules run every target, whatever their content', async () => {
   const { selectScope } = await load();
-  for (const path of ['sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/prompt.ts', 'sdk/src/install.ts', 'sdk/src/macos-signature.ts', 'crates/hraness-control-kit/src/crypto.rs']) {
+  for (const path of ['sdk/src/human-gate.ts', 'sdk/src/helper.ts', 'sdk/src/install.ts', 'sdk/src/macos-signature.ts', 'crates/hraness-control-kit/src/crypto.rs']) {
     const read = files({ [path]: { base: neutral, head: neutral } });
     assert.equal(selectScope([{ status: 'M', path }], read, () => false).scope, 'full', path);
   }
@@ -95,8 +95,9 @@ test('an SDK module whose paired test branches on the platform runs every target
 test('documentation that code or the package reads is not docs-only', async () => {
   const { selectScope } = await load();
   // include_str! by Rust tests that run only on native legs.
-  for (const path of ['docs/protocol.md', 'docs/permissions.md'])
-    assert.equal(selectScope([{ status: 'M', path }], files({})).scope, 'subset', path);
+  assert.equal(selectScope([{ status: 'M', path: 'docs/permissions.md' }], files({})).scope, 'subset');
+  // protocol.md is packaged but no longer asserted by code: edits are docs.
+  assert.equal(selectScope([{ status: 'M', path: 'docs/protocol.md' }], files({})).scope, 'docs');
   // The packaged skill, and deleting any packaged doc, needs the package job.
   assert.equal(selectScope([{ status: 'M', path: 'skills/companion/SKILL.md' }], files({})).scope, 'full');
   for (const path of ['docs/installation.md', 'README.md', 'LICENSE'])
@@ -131,10 +132,10 @@ test('the doc lists match what the code reads', async (t) => {
 test('build, packaging, CI and selector changes run every target', async () => {
   const { selectScope } = await load();
   for (const path of [
-    '.github/workflows/companion.yml', 'scripts/native-scope.mjs', 'scripts/alias-smoke.mjs', 'scripts/prompt-smoke.mjs',
+    '.github/workflows/companion.yml', 'scripts/native-scope.mjs', 'scripts/alias-smoke.mjs',
     'Cargo.toml', 'Cargo.lock', 'crates/hraness-local-app/Cargo.toml', 'crates/hraness-cli-kit/LICENSE', 'build.rs', 'tauri.conf.json', 'windows.manifest.xml',
     'capabilities/README.json', 'icons/icon.ico', 'examples/stdio_fixture.rs', 'package.json', 'package-lock.json',
-    'sdk/tsconfig.json', '.gitattributes', 'crates/hraness-control-kit/tests/golden/tui-status-80.txt',
+    'sdk/tsconfig.json', '.gitattributes', 'crates/hraness-cli-kit/tests/golden/example.txt',
   ]) {
     assert.equal(selectScope([{ status: 'M', path }, { status: 'M', path: 'README.md' }], files({})).scope, 'full', path);
   }

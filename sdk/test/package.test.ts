@@ -6,8 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as root from '../src/index.js';
 import { loadLoginEnvironment, loginEnvironmentPath, saveLoginEnvironment } from '../src/login-env.js';
-import { MAX_FRAME_BYTES, type NoticeRequest } from '../src/notice.js';
-import type { PromptRequest } from '../src/prompt.js';
 
 // Compiled to dist/test/package.test.js; the repository root is two levels up.
 const repo = new URL('../../', import.meta.url);
@@ -17,7 +15,7 @@ const pkg = JSON.parse(readFileSync(new URL('package.json', repo), 'utf8')) as {
 
 test('1.0 exports no menu kit and no tray API', () => {
   assert.deepEqual(Object.keys(pkg.exports).sort(), [
-    '.', './audience', './cli-style', './control', './helper', './human-gate', './login', './permissions', './registry', './retire', './tui',
+    '.', './audience', './cli-style', './control', './helper', './human-gate', './login', './permissions', './registry', './retire',
   ]);
   assert.equal(pkg.bin, undefined, 'the companion CLI was removed');
   for (const name of [
@@ -27,18 +25,16 @@ test('1.0 exports no menu kit and no tray API', () => {
   ]) assert.equal(name in root, false, `${name} is still exported`);
   const dist = new URL('dist/src/', repo);
   assert.equal(existsSync(new URL('menu-kit.js', dist)), false, 'a stale menu-kit build would ship through files: dist/src');
-  assert.deepEqual(readdirSync(new URL('sdk/src/', repo)).filter(name => /menu|protocol|client|service|commands|browser|cli\.ts/.test(name)), []);
+  assert.deepEqual(readdirSync(new URL('sdk/src/', repo)).filter(name => /menu|protocol|client|service|commands|browser|cli\.ts|tui|notice|prompt/.test(name)), []);
 });
 
-test('the root keeps the installer, manifest and prompt API', () => {
-  for (const name of ['packagedManifest', 'parseReleaseManifest', 'ensureBinary', 'inspectBinary', 'userPaths', 'diagnosePlatform', 'promptNative', 'promptTui', 'formatNotice', 'loadLoginEnvironment', 'saveLoginEnvironment']) {
+test('the root keeps the installer, manifest and notice-copy API', () => {
+  for (const name of ['packagedManifest', 'parseReleaseManifest', 'ensureBinary', 'inspectBinary', 'userPaths', 'diagnosePlatform', 'formatNotice', 'loadLoginEnvironment', 'saveLoginEnvironment']) {
     assert.equal(typeof (root as Record<string, unknown>)[name], 'function', `${name} missing`);
   }
-  assert.equal(MAX_FRAME_BYTES, 256 * 1024);
-  const notice: NoticeRequest = { type: 'notice-request', version: 1, title: 't', message: 'm', primary: 'OK' };
-  const prompt: PromptRequest = { title: 't', message: 'm', secret: true };
-  assert.equal(notice.type, 'notice-request');
-  assert.equal(prompt.secret, true);
+  for (const name of ['promptNative', 'promptTui', 'runTui', 'renderSnapshot']) {
+    assert.equal(name in root, false, `${name} was removed in 2.0`);
+  }
 });
 
 test('login credentials load only into unset variables and only from a private file', { skip: process.platform === 'win32' ? 'POSIX file modes' : false }, async t => {

@@ -1,8 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
-//! The one-shot helper: `--version`, `--prompt-probe`, `--assemble-app`,
-//! `--signing-identity`, `--launch`, `--notice` and `--prompt`, with the
-//! v0.8.1 argv, stdout and exit contract
+//! The one-shot helper: `--version`, `--assemble-app`, `--signing-identity`
+//! and `--launch`, with the v0.8.1 argv, stdout and exit contract
 //! (`contract/helper-argv.v0.8.1.json`). `hraness-companion` is its alias.
 
 use hraness_local_app::helper::{self, Binary};

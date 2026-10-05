@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use sha2::Digest;
 
-use crate::wire::{ProtocolError, VERSION};
-use crate::{identity, launch, notice, prompt};
+use crate::wire::{self, ProtocolError, VERSION};
+use crate::{identity, launch};
 
 /// Who is running the mode: the name `--version` prints and the version
 /// recorded in an assembled app.
@@ -34,9 +34,6 @@ pub fn dispatch(args: &[OsString], binary: Binary<'_>) -> Option<Result<(), Prot
         );
         return Some(Ok(()));
     }
-    if one("--prompt-probe") {
-        return Some(prompt::probe().emit(&mut std::io::stdout()));
-    }
     if one("--assemble-app") {
         return Some(assemble_app(binary.version));
     }
@@ -45,18 +42,6 @@ pub fn dispatch(args: &[OsString], binary: Binary<'_>) -> Option<Result<(), Prot
     }
     if args.len() == 2 && args[0] == "--launch" && Path::new(&args[1]).is_absolute() {
         return Some(launch::launch(Path::new(&args[1])));
-    }
-    if one("--notice") {
-        return Some(
-            notice::read_spec(&mut BufReader::new(std::io::stdin()))
-                .and_then(|spec| notice::emit_result(&mut std::io::stdout(), notice::run(&spec))),
-        );
-    }
-    if one("--prompt") {
-        return Some(
-            prompt::read_spec(&mut BufReader::new(std::io::stdin()))
-                .and_then(|spec| prompt::emit_result(&mut std::io::stdout(), &prompt::run(&spec))),
-        );
     }
     None
 }
@@ -69,7 +54,7 @@ pub const TRAY_REMOVED_CODE: &str = "tray-removed";
 /// What `hraness-companion` prints on stderr for a removed tray mode.
 pub const TRAY_REMOVED_MESSAGE: &str =
     "hraness-companion: the menu bar was removed in desktop-foundation 1.0. \
-Run `<product> tui` to watch a product, or `<product> status --json` from a script. \
+Run `<product> status --json` to watch a product from a script. \
 See docs/migration-1.0.md.";
 
 /// True for the argv refused as removed tray modes, frozen in
@@ -147,7 +132,7 @@ fn home_dir() -> Result<PathBuf, ProtocolError> {
 /// this runner. One `app-request` line in, one `app-result` line out.
 fn assemble_app(runner_version: &str) -> Result<(), ProtocolError> {
     let frame =
-        prompt::read_single_frame(&mut BufReader::new(std::io::stdin()), "invalid-app-request")?;
+        wire::read_single_frame(&mut BufReader::new(std::io::stdin()), "invalid-app-request")?;
     let wire: AppRequestWire =
         serde_json::from_slice(&frame).map_err(|_| ProtocolError("invalid-app-request"))?;
     if wire.kind != "app-request" {

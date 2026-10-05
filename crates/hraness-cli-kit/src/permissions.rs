@@ -86,13 +86,6 @@ pub enum PrePromptOutcome {
     UnattendedStop,
 }
 
-/// Where the copy is shown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Surface {
-    Cli,
-    Dialog,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unattended {
     Proceed,
@@ -378,30 +371,18 @@ impl PermissionNeed {
     }
 }
 
-/// Rendered copy for one surface.
+/// Rendered copy for the terminal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedNotice {
-    /// Dialog title; for the CLI, the first line without its symbol.
+    /// The first line without its symbol.
     pub title: String,
-    /// Following CLI lines without indentation, or the dialog message.
+    /// Following lines without indentation.
     pub lines: Vec<String>,
     /// Pre-prompt: the confirm line. Recovery: the "press o" hint for the `→`
     /// line. Only shown when stdin and stderr are terminals.
     pub confirm: Option<String>,
     /// Recovery only: the one next step, printed after `→`.
     pub next: Option<String>,
-}
-
-impl RenderedNotice {
-    /// `{"title","lines","next"}` as the TypeScript kit serializes it.
-    pub fn to_json(&self) -> String {
-        json::Object::new()
-            .str("title", &self.title)
-            .strings("lines", &self.lines)
-            .opt_str("confirm", self.confirm.as_deref())
-            .opt_str("next", self.next.as_deref())
-            .finish()
-    }
 }
 
 const TERMINALS: [(&str, &str, &str); 7] = [
@@ -460,9 +441,9 @@ fn for_product(requester: &str, need: &PermissionNeed) -> String {
     }
 }
 
-/// The pre-prompt copy for one surface. Pure; `env` only resolves the
+/// The pre-prompt copy for the terminal. Pure; `env` only resolves the
 /// default requester.
-pub fn render_pre_prompt(need: &PermissionNeed, surface: Surface, env: Env) -> RenderedNotice {
+pub fn render_pre_prompt(need: &PermissionNeed, env: Env) -> RenderedNotice {
     let kind = need.kind;
     let (behavior, pane, path) = (
         kind.behavior(),
@@ -513,41 +494,18 @@ pub fn render_pre_prompt(need: &PermissionNeed, surface: Surface, env: Env) -> R
             Some("Press Enter to continue · s to skip"),
         )
     };
-    if surface == Surface::Cli {
-        return RenderedNotice {
-            title,
-            lines: vec![detail],
-            confirm: confirm.map(str::to_owned),
-            next: None,
-        };
-    }
-    let heading = if behavior == PromptBehavior::SettingsOnly {
-        format!("{product} needs {pane}")
-    } else if kind == PermissionKind::DeveloperTools {
-        format!("{product} needs Apple's command line tools")
-    } else {
-        format!(
-            "{product} needs access to {}",
-            need.target.as_deref().unwrap_or(pane)
-        )
-    };
     RenderedNotice {
-        title: heading,
-        lines: vec![format!("{title} {detail}")],
-        confirm: None,
+        title,
+        lines: vec![detail],
+        confirm: confirm.map(str::to_owned),
         next: None,
     }
 }
 
 /// The recovery copy after a denial or an unexplained failure.
-pub fn render_recovery(
-    need: &PermissionNeed,
-    state: RecoveryState,
-    surface: Surface,
-    env: Env,
-) -> RenderedNotice {
+pub fn render_recovery(need: &PermissionNeed, state: RecoveryState, env: Env) -> RenderedNotice {
     let kind = need.kind;
-    let (pane, path, url) = (kind.pane_name(), kind.settings_path(), kind.settings_url());
+    let (path, url) = (kind.settings_path(), kind.settings_url());
     let requester = requester_of(need, env);
     let product = &need.product.product;
     let ask = &need.ask;
@@ -590,27 +548,10 @@ pub fn render_recovery(
                 .unwrap_or_default(),
         )
     };
-    if surface == Surface::Cli {
-        return RenderedNotice {
-            title,
-            lines,
-            confirm,
-            next: Some(step),
-        };
-    }
-    let heading = if kind == PermissionKind::DeveloperTools {
-        format!("{product} needs Apple's command line tools")
-    } else if state == RecoveryState::Denied && pane.is_some() && kind != PermissionKind::Keychain {
-        format!("{} is off for {product}", pane.unwrap_or(""))
-    } else {
-        format!("{product} can't {ask}")
-    };
-    let mut message = vec![title];
-    message.extend(lines);
     RenderedNotice {
-        title: heading,
-        lines: vec![message.join(" ")],
-        confirm: None,
+        title,
+        lines,
+        confirm,
         next: Some(step),
     }
 }
@@ -656,65 +597,6 @@ pub fn format_notice(
     out.join("\n") + "\n"
 }
 
-/// The helper `--notice` dialog request (`docs/protocol.md`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NoticeRequest {
-    pub title: String,
-    pub message: String,
-    pub primary: String,
-    pub secondary: Option<String>,
-    /// A permission kind whose pane the runner opens when the person chooses
-    /// the primary button.
-    pub settings: Option<PermissionKind>,
-}
-
-impl NoticeRequest {
-    /// One JSON frame for `hraness-companion --notice`.
-    pub fn to_json(&self) -> String {
-        json::Object::new()
-            .str("type", "notice-request")
-            .raw("version", "1")
-            .str("title", &self.title)
-            .str("message", &self.message)
-            .str("primary", &self.primary)
-            .opt_str("secondary", self.secondary.as_deref())
-            .opt_str("settings", self.settings.map(PermissionKind::as_str))
-            .finish()
-    }
-}
-
-fn clip(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_owned();
-    }
-    let mut out: String = text.chars().take(max - 1).collect();
-    out.push('…');
-    out
-}
-
-/// The `--notice` dialog request for a need, or `None` when no dialog
-/// applies (login items: running the login-item command is the consent).
-pub fn notice_request(need: &PermissionNeed, env: Env) -> Option<NoticeRequest> {
-    let behavior = need.kind.behavior();
-    if behavior == PromptBehavior::Notifies {
-        return None;
-    }
-    let rendered = render_pre_prompt(need, Surface::Dialog, env);
-    let settings = (behavior == PromptBehavior::SettingsOnly && need.kind.has_settings_pane())
-        .then_some(need.kind);
-    Some(NoticeRequest {
-        title: clip(&rendered.title, 128),
-        message: clip(&rendered.lines.join(" "), 512),
-        primary: if settings.is_some() {
-            "Open System Settings".to_owned()
-        } else {
-            "Continue".to_owned()
-        },
-        secondary: Some("Not now".to_owned()),
-        settings,
-    })
-}
-
 /// The `--json` error fields for a permission failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionErrorInfo {
@@ -731,7 +613,7 @@ pub fn permission_error(
     state: RecoveryState,
     env: Env,
 ) -> PermissionErrorInfo {
-    let recovery = render_recovery(need, state, Surface::Cli, env);
+    let recovery = render_recovery(need, state, env);
     PermissionErrorInfo {
         code: format!("permission-{}", state.as_str()),
         kind: need.kind,
@@ -1068,7 +950,7 @@ pub fn pre_prompt_with_timeout(
     let (notice, style, interactive, audience) = {
         let env = io_env(io);
         let audience = audience.unwrap_or_else(|| audience::detect(&env, io.stderr_is_tty()));
-        let notice = render_pre_prompt(need, Surface::Cli, &env);
+        let notice = render_pre_prompt(need, &env);
         let style = Style::detect(&env, io.stderr_is_tty());
         (
             notice,
@@ -1131,7 +1013,7 @@ pub fn report_permission_failure(
         if audience == Audience::Agent {
             return Ok(());
         }
-        let recovery = render_recovery(need, state, Surface::Cli, &env);
+        let recovery = render_recovery(need, state, &env);
         let style = Style::detect(&env, io.stderr_is_tty()).for_audience(audience);
         let interactive = audience == Audience::Human && io.stdin_is_tty() && io.stderr_is_tty();
         (recovery, style, interactive)

@@ -89,35 +89,39 @@ try {
     const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
     assert.equal(pkg.name, ${JSON.stringify(packageName)});
     for (const file of [
-      'release-manifest.json', 'dist/src/index.js', 'dist/src/index.d.ts', 'dist/src/notice.js',
+      'release-manifest.json', 'dist/src/index.js', 'dist/src/index.d.ts',
       'README.md', 'LICENSE', 'docs/installation.md', 'docs/platforms.md', 'skills/companion/SKILL.md',
       'docs/architecture.md', 'docs/adoption.md', 'docs/protocol.md', 'docs/migration-1.0.md',
       'docs/permissions.md', 'docs/identity.md', 'docs/control.md', 'docs/human-gate.md',
-      'src/lib.rs', 'src/bin/hraness-companion.rs', 'src/bin/hraness-helper.rs', 'sdk/src/prompt.ts',
+      'src/lib.rs', 'src/bin/hraness-companion.rs', 'src/bin/hraness-helper.rs',
       'crates/hraness-local-app/src/identity.rs', 'crates/hraness-local-app/src/service.rs',
-      'crates/hraness-local-app/src/notice.rs', 'crates/hraness-local-app/src/prompt.rs',
       'crates/hraness-local-app/src/helper.rs',
       'crates/hraness-control-kit/src/lib.rs', 'contract/helper-argv.v0.8.1.json', 'contract/companion-alias.v1.json',
       'contract/error-codes.json',
-      'dist/src/registry.js', 'dist/src/control.js', 'dist/src/human-gate.js', 'dist/src/tui.js',
+      'dist/src/registry.js', 'dist/src/control.js', 'dist/src/human-gate.js',
       'dist/src/login.js', 'dist/src/retire.js', 'dist/src/helper.js',
       'dist/src/permissions.js', 'dist/src/audience.js', 'dist/src/cli-style.js',
     ]) await access(join(root, file));
-    // 1.0 removed the menu bar: no menu kit, no companion CLI, no tray sources.
+    // 1.0 removed the menu bar; 2.0 removed the TUI and the notice/prompt dialogs.
     for (const file of [
       'dist/src/menu-kit.js', 'dist/src/cli.js', 'dist/src/client.js', 'dist/src/commands.js', 'dist/src/protocol.js',
       'dist/src/protocol-v2.js', 'dist/src/service.js', 'dist/src/browser.js',
       'src/protocol.rs', 'src/protocol_v2.rs', 'src/outputs.rs', 'src/symbols.rs',
-    ]) await assert.rejects(access(join(root, file)), undefined, file + ' must not ship in 1.0');
+      'dist/src/tui.js', 'dist/src/notice.js', 'dist/src/prompt.js',
+      'sdk/src/tui.ts', 'sdk/src/notice.ts', 'sdk/src/prompt.ts',
+      'crates/hraness-local-app/src/notice.rs', 'crates/hraness-local-app/src/prompt.rs',
+      'crates/hraness-control-kit/src/tui.rs',
+    ]) await assert.rejects(access(join(root, file)), undefined, file + ' must not ship');
     assert.equal(pkg.bin, undefined, 'the companion CLI was removed in 1.0');
     assert.equal(pkg.exports['./menu-kit'], undefined, 'menu-kit was removed in 1.0');
     await assert.rejects(import(${JSON.stringify(packageName + '/menu-kit')}), /ERR_PACKAGE_PATH_NOT_EXPORTED|not exported/);
     const sdk = await import(${JSON.stringify(packageName)});
     assert.equal(import.meta.resolve(${JSON.stringify(packageName)}), pathToFileURL(join(root, 'dist/src/index.js')).href);
     for (const name of ['packagedManifest', 'parseReleaseManifest', 'inspectBinary', 'ensureBinary',
-      'diagnosePlatform', 'planAutostart', 'userPaths', 'loadLoginEnvironment', 'saveLoginEnvironment',
-      'promptNative', 'promptCapability', 'promptTui', 'validatePromptRequest'])
+      'diagnosePlatform', 'planAutostart', 'userPaths', 'loadLoginEnvironment', 'saveLoginEnvironment'])
       assert.equal(typeof sdk[name], 'function', name);
+    for (const name of ['promptNative', 'promptCapability', 'promptTui', 'validatePromptRequest'])
+      assert.equal(typeof sdk[name], 'undefined', name + ' was removed in 2.0');
     for (const name of ['runCompanion', 'startCompanion', 'stopCompanion', 'companionStatus', 'handleCompanionCommand',
       'layout', 'lintMenu', 'validateSnapshotV2', 'downlevelSnapshot', 'parseRunnerProtocols', 'openBrowser', 'permissionMenuItems'])
       assert.equal(name in sdk, false, name + ' was removed in 1.0');
@@ -140,8 +144,8 @@ try {
     const audience = await import(${JSON.stringify(packageName + '/audience')});
     const style = await import(${JSON.stringify(packageName + '/cli-style')});
     const sub = async name => import(${JSON.stringify(packageName + '/')} + name);
-    const [registry, control, gate, tui, login, retire, helper] = await Promise.all(
-      ['registry', 'control', 'human-gate', 'tui', 'login', 'retire', 'helper'].map(sub));
+    const [registry, control, gate, login, retire, helper] = await Promise.all(
+      ['registry', 'control', 'human-gate', 'login', 'retire', 'helper'].map(sub));
     for (const [module, names] of [
       [permissions, ['prePrompt', 'renderPrePrompt', 'renderRecovery', 'permissionErrorJson', 'LOCAL_SIGNING', 'MESSAGES_FDA']],
       [audience, ['detectAudience']],
@@ -149,7 +153,6 @@ try {
       [registry, ['defineRegistry', 'runCli', 'commandsJson', 'okEnvelope', 'errorEnvelope', 'isErrorCode']],
       [control, ['serveControl', 'agentRequest', 'adminRequest', 'controlStatus', 'ensureOwner', 'ownerPaths']],
       [gate, ['requireHuman', 'detectAgent', 'oneTimeCode', 'ownerAuthorize']],
-      [tui, ['runTui', 'renderSnapshot', 'chooseMode', 'box', 'table']],
       [login, ['planLoginItem', 'installLoginItem', 'uninstallLoginItem']],
       [retire, ['retireLegacyLoginItem', 'launches']],
       [helper, ['resolveHelper']],
@@ -180,7 +183,7 @@ try {
     const refusal = await execute(companion, [], { env, timeout: 10_000 }).then(() => ({ code: 0 }), error => error);
     assert.equal(refusal.code, 2, 'the alias refuses the removed tray mode with exit 2');
     assert.equal(refusal.stdout.trim(), '{"type":"error","version":1,"code":"tray-removed"}');
-    assert.match(refusal.stderr, /tui.*status --json/);
+    assert.match(refusal.stderr, /status --json/);
     runnerResult = `${hostTarget} helper and alias report ${installed.version}; tray mode refused`;
   } else if (process.env.CI) {
     throw new Error(`Package smoke needs the ${hostTarget} helper and companion in artifacts/`);

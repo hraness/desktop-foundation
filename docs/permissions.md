@@ -12,8 +12,8 @@ when the person asks.
 
 ## Rules every product follows
 
-- Before any system prompt, show the notice for that prompt: on stderr at a
-  terminal, or through the `--notice` dialog when there is no terminal.
+- Before any system prompt, show the notice for that prompt on stderr at a
+  terminal. With no terminal, the audience is `quiet` and nothing is shown.
 - After a denial, say it was a denial (never "not found", "signed out" or a raw
   `EPERM`), name the exact pane and give one next step.
 - Name the product. `requester` is whatever macOS will actually show, so the
@@ -41,9 +41,9 @@ when the person asks.
 | `developer-tools` | asks to install Apple's command line tools | none | none | none |
 | `gatekeeper` | blocks a quarantined download | Privacy & Security | System Settings › Privacy & Security | `x-apple.systempreferences:com.apple.preference.security?General` |
 
-The URLs are the allowlist: `openPermissionSettings` and the notice dialog open only
-these. `keychain` and `developer-tools` have no pane, so they cannot be a
-notice's `settings`. Verify the `incoming-connections` and `gatekeeper` URLs on macOS 26
+The URLs are the allowlist: `openPermissionSettings` opens only these.
+`keychain` and `developer-tools` have no pane. Verify the
+`incoming-connections` and `gatekeeper` URLs on macOS 26
 when the kit lands; fall back to the Privacy & Security pane if either fails.
 
 ## TypeScript API
@@ -58,7 +58,6 @@ export type PermissionKind =
 export type PromptBehavior = 'asks' | 'settings-only' | 'notifies';
 export type PermissionState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 export type PrePromptOutcome = 'continue' | 'skip' | 'unattended-proceed' | 'unattended-stop';
-export type Surface = 'cli' | 'dialog';
 
 export interface ProductRef {
   product: string;      // display name from the portfolio registry: "Textbutler"
@@ -76,8 +75,8 @@ export interface PermissionNeed extends ProductRef {
 }
 
 export interface RenderedNotice {
-  title: string;        // dialog title; first line of the CLI form
-  lines: string[];      // CLI lines without the symbol, or the dialog message parts
+  title: string;        // first line without the symbol
+  lines: string[];      // following lines without indentation
   confirm?: string;     // "Press Enter to continue · s to skip" when a confirm applies
 }
 
@@ -89,7 +88,6 @@ export interface PermissionIO {
   write(text: string): void;                   // stderr
   readKey(timeoutSeconds: number): Promise<'enter' | 's' | 'o' | 'timeout'>;
   openUrl(url: string): Promise<boolean>;      // `open` with an allowlisted URL
-  notice?(request: NoticeRequest): Promise<NoticeResult>;   // runner --notice
   fileAccess?(path: string): Promise<'ok' | 'denied' | 'missing'>;
   run?(argv: readonly string[]): Promise<{ status: number }>;
 }
@@ -101,8 +99,8 @@ export function paneName(kind: PermissionKind): string | null;
 export function settingsPath(kind: PermissionKind): string | null;
 export function settingsUrl(kind: PermissionKind): string | null;
 
-export function renderPrePrompt(need: PermissionNeed, surface: Surface): RenderedNotice;
-export function renderRecovery(need: PermissionNeed, state: 'denied' | 'unknown' | 'missing', surface: Surface): RenderedNotice;
+export function renderPrePrompt(need: PermissionNeed, env?: NodeJS.ProcessEnv): RenderedNotice;
+export function renderRecovery(need: PermissionNeed, state: 'denied' | 'unknown' | 'missing', env?: NodeJS.ProcessEnv): RenderedNotice;
 
 /** Shows the notice for the audience, waits for Enter/s when it applies, never triggers the prompt. */
 export function prePrompt(need: PermissionNeed, options?: { audience?: Audience; io?: PermissionIO; timeoutSeconds?: number }): Promise<PrePromptOutcome>;
@@ -118,9 +116,6 @@ export function permissionError(need: PermissionNeed, state: 'denied' | 'unknown
 };
 ```
 
-`NoticeRequest` and `NoticeResult` come from `sdk/src/notice.ts`.
-`PermissionKind` is defined there too, because the wire uses it.
-
 The shipped kit also exports these helpers. Every function that resolves a
 default requester takes an optional last `env` argument, and `responsibleApp`
 takes an optional product name, because the local app's bundle ID alone does
@@ -133,8 +128,6 @@ export function hasSettingsPane(kind: PermissionKind): kind is SettingsPermissio
 export function isAllowedSettingsUrl(url: string): boolean;
 /** Plain text for a CLI notice (🔐 …) or recovery (✗ … → …), with the confirm or "press o" hint only when interactive. */
 export function formatNotice(notice: RenderedNotice, options: { kind: 'pre-prompt' | 'recovery'; interactive: boolean; style?: CliStyle }): string;
-/** The --notice dialog request for a need, or null for login items. */
-export function permissionNoticeRequest(need: PermissionNeed, env?: NodeJS.ProcessEnv): NoticeRequest | null;
 /** Prints the CLI recovery on stderr and opens Settings when the person presses o. */
 export function reportPermissionFailure(need: PermissionNeed, state: RecoveryState, options?: { audience?: Audience; io?: PermissionIO }): Promise<void>;
 /** The whole JSON error document from § JSON error shape. */
@@ -150,8 +143,8 @@ printed after `→`; its `confirm` is the "press o to open Settings" hint.
 Keychain Access has no pane, so keychain copy never offers Settings. A keychain `missing` recovery reads `✗ {product} can't find "{target}" in your
 keychain.`
 
-`sdk/test/golden/permissions/*.txt` holds the rendered copy for every preset,
-surface and state, for a product as its own requester and before its local
+`sdk/test/golden/permissions/*.txt` holds the rendered copy for every preset
+and state, for a product as its own requester and before its local
 app exists. The Rust `hraness-cli-kit` tests read the same files, and also check
 this page's kind table, preset copy and JSON sample. Regenerate
 them with `UPDATE_GOLDEN=1 npm run check:sdk` and review the diff.
@@ -295,14 +288,6 @@ missing, `developer-tools`:
 "press o to open Settings" appears only when stdin and stderr are terminals
 and the kind has a pane. The symbols follow the CLI style contract, including
 its ASCII fallback (`🔐` → `NOTE`, `✗` → `FAIL`, `→` → `->`).
-
-### Dialog (`--notice`, when a prompt is coming and there is no terminal)
-
-| Behavior | Title | Message | Buttons |
-| --- | --- | --- | --- |
-| asks | `{product} needs access to {target or pane}` | the CLI notice's first two lines as one paragraph, without the symbol | primary "Continue", secondary "Not now" |
-| settings-only | `{product} needs {pane}` | the CLI notice's first two lines | primary "Open System Settings" with `settings: {kind}` (choosing it opens the pane), secondary "Not now" |
-| notifies | no dialog: running the product's login-item command is the consent. | | |
 
 ## Presets
 
@@ -476,7 +461,6 @@ pub mod permissions {
     pub enum PermissionState { Granted, Denied, NotDetermined, Unknown }
     pub enum RecoveryState { Denied, Unknown, Missing }
     pub enum PrePromptOutcome { Continue, Skip, UnattendedProceed, UnattendedStop }
-    pub enum Surface { Cli, Dialog }
     pub enum Unattended { Proceed, Stop }
     pub enum NoticeKind { PrePrompt, Recovery }
 
@@ -486,8 +470,6 @@ pub mod permissions {
         pub ask: String, pub why: String, pub next: Option<String>, pub when_unattended: Option<Unattended>,
     }
     pub struct RenderedNotice { pub title: String, pub lines: Vec<String>, pub confirm: Option<String>, pub next: Option<String> }
-    pub struct NoticeRequest { pub title: String, pub message: String, pub primary: String,
-        pub secondary: Option<String>, pub settings: Option<PermissionKind> }   // .to_json()
 
     pub trait PermissionIo {
         fn env(&self, key: &str) -> Option<String>;
@@ -515,10 +497,9 @@ pub mod permissions {
     pub fn is_allowed_settings_url(url: &str) -> bool;
     pub fn responsible_app(env: Env, product: Option<&str>) -> String;
     pub fn requester_of(need: &PermissionNeed, env: Env) -> String;
-    pub fn render_pre_prompt(need: &PermissionNeed, surface: Surface, env: Env) -> RenderedNotice;
-    pub fn render_recovery(need: &PermissionNeed, state: RecoveryState, surface: Surface, env: Env) -> RenderedNotice;
+    pub fn render_pre_prompt(need: &PermissionNeed, env: Env) -> RenderedNotice;
+    pub fn render_recovery(need: &PermissionNeed, state: RecoveryState, env: Env) -> RenderedNotice;
     pub fn format_notice(notice: &RenderedNotice, kind: NoticeKind, interactive: bool, style: Style) -> String;
-    pub fn notice_request(need: &PermissionNeed, env: Env) -> Option<NoticeRequest>;
     pub fn pre_prompt(need: &PermissionNeed, audience: Option<Audience>, io: &mut dyn PermissionIo) -> std::io::Result<PrePromptOutcome>;
     pub fn report_permission_failure(need: &PermissionNeed, state: RecoveryState, audience: Option<Audience>, io: &mut dyn PermissionIo) -> std::io::Result<()>;
     pub fn permission_status(kind: PermissionKind, target: Option<&str>, io: &dyn PermissionIo) -> PermissionState;
@@ -566,7 +547,7 @@ pub mod clap {   // feature "clap"
 ```
 
 Rendered strings are byte-identical between TypeScript and Rust. Both suites
-check the same golden files for every preset, surface and state.
+check the same golden files for every preset and state.
 
 The clap hook turns clap's multi-line usage errors into the contract's form:
 

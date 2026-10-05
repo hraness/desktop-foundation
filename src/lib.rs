@@ -6,14 +6,14 @@
 //! re-exports the crates products link directly:
 //!
 //! - [`local_app`] (`hraness-local-app`): the macOS local app, login items
-//!   and the one-shot notice and prompt dialogs.
+//!   and the signed-helper machinery.
 //! - [`cli_kit`] (`hraness-cli-kit`): audience detection and permission copy.
 //!
 //! The headless control surface lives in `hraness-control-kit`, which
 //! products depend on by the same tag.
 
 pub use hraness_local_app as local_app;
-pub use hraness_local_app::{identity, notice, prompt, service};
+pub use hraness_local_app::{identity, service};
 
 pub use hraness_cli_kit as cli_kit;
 pub use hraness_cli_kit::{audience, permissions};

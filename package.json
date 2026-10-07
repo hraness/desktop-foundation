@@ -25,5 +25,5 @@
     "check:sdk": "npm run build:sdk && npm run test:sdk",
     "check": "npm run check:sdk && cargo test --locked --release && cargo build --locked --release --bin hraness-companion --bin hraness-helper"
   },
-  "devDependencies": { "@types/node": "22.19.7", "typescript": "5.9.3" }
+  "devDependencies": { "@types/node": "22.19.7", "typescript": "7.0.2" }
 }

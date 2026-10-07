@@ -2,7 +2,8 @@
 
 Report a vulnerability through GitHub's private vulnerability reporting on
 this repository (Security, then Report a vulnerability). Please do not open a
-public issue for it.
+public issue for it. If GitHub reporting is unavailable, email
+[hraness@pm.me](mailto:hraness@pm.me).
 
 ## What the companion and helper are
 
